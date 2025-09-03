@@ -3,6 +3,7 @@ uvicorn[standard]
 sqlalchemy
 psycopg[asyncpg]
 pydantic-settings
+pydantic[email]
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]
 httpx
