@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.db import models
 from app.db.schemas import UserCreate, UserUpdate
-from app.services.security_service import get_password_hash
+from app.services.security import get_password_hash
 
 async def get_user_by_email(db: AsyncSession, email: str) -> models.User | None:
     """Busca um usuário pelo seu endereço de e-mail."""

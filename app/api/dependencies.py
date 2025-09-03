@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.db import models
 from app.db.schemas import TokenData
-from app.services.security_service import get_current_user as get_token_data
+from app.services.security import get_current_user as get_token_data
 from app.crud import crud_user
 
 async def get_current_active_user(
