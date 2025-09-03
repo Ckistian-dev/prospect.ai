@@ -1,4 +1,16 @@
-# nixpacks.toml
+# Arquivo de configuração para o Nixpacks (Sistema de Build do Railway)
 
 [phases.setup]
 aptPkgs = ["ffmpeg"]
+
+# Define a fase de instalação
+[phases.install]
+# Lista de comandos a serem executados.
+# Isso garante que o pip será usado para instalar os pacotes do requirements.txt.
+cmds = ["pip install -r requirements.txt"]
+
+# Define a fase de inicialização
+[start]
+# Comando para iniciar a aplicação.
+# Ajuste 'app.main:app' se o seu arquivo principal for diferente.
+cmd = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
