@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 pydantic
 pydantic-settings
+pydantic[email]
 passlib[bcrypt]
 PyJWT
 python-dotenv
