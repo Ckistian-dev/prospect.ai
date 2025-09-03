@@ -2,7 +2,7 @@ import httpx
 from app.core.config import settings
 import logging
 import json
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import base64
 import os
 import subprocess
@@ -167,13 +167,10 @@ class WhatsAppService:
         logger.warning(f"Nenhum histórico encontrado para o número {clean_number} em nenhuma variação.")
         return None
     
-    async def get_media_and_convert(self, instance_name: str, message: dict) -> dict | None:
-        """Baixa mídia, converte áudio para MP3 de forma compatível com múltiplos sistemas e retorna dados para o Gemini."""
-        message_key = message.get("key")
+    async def get_media_and_convert(self, instance_name: str, message: dict) -> Optional[dict]:
+        """Baixa mídia, converte áudio para MP3 e retorna dados para o Gemini."""
         message_content = message.get("message", {})
-
-        if not message_key or not message_content:
-            return None
+        if not message_content: return None
 
         url = f"{self.api_url}/chat/getBase64FromMediaMessage/{instance_name}"
         payload = {"message": message}
@@ -185,39 +182,36 @@ class WhatsAppService:
                 media_response = response.json()
             
             base64_data = media_response.get("base64")
-            if not base64_data:
-                raise ValueError("API de mídia não retornou 'base64'.")
-
+            if not base64_data: raise ValueError("API de mídia não retornou 'base64'.")
             media_bytes = base64.b64decode(base64_data)
 
-            if message_content.get("imageMessage"):
+            if "imageMessage" in message_content:
                 return {"mime_type": "image/jpeg", "data": media_bytes}
 
-            if message_content.get("audioMessage"):
-                # Usando um diretório temporário que funciona em qualquer sistema operacional
+            if "documentMessage" in message_content:
+                mime_type = message_content["documentMessage"].get("mimetype", "application/octet-stream")
+                return {"mime_type": mime_type, "data": media_bytes}
+
+            if "audioMessage" in message_content:
                 with tempfile.TemporaryDirectory() as temp_dir:
                     ogg_path = os.path.join(temp_dir, f"{uuid.uuid4()}.ogg")
                     mp3_path = os.path.join(temp_dir, f"{uuid.uuid4()}.mp3")
                     
-                    try:
-                        with open(ogg_path, "wb") as f:
-                            f.write(media_bytes)
-                        
-                        # Esta é a linha que causa o erro. Garanta que o ffmpeg está no PATH do sistema.
-                        command = ["ffmpeg", "-y", "-i", ogg_path, "-acodec", "libmp3lame", mp3_path]
-                        subprocess.run(command, check=True, capture_output=True, text=True)
-                        
-                        with open(mp3_path, "rb") as f:
-                            mp3_bytes = f.read()
-                        
-                        return {"mime_type": "audio/mp3", "data": mp3_bytes}
-                    except subprocess.CalledProcessError as e:
-                        logger.error(f"Erro do FFmpeg (verifique se está instalado e no PATH): {e.stderr}")
-                        return None
+                    with open(ogg_path, "wb") as f: f.write(media_bytes)
+                    
+                    command = ["ffmpeg", "-y", "-i", ogg_path, "-acodec", "libmp3lame", mp3_path]
+                    subprocess.run(command, check=True, capture_output=True, text=True)
+                    
+                    with open(mp3_path, "rb") as f: mp3_bytes = f.read()
+                    
+                    return {"mime_type": "audio/mp3", "data": mp3_bytes}
 
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Erro do FFmpeg (verifique se está instalado e no PATH): {e.stderr}")
         except Exception as e:
-            logger.error(f"Falha ao processar mídia da mensagem {message_key.get('id')}: {e}")
-            return None
+            logger.error(f"Falha ao processar mídia da mensagem: {e}")
+        
+        return None
 
 _whatsapp_service_instance = None
 def get_whatsapp_service():

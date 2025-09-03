@@ -12,8 +12,8 @@ class GeminiService:
     def __init__(self):
         try:
             genai.configure(api_key=settings.GOOGLE_API_KEY)
-            self.model = genai.GenerativeModel('gemini-2.5-flash')
-            logger.info("✅ Cliente Gemini inicializado com sucesso (gemini-2.5-flash).")
+            self.model = genai.GenerativeModel('gemini-1.5-flash-latest')
+            logger.info("✅ Cliente Gemini inicializado com sucesso (gemini-1.5-flash-latest).")
         except Exception as e:
             logger.error(f"🚨 ERRO CRÍTICO ao configurar o Gemini: {e}")
             raise
@@ -31,18 +31,13 @@ class GeminiService:
             text = text.replace(var, value)
         return text
 
-    def _format_history_objects_to_string(self, evolution_history: List[dict]) -> str:
-        """Converte uma lista de objetos de mensagem em uma string formatada para prompts."""
+    def _format_history_objects_to_string(self, conversation_from_db: List[dict]) -> str:
+        """Converte o histórico salvo no DB (com placeholders) em uma string para o prompt."""
         history_lines = []
-        for msg in evolution_history:
-            remetente = "Eu" if msg.get("key", {}).get("fromMe") else "Contato"
-            message_obj = msg.get("message", {})
-            conteudo = (
-                message_obj.get("extendedTextMessage", {}).get("text") or
-                message_obj.get("conversation", "") or
-                "[Mídia recebida]" # Placeholder para mídias no histórico de texto
-            )
-            history_lines.append(f"- {remetente}: {conteudo.strip()}")
+        for msg in conversation_from_db:
+            remetente = "Eu" if msg.get("role") == "assistant" else "Contato"
+            conteudo = msg.get("content", "")
+            history_lines.append(f"- {remetente}: {conteudo}")
         return "\n".join(history_lines)
 
     def generate_initial_message(self, config: models.Config, contact: models.Contact, history_objects: Optional[List[dict]] = None) -> dict:
@@ -52,6 +47,7 @@ class GeminiService:
         
         history_text_for_prompt = ""
         if history_objects:
+            # Aqui usamos o histórico do DB, que já tem o formato de role/content
             history_text_for_prompt = self._format_history_objects_to_string(history_objects)
             task_instruction = f"""
             Existe um histórico de conversa anterior com este contato.
@@ -82,7 +78,6 @@ class GeminiService:
         """
         try:
             response = self.model.generate_content(prompt)
-            # Lógica robusta para extrair JSON
             text_response = response.text
             start_index = text_response.find('{')
             end_index = text_response.rfind('}')
@@ -102,21 +97,20 @@ class GeminiService:
         conversation_history: List[dict],
         media_input: Optional[dict] = None
     ) -> dict:
-        """Gera uma resposta, considerando o histórico e possível mídia na última mensagem, usando um prompt único."""
+        """Gera uma resposta, considerando o histórico do DB e possível mídia na última mensagem."""
         persona_prompt = self._replace_variables(config.persona, contact)
         history_string = self._format_history_objects_to_string(conversation_history)
 
-        # Constrói um prompt único com todas as partes necessárias
         prompt_parts = [
             f"**Sua Persona:**\n{persona_prompt}\n\n",
             f"**Histórico da Conversa com '{contact.nome}':**\n{history_string}\n\n",
-            "**Sua Tarefa:**\nVocê é um agente de prospecção. Com base no histórico e em qualquer mídia fornecida na ÚLTIMA mensagem, decida a melhor ação.\n"
+            "**Sua Tarefa:**\nVocê é um agente de prospecção. Com base no histórico e em qualquer mídia/arquivo fornecido na ÚLTIMA mensagem, decida a melhor ação.\n"
         ]
 
         if media_input:
-            prompt_parts.append("A última mensagem do contato continha a seguinte mídia para sua análise:\n")
+            prompt_parts.append("A última mensagem do contato continha a seguinte mídia/arquivo para sua análise:\n")
             prompt_parts.append(media_input)
-            prompt_parts.append("\nAnalise esta mídia no contexto da conversa e responda de forma relevante.\n")
+            prompt_parts.append("\nAnalise o conteúdo no contexto da conversa e responda de forma relevante.\n")
         else:
             prompt_parts.append("A última mensagem do contato foi em texto. Analise o histórico e responda.\n")
 
@@ -124,15 +118,15 @@ class GeminiService:
             """
             **Formato OBRIGATÓRIO da Resposta:**
             Responda APENAS com um objeto JSON válido contendo TRÊS chaves:
-            1. "mensagem_para_enviar": A resposta em texto para o contato. Se decidir que a melhor ação é esperar, o valor deve ser null.
-            2. "nova_situacao": Um novo status para o contato. Pode ser "Aguardando Resposta", "Reunião Agendada", "Não Interessado", "Concluído", "Lead Qualificado".
-            3. "observacoes": Um resumo ou anotação importante sobre a interação para ser salvo internamente. Deve ser uma string, mesmo que vazia.
+            1. "mensagem_para_enviar": A resposta em texto. Se decidir esperar, o valor deve ser null.
+            2. "nova_situacao": Um novo status para o contato ("Aguardando Resposta", "Reunião Agendada", "Lead Qualificado", etc.).
+            3. "observacoes": Um resumo da interação para salvar internamente.
 
-            Exemplo de Resposta VÁLIDA:
+            Exemplo (PDF):
             {
-                "mensagem_para_enviar": "Entendido, obrigado por enviar a planta do imóvel! Vou analisar e retorno em breve.",
+                "mensagem_para_enviar": "Recebi o catálogo. Vou verificar os itens que você mencionou e já retorno.",
                 "nova_situacao": "Analisando Documento",
-                "observacoes": "Contato enviou a planta do projeto. Qualificado."
+                "observacoes": "Cliente enviou catálogo em PDF para análise de itens."
             }
             """
         )
@@ -140,7 +134,6 @@ class GeminiService:
         try:
             response = self.model.generate_content(prompt_parts)
             
-            # --- CORREÇÃO: Lógica mais robusta para extrair o JSON ---
             if not hasattr(response, 'text') or not response.text:
                 raise ValueError("A resposta da IA está vazia.")
 
