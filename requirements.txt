@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+passlib[bcrypt]
+PyJWT
+python-dotenv
+google-api-python-client
+python-multipart
