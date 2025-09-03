@@ -74,6 +74,7 @@ class ProspectContact(Base):
     situacao = Column(String, default="Aguardando Início")
     observacoes: Mapped[str] = mapped_column(Text, nullable=True, default="")
     conversa = Column(Text, default="[]")
-
+    media_type: Mapped[str] = mapped_column(String(50), nullable=True)
+    
     prospect = relationship("Prospect", back_populates="contacts")
     contact = relationship("Contact")
