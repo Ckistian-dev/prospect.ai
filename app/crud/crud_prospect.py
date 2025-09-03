@@ -1,5 +1,6 @@
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+# --- CORREÇÃO: Importado 'joinedload' ---
+from sqlalchemy.orm import joinedload 
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import models
 from app.db.schemas import ProspectCreate, ProspectUpdate
@@ -12,14 +13,20 @@ async def get_prospect(db: AsyncSession, prospect_id: int, user_id: int) -> mode
     )
     return result.scalars().first()
 
+# --- FUNÇÃO CORRIGIDA ---
 async def get_prospects_by_user(db: AsyncSession, user_id: int) -> List[models.Prospect]:
+    """
+    Busca todas as prospecções de um usuário, carregando os contatos relacionados
+    de forma antecipada (eager loading) usando um JOIN para evitar erros de lazy-loading.
+    """
     result = await db.execute(
         select(models.Prospect)
         .where(models.Prospect.user_id == user_id)
-        .options(selectinload(models.Prospect.contacts))
+        .options(joinedload(models.Prospect.contacts)) # Força um JOIN para buscar tudo de uma vez
         .order_by(models.Prospect.created_at.desc())
     )
-    return result.scalars().all()
+    # .unique() é necessário com joinedload para evitar duplicatas do objeto Prospect
+    return result.scalars().unique().all()
 
 async def create_prospect(db: AsyncSession, prospect_in: ProspectCreate, user_id: int) -> models.Prospect:
     db_prospect = models.Prospect(
@@ -87,36 +94,23 @@ async def get_prospect_contacts_with_details(db: AsyncSession, prospect_id: int)
         select(models.ProspectContact, models.Contact)
         .join(models.Contact)
         .where(models.ProspectContact.prospect_id == prospect_id)
-        .options(selectinload(models.ProspectContact.contact))
+        .options(joinedload(models.ProspectContact.contact))
     )
     return result.all()
 
 async def find_active_prospect_contact_by_number(db: AsyncSession, user_id: int, number: str) -> Optional[Tuple[models.Contact, models.ProspectContact, models.Prospect]]:
-    """
-    Encontra um contato pelo número de telefone em qualquer campanha do usuário,
-    lidando de forma inteligente com a presença ou ausência do nono dígito.
-    """
     clean_number = "".join(filter(str.isdigit, str(number)))
+    number_v1, number_v2 = "", ""
 
-    # Gera as duas possíveis variações do número
-    number_v1 = ""
-    number_v2 = ""
-
-    # Verifica se é um número de celular brasileiro (com código de país 55 e DDD)
     if clean_number.startswith("55") and len(clean_number) >= 12:
-        prefix = clean_number[:4]  # 55 + DDD
-        suffix = clean_number[5:]
-        
-        # Se o número tem 13 dígitos e o 9º dígito está presente
+        prefix = clean_number[:4]
         if len(clean_number) == 13 and clean_number[4] == '9':
-            number_v1 = clean_number          # Versão com o 9º dígito (Ex: 5545999861237)
-            number_v2 = prefix + suffix       # Versão sem o 9º dígito (Ex: 554599861237)
-        # Se o número tem 12 dígitos (veio sem o 9º dígito)
+            number_v1 = clean_number
+            number_v2 = prefix + clean_number[5:]
         elif len(clean_number) == 12:
-            number_v1 = clean_number                # Versão sem o 9º dígito
-            number_v2 = prefix + '9' + clean_number[4:] # Versão com o 9º dígito
+            number_v1 = clean_number
+            number_v2 = f"{prefix}9{clean_number[4:]}"
     
-    # Se não for um formato reconhecido, busca apenas o número limpo
     if not number_v1:
         number_v1 = clean_number
 
@@ -125,12 +119,10 @@ async def find_active_prospect_contact_by_number(db: AsyncSession, user_id: int,
         .join(models.ProspectContact, models.Contact.id == models.ProspectContact.contact_id)
         .join(models.Prospect, models.Prospect.id == models.ProspectContact.prospect_id)
         .where(
-            # Procura por QUALQUER UMA das duas variações do número
             models.Contact.whatsapp.in_([number_v1, number_v2]),
-            models.Prospect.user_id == user_id,
+            models.Prospect.user_id == user_id
         )
         .order_by(models.Prospect.created_at.desc())
     )
     return result.first()
-
 
