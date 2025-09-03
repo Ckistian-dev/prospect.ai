@@ -95,27 +95,23 @@ async def update_prospect_contact(
     db: AsyncSession, 
     pc_id: int, 
     situacao: str, 
-    conversa: str | None = None,
-    observacoes: str | None = None
+    conversa: Optional[str] = None,
+    observacoes: Optional[str] = None,
+    media_type: Optional[str] = "" # Pode ser "" para limpar a flag
 ):
-    """
-    Atualiza os dados de um contato dentro de uma prospecção.
-    """
     prospect_contact = await db.get(models.ProspectContact, pc_id)
     if prospect_contact:
         prospect_contact.situacao = situacao
         if conversa is not None:
             prospect_contact.conversa = conversa
         if observacoes is not None:
-            # Anexa a nova observação à existente, com um timestamp.
-            timestamp = datetime.now().strftime('%d/%m %H:%M')
-            nova_observacao_formatada = f"[{timestamp}] {observacoes}"
-            
-            if prospect_contact.observacoes:
-                prospect_contact.observacoes += f"\n{nova_observacao_formatada}"
-            else:
-                prospect_contact.observacoes = nova_observacao_formatada
-                
+            prospect_contact.observacoes = observacoes
+        
+        # Se media_type for passado (incluindo uma string vazia), ele é atualizado.
+        # Se for None, o campo não é alterado.
+        if media_type is not None:
+             prospect_contact.media_type = media_type
+
         await db.commit()
 
 async def get_prospect_contacts_with_details(db: AsyncSession, prospect_id: int):
