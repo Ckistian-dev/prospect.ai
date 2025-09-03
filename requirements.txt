@@ -7,3 +7,4 @@ PyJWT
 python-dotenv
 google-api-python-client
 python-multipart
+sqlalchemy
