@@ -5,6 +5,7 @@ pydantic-settings
 pydantic[email]
 passlib[bcrypt]
 PyJWT
+jose
 python-dotenv
 google-api-python-client
 python-multipart
