@@ -29,6 +29,10 @@ async def get_prospects_by_user(db: AsyncSession, user_id: int) -> List[models.P
     return result.scalars().unique().all()
 
 async def create_prospect(db: AsyncSession, prospect_in: ProspectCreate, user_id: int) -> models.Prospect:
+    """
+    Cria uma nova prospecção e associa os contatos a ela,
+    inicializando o campo 'observacoes' para cada um.
+    """
     db_prospect = models.Prospect(
         **prospect_in.model_dump(exclude={"contact_ids"}),
         user_id=user_id,
@@ -44,7 +48,9 @@ async def create_prospect(db: AsyncSession, prospect_in: ProspectCreate, user_id
             prospect_id=db_prospect.id,
             contact_id=contact_id,
             situacao="Aguardando Início",
-            conversa="[]"
+            conversa="[]",
+            # --- CAMPO ADICIONADO ---
+            observacoes="" # Garante que o campo seja inicializado como uma string vazia.
         )
         db.add(db_prospect_contact)
     
@@ -53,6 +59,10 @@ async def create_prospect(db: AsyncSession, prospect_in: ProspectCreate, user_id
     return db_prospect
 
 async def update_prospect(db: AsyncSession, *, db_prospect: models.Prospect, prospect_in: ProspectUpdate) -> models.Prospect:
+    """
+    Atualiza os dados de uma prospecção (ex: nome, status).
+    Esta função não altera os contatos associados.
+    """
     update_data = prospect_in.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_prospect, field, value)
@@ -81,12 +91,31 @@ async def get_prospect_contacts_by_status(db: AsyncSession, prospect_id: int, st
     )
     return result.all()
     
-async def update_prospect_contact(db: AsyncSession, pc_id: int, situacao: str, conversa: str | None = None):
+async def update_prospect_contact(
+    db: AsyncSession, 
+    pc_id: int, 
+    situacao: str, 
+    conversa: str | None = None,
+    observacoes: str | None = None
+):
+    """
+    Atualiza os dados de um contato dentro de uma prospecção.
+    """
     prospect_contact = await db.get(models.ProspectContact, pc_id)
     if prospect_contact:
         prospect_contact.situacao = situacao
         if conversa is not None:
             prospect_contact.conversa = conversa
+        if observacoes is not None:
+            # Anexa a nova observação à existente, com um timestamp.
+            timestamp = datetime.now().strftime('%d/%m %H:%M')
+            nova_observacao_formatada = f"[{timestamp}] {observacoes}"
+            
+            if prospect_contact.observacoes:
+                prospect_contact.observacoes += f"\n{nova_observacao_formatada}"
+            else:
+                prospect_contact.observacoes = nova_observacao_formatada
+                
         await db.commit()
 
 async def get_prospect_contacts_with_details(db: AsyncSession, prospect_id: int):

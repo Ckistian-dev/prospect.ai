@@ -22,7 +22,7 @@ async def prospecting_agent_task(
     prospect_id: int, 
     user_id: int
 ):
-    """O agente inteligente de prospecção que opera em loop contínuo."""
+    """O agente inteligente de prospecção que opera em loop contínuo, agora com capacidade multimodal."""
     prospecting_status[prospect_id] = "running"
     
     whatsapp_service = get_whatsapp_service()
@@ -54,14 +54,23 @@ async def prospecting_agent_task(
                         for contact_info in replies_to_process:
                             contact, prospect_contact = contact_info.Contact, contact_info.ProspectContact
                             
-                            full_history = await whatsapp_service.get_conversation_history(user.instance_name, contact.whatsapp)
-                            if not full_history:
+                            full_history_objects = await whatsapp_service.get_conversation_history(user.instance_name, contact.whatsapp)
+                            if not full_history_objects:
                                 await log(db, f"   - Não foi possível obter histórico para {contact.nome}. Pulando.")
                                 continue
+                            
+                            last_message = full_history_objects[-1]
+                            media_data = None
+                            if last_message.get("message", {}).get("imageMessage") or last_message.get("message", {}).get("audioMessage"):
+                                await log(db, f"   - Detectada mídia de {contact.nome}. Processando...")
+                                media_data = await whatsapp_service.get_media_and_convert(user.instance_name, last_message)
+                                if not media_data:
+                                    await log(db, f"   - FALHA ao processar mídia de {contact.nome}.")
 
-                            ia_response = gemini_service.generate_reply_message(config, contact, full_history)
+                            ia_response = gemini_service.generate_reply_message(config, contact, full_history_objects, media_data)
                             message_to_send = ia_response.get("mensagem_para_enviar")
                             new_status = ia_response.get("nova_situacao", "Aguardando Resposta")
+                            new_observation = ia_response.get("observacoes", "")
                             
                             if message_to_send:
                                 success = await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, message_to_send)
@@ -77,8 +86,14 @@ async def prospecting_agent_task(
                             db_history = json.loads(prospect_contact.conversa)
                             db_history.append({"role": "assistant", "content": message_to_send or "Ação: Esperar"})
                             
-                            await crud_prospect.update_prospect_contact(db, pc_id=prospect_contact.id, situacao=new_status, conversa=json.dumps(db_history))
-                            await asyncio.sleep(15)
+                            await crud_prospect.update_prospect_contact(
+                                db, 
+                                pc_id=prospect_contact.id, 
+                                situacao=new_status, 
+                                conversa=json.dumps(db_history),
+                                observacoes=new_observation
+                            )
+                            await asyncio.sleep(20)
 
                     if not action_taken:
                         pending_contacts = await crud_prospect.get_prospect_contacts_by_status(db, prospect_id=prospect_id, status="Aguardando Início")
@@ -88,8 +103,10 @@ async def prospecting_agent_task(
                             contact, prospect_contact = contact_info.Contact, contact_info.ProspectContact
                             await log(db, f"   - Nenhuma resposta pendente. Iniciando novo contato: {contact.nome}...")
                             
-                            history = await whatsapp_service.get_conversation_history(user.instance_name, contact.whatsapp)
-                            ia_response = gemini_service.generate_initial_message(config, contact, history)
+                            # Para a mensagem inicial, não processamos mídia, apenas texto
+                            history_objects = await whatsapp_service.get_conversation_history(user.instance_name, contact.whatsapp)
+                            
+                            ia_response = gemini_service.generate_initial_message(config, contact, history_objects)
                             message_to_send = ia_response.get("mensagem_para_enviar")
 
                             if message_to_send:
@@ -105,7 +122,7 @@ async def prospecting_agent_task(
                             else:
                                 await log(db, f"   - IA decidiu não iniciar conversa com {contact.nome}.")
                                 await crud_prospect.update_prospect_contact(db, pc_id=prospect_contact.id, situacao="Cancelado pela IA")
-                        
+                            
                         else:
                             await log(db, "-> Nenhuma ação pendente no momento. Monitorando...")
 
@@ -157,7 +174,6 @@ async def start_prospecting(prospect_id: int, background_tasks: BackgroundTasks,
     background_tasks.add_task(prospecting_agent_task, prospect_id, current_user.id)
     return {"message": "Agente de prospecção iniciado em segundo plano."}
 
-# --- ROTA /STOP ATUALIZADA ---
 @router.post("/{prospect_id}/stop", summary="Parar uma prospecção")
 async def stop_prospecting(
     prospect_id: int,
@@ -171,16 +187,12 @@ async def stop_prospecting(
     if not prospect:
         raise HTTPException(status_code=404, detail="Prospecção não encontrada.")
 
-    # A verificação agora é feita com base no status do banco de dados.
     if prospect.status != "Em Andamento":
         raise HTTPException(status_code=400, detail=f"A campanha não está 'Em Andamento', seu status atual é '{prospect.status}'.")
     
-    # Atualiza o status no banco de dados para "Parado".
     prospect_update = ProspectUpdate(status="Parado")
     await crud_prospect.update_prospect(db, db_prospect=prospect, prospect_in=prospect_update)
     
-    # Se o processo estiver rodando em memória, sinaliza para ele parar.
-    # Isso desacopla o estado do banco do estado da memória.
     if prospect_id in prospecting_status and prospecting_status[prospect_id] == "running":
         prospecting_status[prospect_id] = "stopping"
     
@@ -192,12 +204,12 @@ async def get_prospecting_sheet_data(prospect_id: int, db: AsyncSession = Depend
     if not prospect:
         raise HTTPException(status_code=404, detail="Campanha não encontrada.")
     contacts_data = await crud_prospect.get_prospect_contacts_with_details(db, prospect_id=prospect_id)
-    headers = ["id", "nome", "whatsapp", "situacao", "conversa"]
+    headers = ["id", "nome", "whatsapp", "situacao", "observacoes", "conversa"]
     data_rows = []
     for item in contacts_data:
         data_rows.append({
             "id": item.Contact.id, "nome": item.Contact.nome, "whatsapp": item.Contact.whatsapp,
-            "situacao": item.ProspectContact.situacao, "conversa": item.ProspectContact.conversa,
+            "situacao": item.ProspectContact.situacao,"observacoes": item.ProspectContact.observacoes, "conversa": item.ProspectContact.conversa,
         })
     return {"headers": headers, "data": data_rows, "prospect_name": prospect.nome_prospeccao}
 

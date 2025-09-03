@@ -2,7 +2,12 @@ import httpx
 from app.core.config import settings
 import logging
 import json
-from typing import Dict, Any
+from typing import Dict, Any, List
+import base64
+import os
+import subprocess
+import uuid
+import tempfile 
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +44,6 @@ class WhatsAppService:
             if not qr_code_string: raise Exception("API não retornou um QR Code válido.")
             return {"status": "qrcode", "qrcode": qr_code_string}
 
-    # --- FUNÇÃO CORRIGIDA ---
     async def _create_instance(self, instance_name: str):
         """Cria a instância usando o payload completo e correto."""
         payload = {
@@ -117,35 +121,30 @@ class WhatsAppService:
             logger.error(f"Erro inesperado ao enviar mensagem para {clean_number}: {e}")
             return False
 
-    # --- FUNÇÃO CORRIGIDA ---
-    async def get_conversation_history(self, instance_name: str, number: str) -> str | None:
+    async def get_conversation_history(self, instance_name: str, number: str) -> List[dict] | None:
         """
-        Busca o histórico de mensagens, tentando com e sem o nono dígito.
+        Busca o histórico de mensagens, tentando com e sem o nono dígito,
+        e retorna a lista de objetos de mensagem brutos.
         """
         if not instance_name or not number: return None
         clean_number = "".join(filter(str.isdigit, str(number)))
         
-        # 1. Gera as duas possíveis variações do número
         jids_to_try = set()
         if clean_number.startswith("55") and len(clean_number) >= 12:
             prefix = clean_number[:4]
             if len(clean_number) == 13 and clean_number[4] == '9':
-                # Número com 9: gera a versão sem
                 jids_to_try.add(f"{clean_number}@s.whatsapp.net")
                 jids_to_try.add(f"{prefix + clean_number[5:]}@s.whatsapp.net")
             elif len(clean_number) == 12:
-                # Número sem 9: gera a versão com
                 jids_to_try.add(f"{clean_number}@s.whatsapp.net")
                 jids_to_try.add(f"{prefix}9{clean_number[4:]}@s.whatsapp.net")
         
-        # Se não for um formato reconhecido, usa apenas o número limpo
         if not jids_to_try:
             jids_to_try.add(f"{clean_number}@s.whatsapp.net")
 
-        # 2. Tenta buscar o histórico para cada variação
         for jid in jids_to_try:
             url = f"{self.api_url}/chat/findMessages/{instance_name}"
-            payload = {"page": 1, "offset": 100, "where": {"key": {"remoteJid": jid}}}
+            payload = {"page": 1, "pageSize": 100, "where": {"key": {"remoteJid": jid}}}
             
             try:
                 async with httpx.AsyncClient(timeout=60.0) as client:
@@ -154,31 +153,71 @@ class WhatsAppService:
                     data = response.json()
                     
                     messages = data.get("messages", {}).get("records", [])
-                    # 3. Se encontrar mensagens, formata e retorna imediatamente
                     if messages:
                         logger.info(f"Histórico encontrado com sucesso para a variação JID: {jid}")
                         sorted_messages = sorted(messages, key=lambda msg: int(msg.get("messageTimestamp", 0)))
-                        history_lines = []
-                        for msg in sorted_messages[-20:]:
-                            remetente = "Eu" if msg.get("key", {}).get("fromMe") else "Contato"
-                            conteudo = (
-                                msg.get("message", {}).get("extendedTextMessage", {}).get("text") or
-                                msg.get("message", {}).get("conversation", "") or
-                                "[Mídia ou mensagem não suportada]"
-                            )
-                            history_lines.append(f"- {remetente}: {conteudo}")
-                        return "\n".join(history_lines)
+                        return sorted_messages
             except Exception as e:
                 error_details = getattr(e, 'response', str(e))
                 if hasattr(error_details, 'text'):
                     error_details = error_details.text
                 logger.error(f"Erro ao buscar histórico para a variação JID {jid}: {error_details}")
-                continue # Tenta a próxima variação
+                continue
 
-        # 4. Se o loop terminar sem encontrar nada
         logger.warning(f"Nenhum histórico encontrado para o número {clean_number} em nenhuma variação.")
         return None
+    
+    async def get_media_and_convert(self, instance_name: str, message: dict) -> dict | None:
+        """Baixa mídia, converte áudio para MP3 de forma compatível com múltiplos sistemas e retorna dados para o Gemini."""
+        message_key = message.get("key")
+        message_content = message.get("message", {})
 
+        if not message_key or not message_content:
+            return None
+
+        url = f"{self.api_url}/chat/getBase64FromMediaMessage/{instance_name}"
+        payload = {"message": message}
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=payload, headers=self.headers, timeout=60)
+                response.raise_for_status()
+                media_response = response.json()
+            
+            base64_data = media_response.get("base64")
+            if not base64_data:
+                raise ValueError("API de mídia não retornou 'base64'.")
+
+            media_bytes = base64.b64decode(base64_data)
+
+            if message_content.get("imageMessage"):
+                return {"mime_type": "image/jpeg", "data": media_bytes}
+
+            if message_content.get("audioMessage"):
+                # Usando um diretório temporário que funciona em qualquer sistema operacional
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    ogg_path = os.path.join(temp_dir, f"{uuid.uuid4()}.ogg")
+                    mp3_path = os.path.join(temp_dir, f"{uuid.uuid4()}.mp3")
+                    
+                    try:
+                        with open(ogg_path, "wb") as f:
+                            f.write(media_bytes)
+                        
+                        # Esta é a linha que causa o erro. Garanta que o ffmpeg está no PATH do sistema.
+                        command = ["ffmpeg", "-y", "-i", ogg_path, "-acodec", "libmp3lame", mp3_path]
+                        subprocess.run(command, check=True, capture_output=True, text=True)
+                        
+                        with open(mp3_path, "rb") as f:
+                            mp3_bytes = f.read()
+                        
+                        return {"mime_type": "audio/mp3", "data": mp3_bytes}
+                    except subprocess.CalledProcessError as e:
+                        logger.error(f"Erro do FFmpeg (verifique se está instalado e no PATH): {e.stderr}")
+                        return None
+
+        except Exception as e:
+            logger.error(f"Falha ao processar mídia da mensagem {message_key.get('id')}: {e}")
+            return None
 
 _whatsapp_service_instance = None
 def get_whatsapp_service():

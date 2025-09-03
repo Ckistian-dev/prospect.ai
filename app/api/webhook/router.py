@@ -10,9 +10,8 @@ router = APIRouter()
 
 async def process_incoming_message(data: dict):
     """
-    Processa uma mensagem de entrada. Sua única função é encontrar o contato
-    na campanha ativa e atualizar seu status para 'Resposta Recebida'.
-    O agente principal cuidará do resto.
+    Processa uma mensagem de entrada. Identifica o tipo de conteúdo (texto, imagem, áudio)
+    e atualiza o contato na campanha ativa para 'Resposta Recebida'.
     """
     async with SessionLocal() as db:
         try:
@@ -22,10 +21,20 @@ async def process_incoming_message(data: dict):
             contact_number = key.get('remoteJid', '').split('@')[0]
             
             message_content = message_data.get('message', {})
-            incoming_text = message_content.get('conversation') or \
-                            message_content.get('extendedTextMessage', {}).get('text', '')
+            
+            # Tenta extrair texto, e se não houver, define um placeholder para mídias
+            incoming_text = (
+                message_content.get('conversation') or
+                message_content.get('extendedTextMessage', {}).get('text', '')
+            )
+            if not incoming_text:
+                if message_content.get('imageMessage'):
+                    incoming_text = "[Imagem Recebida]"
+                elif message_content.get('audioMessage'):
+                    incoming_text = "[Áudio Recebido]"
 
             if not all([instance_name, contact_number, incoming_text]):
+                logger.warning("Webhook ignorado: dados insuficientes.")
                 return
 
             user = await crud_user.get_user_by_instance(db, instance_name=instance_name)
@@ -36,7 +45,6 @@ async def process_incoming_message(data: dict):
 
             contact, prospect_contact, prospect = prospect_info
             
-            # Adiciona a nova mensagem ao histórico
             try:
                 history_list = json.loads(prospect_contact.conversa)
             except (json.JSONDecodeError, TypeError):
@@ -45,7 +53,6 @@ async def process_incoming_message(data: dict):
             history_list.append({"role": "user", "content": incoming_text})
             new_conversation_history = json.dumps(history_list)
 
-            # Atualiza o status e a conversa
             await crud_prospect.update_prospect_contact(
                 db, 
                 pc_id=prospect_contact.id, 
@@ -76,4 +83,3 @@ async def receive_evolution_messages_upsert(
     except Exception as e:
         logger.error(f"Erro ao processar corpo do webhook: {e}")
         return {"status": "error"}
-

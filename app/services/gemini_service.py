@@ -3,7 +3,7 @@ from app.core.config import settings
 import logging
 import json
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from app.db import models
 
 logger = logging.getLogger(__name__)
@@ -13,13 +13,12 @@ class GeminiService:
         try:
             genai.configure(api_key=settings.GOOGLE_API_KEY)
             self.model = genai.GenerativeModel('gemini-2.5-flash')
-            logger.info("✅ Cliente Gemini inicializado com sucesso.")
+            logger.info("✅ Cliente Gemini inicializado com sucesso (gemini-2.5-flash).")
         except Exception as e:
             logger.error(f"🚨 ERRO CRÍTICO ao configurar o Gemini: {e}")
             raise
 
     def _replace_variables(self, text: str, contact_data: models.Contact) -> str:
-        # (código existente, sem alterações)
         now = datetime.now()
         days_in_portuguese = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
         first_name = contact_data.nome.split(" ")[0] if contact_data.nome else ""
@@ -32,20 +31,34 @@ class GeminiService:
             text = text.replace(var, value)
         return text
 
-    # --- FUNÇÃO ATUALIZADA ---
-    def generate_initial_message(self, config: models.Config, contact: models.Contact, history: Optional[str] = None) -> dict:
-        """Gera a mensagem inicial ou de reengajamento, considerando um histórico pré-existente."""
+    def _format_history_objects_to_string(self, evolution_history: List[dict]) -> str:
+        """Converte uma lista de objetos de mensagem em uma string formatada para prompts."""
+        history_lines = []
+        for msg in evolution_history:
+            remetente = "Eu" if msg.get("key", {}).get("fromMe") else "Contato"
+            message_obj = msg.get("message", {})
+            conteudo = (
+                message_obj.get("extendedTextMessage", {}).get("text") or
+                message_obj.get("conversation", "") or
+                "[Mídia recebida]" # Placeholder para mídias no histórico de texto
+            )
+            history_lines.append(f"- {remetente}: {conteudo.strip()}")
+        return "\n".join(history_lines)
+
+    def generate_initial_message(self, config: models.Config, contact: models.Contact, history_objects: Optional[List[dict]] = None) -> dict:
+        """Gera a mensagem inicial, considerando um histórico de texto pré-existente."""
         persona_prompt = self._replace_variables(config.persona, contact)
         message_prompt_template = self._replace_variables(config.prompt, contact)
-
-        if history:
+        
+        history_text_for_prompt = ""
+        if history_objects:
+            history_text_for_prompt = self._format_history_objects_to_string(history_objects)
             task_instruction = f"""
-            Existe um histórico de conversa anterior com este contato, que talvez não esteja relacionado a esta campanha.
+            Existe um histórico de conversa anterior com este contato.
             **Histórico Anterior:**
-            {history}
+            {history_text_for_prompt}
             
             Sua tarefa é reengajar o contato de forma natural, conectando a conversa anterior com o objetivo da campanha atual, que é: "{message_prompt_template}".
-            Crie uma mensagem de continuação que seja educada e relevante.
             """
         else:
             task_instruction = f"""
@@ -62,63 +75,89 @@ class GeminiService:
 
         **Regras Importantes:**
         - Seja breve, amigável e profissional.
-        - Não adicione saudações como "Olá" se o modelo já as contiver.
 
         **Formato da Resposta:**
         Responda APENAS com um objeto JSON contendo a chave "mensagem_para_enviar".
-        Exemplo: {{ "mensagem_para_enviar": "Olá, {contact.nome}! Vi que conversamos antes sobre X..." }}
+        Exemplo: {{"mensagem_para_enviar": "Olá, {contact.nome}! Vi que conversamos antes sobre X..."}}
         """
         try:
             response = self.model.generate_content(prompt)
-            clean_response = response.text.strip().replace("```json", "").replace("```", "")
-            return json.loads(clean_response)
+            # Lógica robusta para extrair JSON
+            text_response = response.text
+            start_index = text_response.find('{')
+            end_index = text_response.rfind('}')
+            if start_index != -1 and end_index != -1:
+                json_string = text_response[start_index : end_index + 1]
+                return json.loads(json_string)
+            else:
+                raise ValueError("Nenhum JSON encontrado na resposta da IA.")
         except Exception as e:
             logger.error(f"Erro ao gerar mensagem inicial com Gemini: {e}")
             return {"mensagem_para_enviar": None}
 
-    # --- FUNÇÃO ATUALIZADA ---
-    def generate_reply_message(self, config: models.Config, contact: models.Contact, history: str) -> dict:
-        """Gera uma RESPOSTA para um contato, com base no histórico da conversa."""
+    def generate_reply_message(
+        self, 
+        config: models.Config, 
+        contact: models.Contact, 
+        conversation_history: List[dict],
+        media_input: Optional[dict] = None
+    ) -> dict:
+        """Gera uma resposta, considerando o histórico e possível mídia na última mensagem, usando um prompt único."""
         persona_prompt = self._replace_variables(config.persona, contact)
+        history_string = self._format_history_objects_to_string(conversation_history)
 
-        prompt = f"""
-        **Sua Persona:**
-        {persona_prompt}
+        # Constrói um prompt único com todas as partes necessárias
+        prompt_parts = [
+            f"**Sua Persona:**\n{persona_prompt}\n\n",
+            f"**Histórico da Conversa com '{contact.nome}':**\n{history_string}\n\n",
+            "**Sua Tarefa:**\nVocê é um agente de prospecção. Com base no histórico e em qualquer mídia fornecida na ÚLTIMA mensagem, decida a melhor ação.\n"
+        ]
 
-        **Histórico da Conversa com '{contact.nome}':**
-        {history}
+        if media_input:
+            prompt_parts.append("A última mensagem do contato continha a seguinte mídia para sua análise:\n")
+            prompt_parts.append(media_input)
+            prompt_parts.append("\nAnalise esta mídia no contexto da conversa e responda de forma relevante.\n")
+        else:
+            prompt_parts.append("A última mensagem do contato foi em texto. Analise o histórico e responda.\n")
 
-        **Sua Tarefa:**
-        Você é um agente de prospecção. A última mensagem foi do contato. Analise o histórico e decida a melhor ação.
-        - Se for uma pergunta, responda-a de forma concisa.
-        - Se o contato pedir para parar, agradeça e sugira encerrar.
-        - Se a conversa chegou a um ponto de agendamento, sugira horários.
-        - Se a última mensagem foi sua e o contato apenas confirmou algo (ex: "ok", "sim"), talvez seja melhor esperar.
-        - Seu objetivo final é avançar na prospecção.
+        prompt_parts.append(
+            """
+            **Formato OBRIGATÓRIO da Resposta:**
+            Responda APENAS com um objeto JSON válido contendo TRÊS chaves:
+            1. "mensagem_para_enviar": A resposta em texto para o contato. Se decidir que a melhor ação é esperar, o valor deve ser null.
+            2. "nova_situacao": Um novo status para o contato. Pode ser "Aguardando Resposta", "Reunião Agendada", "Não Interessado", "Concluído", "Lead Qualificado".
+            3. "observacoes": Um resumo ou anotação importante sobre a interação para ser salvo internamente. Deve ser uma string, mesmo que vazia.
 
-        **Formato da Resposta:**
-        Responda APENAS com um objeto JSON contendo duas chaves:
-        1. "mensagem_para_enviar": A resposta em texto. Se decidir que a melhor ação é esperar, o valor deve ser null.
-        2. "nova_situacao": Um novo status para o contato. Pode ser "Aguardando Resposta", "Reunião Agendada", "Não Interessado", "Concluído", "Lead Qualificado".
-
-        Exemplo de Ação:
-        {{
-            "mensagem_para_enviar": "Claro! Que tal amanhã às 10h ou às 15h?",
-            "nova_situacao": "Agendando Reunião"
-        }}
-        Exemplo de Espera:
-        {{
-            "mensagem_para_enviar": null,
-            "nova_situacao": "Aguardando Ação do Contato"
-        }}
-        """
+            Exemplo de Resposta VÁLIDA:
+            {
+                "mensagem_para_enviar": "Entendido, obrigado por enviar a planta do imóvel! Vou analisar e retorno em breve.",
+                "nova_situacao": "Analisando Documento",
+                "observacoes": "Contato enviou a planta do projeto. Qualificado."
+            }
+            """
+        )
+        
         try:
-            response = self.model.generate_content(prompt)
-            clean_response = response.text.strip().replace("```json", "").replace("```", "")
-            return json.loads(clean_response)
+            response = self.model.generate_content(prompt_parts)
+            
+            # --- CORREÇÃO: Lógica mais robusta para extrair o JSON ---
+            if not hasattr(response, 'text') or not response.text:
+                raise ValueError("A resposta da IA está vazia.")
+
+            text_response = response.text
+            start_index = text_response.find('{')
+            end_index = text_response.rfind('}')
+
+            if start_index == -1 or end_index == -1:
+                raise ValueError(f"Não foi possível encontrar um objeto JSON na resposta da IA: {text_response}")
+
+            json_string = text_response[start_index : end_index + 1]
+            return json.loads(json_string)
+            
         except Exception as e:
             logger.error(f"Erro ao gerar resposta com Gemini: {e}")
-            return {"mensagem_para_enviar": None, "nova_situacao": "Erro IA"}
+            return {"mensagem_para_enviar": None, "nova_situacao": "Erro IA", "observacoes": f"Falha da IA: {e}"}
+
 
 _gemini_service_instance = None
 def get_gemini_service():

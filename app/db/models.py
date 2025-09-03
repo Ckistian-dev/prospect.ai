@@ -72,6 +72,7 @@ class ProspectContact(Base):
     prospect_id = Column(Integer, ForeignKey('prospects.id'))
     contact_id = Column(Integer, ForeignKey('contacts.id'))
     situacao = Column(String, default="Aguardando Início")
+    observacoes: Mapped[str] = mapped_column(Text, nullable=True, default="")
     conversa = Column(Text, default="[]")
 
     prospect = relationship("Prospect", back_populates="contacts")
