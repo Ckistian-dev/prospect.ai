@@ -12,8 +12,8 @@ class GeminiService:
     def __init__(self):
         try:
             genai.configure(api_key=settings.GOOGLE_API_KEY)
-            self.model = genai.GenerativeModel('gemini-1.5-flash-latest')
-            logger.info("✅ Cliente Gemini inicializado com sucesso (gemini-1.5-flash-latest).")
+            self.model = genai.GenerativeModel('gemini-2.5-flash')
+            logger.info("✅ Cliente Gemini inicializado com sucesso (gemini-2.5-flash).")
         except Exception as e:
             logger.error(f"🚨 ERRO CRÍTICO ao configurar o Gemini: {e}")
             raise
