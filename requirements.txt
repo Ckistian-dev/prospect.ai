@@ -17,3 +17,5 @@ requests
 qrcode
 
 python-dotenv
+
+python-multipart
