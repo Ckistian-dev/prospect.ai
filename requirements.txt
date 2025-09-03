@@ -11,4 +11,3 @@ google-generativeai
 python-dotenv
 requests
 qrcode
-psycopg[asyncpg]
