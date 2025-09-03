@@ -11,7 +11,7 @@
 # 4. Digite a senha que deseja usar e pressione Enter.
 # 5. Copie o hash gerado e cole na coluna 'senha' da sua planilha.
 
-from app.core.security import get_password_hash
+from app.services.security import get_password_hash
 
 def generate_hash():
     """
