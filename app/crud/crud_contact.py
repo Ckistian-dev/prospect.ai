@@ -1,8 +1,11 @@
-from sqlalchemy import select
+import logging
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import models
 from app.db.schemas import ContactCreate, ContactUpdate
 from typing import List, Set
+
+logger = logging.getLogger(__name__)
 
 async def get_contact(db: AsyncSession, contact_id: int, user_id: int) -> models.Contact | None:
     result = await db.execute(
@@ -39,9 +42,7 @@ async def delete_contact(db: AsyncSession, contact_id: int, user_id: int) -> mod
         await db.commit()
     return db_contact
 
-# --- NOVA FUNÇÃO ADICIONADA ---
 async def get_all_contact_categories(db: AsyncSession, user_id: int) -> List[str]:
-    """Busca todas as categorias únicas de contatos para um usuário."""
     contacts = await get_contacts_by_user(db, user_id=user_id)
     all_categories: Set[str] = set()
     for contact in contacts:
@@ -50,3 +51,10 @@ async def get_all_contact_categories(db: AsyncSession, user_id: int) -> List[str
                 all_categories.add(category)
     return sorted(list(all_categories))
 
+# --- FUNÇÃO ADICIONADA PARA O DASHBOARD ---
+async def get_total_contacts_count(db: AsyncSession, user_id: int) -> int:
+    """Calcula o número total de contatos de um usuário."""
+    logger.info(f"DASHBOARD: Calculando total de contatos para o usuário {user_id}")
+    count_query = select(func.count(models.Contact.id)).where(models.Contact.user_id == user_id)
+    total_contacts = await db.execute(count_query)
+    return total_contacts.scalar_one()

@@ -8,6 +8,7 @@ from app.api.configs import router as configs_router
 from app.api.whatsapp import router as whatsapp_router
 from app.api.prospecting import router as prospecting_router
 from app.api.webhook import router as webhook_router
+from app.api.dashboard import router as dashboard_router
 
 from app.db.database import engine
 from app.db import models
@@ -50,6 +51,7 @@ app.include_router(configs_router.router, prefix=f"{API_PREFIX}/configs", tags=[
 app.include_router(whatsapp_router.router, prefix=f"{API_PREFIX}/whatsapp", tags=["WhatsApp"])
 app.include_router(prospecting_router.router, prefix=f"{API_PREFIX}/prospecting", tags=["Prospecção"])
 app.include_router(webhook_router.router, prefix=f"{API_PREFIX}/webhook", tags=["Webhook"])
+app.include_router(dashboard_router.router, prefix=f"{API_PREFIX}/dashboard", tags=["Dashboard"])
 
 @app.get("/", tags=["Root"])
 def read_root():
