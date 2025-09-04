@@ -7,7 +7,7 @@ import base64
 import os
 import subprocess
 import uuid
-import tempfile 
+import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,7 @@ class WhatsAppService:
             async with httpx.AsyncClient() as client:
                 response = await client.post(url, headers=self.headers, json=payload)
                 response.raise_for_status()
+                logger.info(f"DEBUG: Mensagem enviada com sucesso para {clean_number}.")
                 return True
         except httpx.HTTPStatusError as e:
             logger.error(f"Erro ao enviar mensagem para {clean_number}. Status: {e.response.status_code}. Resposta: {e.response.text}")
@@ -121,10 +122,9 @@ class WhatsAppService:
             logger.error(f"Erro inesperado ao enviar mensagem para {clean_number}: {e}")
             return False
 
-    async def get_conversation_history(self, instance_name: str, number: str) -> List[dict] | None:
+    async def get_conversation_history(self, instance_name: str, number: str) -> Optional[List[dict]]:
         """
-        Busca o histórico de mensagens, tentando com e sem o nono dígito,
-        e retorna a lista de objetos de mensagem brutos.
+        Busca o histórico de mensagens e retorna a lista de objetos de mensagem brutos da API.
         """
         if not instance_name or not number: return None
         clean_number = "".join(filter(str.isdigit, str(number)))
@@ -148,23 +148,24 @@ class WhatsAppService:
             
             try:
                 async with httpx.AsyncClient(timeout=60.0) as client:
+                    logger.info(f"DEBUG: Buscando histórico para JID: {jid}")
                     response = await client.post(url, headers=self.headers, json=payload)
                     response.raise_for_status()
                     data = response.json()
                     
                     messages = data.get("messages", {}).get("records", [])
                     if messages:
-                        logger.info(f"Histórico encontrado com sucesso para a variação JID: {jid}")
+                        logger.info(f"DEBUG: {len(messages)} mensagens encontradas para JID: {jid}")
                         sorted_messages = sorted(messages, key=lambda msg: int(msg.get("messageTimestamp", 0)))
                         return sorted_messages
             except Exception as e:
                 error_details = getattr(e, 'response', str(e))
                 if hasattr(error_details, 'text'):
                     error_details = error_details.text
-                logger.error(f"Erro ao buscar histórico para a variação JID {jid}: {error_details}")
+                logger.error(f"DEBUG: Erro ao buscar histórico para JID {jid}: {error_details}")
                 continue
 
-        logger.warning(f"Nenhum histórico encontrado para o número {clean_number} em nenhuma variação.")
+        logger.warning(f"DEBUG: Nenhum histórico encontrado para o número {clean_number} em nenhuma variação.")
         return None
     
     async def get_media_and_convert(self, instance_name: str, message: dict) -> Optional[dict]:

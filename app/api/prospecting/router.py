@@ -54,44 +54,53 @@ async def prospecting_agent_task(
                         for contact_info in replies_to_process:
                             contact, prospect_contact = contact_info.Contact, contact_info.ProspectContact
                             
-                            full_history_objects = await whatsapp_service.get_conversation_history(user.instance_name, contact.whatsapp)
-                            if not full_history_objects:
-                                await log(db, f"   - Não foi possível obter histórico para {contact.nome}. Pulando.")
+                            await log(db, f"   - Processando resposta de {contact.nome} (ID Contato Prospecção: {prospect_contact.id}).")
+                            
+                            # 1. Obter o histórico bruto completo da API
+                            full_history_from_api = await whatsapp_service.get_conversation_history(user.instance_name, contact.whatsapp)
+                            if not full_history_from_api:
+                                await log(db, f"   - Não foi possível obter histórico da API para {contact.nome}. Pulando.")
                                 continue
                             
-                            last_message = full_history_objects[-1]
+                            # 2. Verificar se a última mensagem tem mídia e processá-la
+                            last_message = full_history_from_api[-1] if full_history_from_api else {}
                             media_data = None
-                            if last_message.get("message", {}).get("imageMessage") or last_message.get("message", {}).get("audioMessage"):
-                                await log(db, f"   - Detectada mídia de {contact.nome}. Processando...")
+                            if prospect_contact.media_type: # Usamos o campo do DB para decidir se processamos
+                                await log(db, f"   - Detectado media_type '{prospect_contact.media_type}' para {contact.nome}. Processando...")
                                 media_data = await whatsapp_service.get_media_and_convert(user.instance_name, last_message)
                                 if not media_data:
-                                    await log(db, f"   - FALHA ao processar mídia de {contact.nome}.")
-
-                            ia_response = gemini_service.generate_reply_message(config, contact, full_history_objects, media_data)
+                                    await log(db, f"   - FALHA ao processar mídia de {contact.nome}.")
+                            
+                            # 3. Gerar a resposta da IA
+                            await log(db, f"   - Enviando histórico de {len(full_history_from_api)} mensagens e mídia ({'Sim' if media_data else 'Não'}) para a IA.")
+                            ia_response = gemini_service.generate_reply_message(config, contact, full_history_from_api, media_data)
                             message_to_send = ia_response.get("mensagem_para_enviar")
                             new_status = ia_response.get("nova_situacao", "Aguardando Resposta")
                             new_observation = ia_response.get("observacoes", "")
                             
+                            # 4. Enviar mensagem se houver uma
                             if message_to_send:
                                 success = await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, message_to_send)
                                 if success:
-                                    await log(db, f"   - Resposta enviada para {contact.nome}.")
+                                    await log(db, f"   - Resposta enviada para {contact.nome}.")
                                     await crud_user.decrement_user_tokens(db, db_user=user)
                                 else:
-                                    await log(db, f"   - FALHA ao enviar resposta para {contact.nome}.")
+                                    await log(db, f"   - FALHA ao enviar resposta para {contact.nome}.")
                                     new_status = "Falha no Envio"
                             else:
-                                await log(db, f"   - IA decidiu esperar antes de responder {contact.nome}.")
+                                await log(db, f"   - IA decidiu esperar antes de responder {contact.nome}.")
 
+                            # 5. Atualizar o banco de dados
                             db_history = json.loads(prospect_contact.conversa)
-                            db_history.append({"role": "assistant", "content": message_to_send or "Ação: Esperar"})
+                            db_history.append({"role": "assistant", "content": message_to_send or "[Ação: Esperar]"})
                             
                             await crud_prospect.update_prospect_contact(
                                 db, 
                                 pc_id=prospect_contact.id, 
                                 situacao=new_status, 
                                 conversa=json.dumps(db_history),
-                                observacoes=new_observation
+                                observacoes=new_observation,
+                                media_type=None # Limpa o media_type após o processamento
                             )
                             await asyncio.sleep(20)
 
@@ -101,26 +110,25 @@ async def prospecting_agent_task(
                             action_taken = True
                             contact_info = pending_contacts[0]
                             contact, prospect_contact = contact_info.Contact, contact_info.ProspectContact
-                            await log(db, f"   - Nenhuma resposta pendente. Iniciando novo contato: {contact.nome}...")
+                            await log(db, f"   - Nenhuma resposta pendente. Iniciando novo contato: {contact.nome}...")
                             
-                            # Para a mensagem inicial, não processamos mídia, apenas texto
-                            history_objects = await whatsapp_service.get_conversation_history(user.instance_name, contact.whatsapp)
+                            history_from_api = await whatsapp_service.get_conversation_history(user.instance_name, contact.whatsapp)
                             
-                            ia_response = gemini_service.generate_initial_message(config, contact, history_objects)
+                            ia_response = gemini_service.generate_initial_message(config, contact, history_from_api)
                             message_to_send = ia_response.get("mensagem_para_enviar")
 
                             if message_to_send:
                                 success = await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, message_to_send)
                                 if success:
-                                    await log(db, f"   - Primeira mensagem enviada para {contact.nome}.")
+                                    await log(db, f"   - Primeira mensagem enviada para {contact.nome}.")
                                     conversa_json = json.dumps([{"role": "assistant", "content": message_to_send}])
                                     await crud_prospect.update_prospect_contact(db, pc_id=prospect_contact.id, situacao="Aguardando Resposta", conversa=conversa_json)
                                     await crud_user.decrement_user_tokens(db, db_user=user)
                                 else:
-                                    await log(db, f"   - FALHA ao enviar primeira mensagem para {contact.nome}.")
+                                    await log(db, f"   - FALHA ao enviar primeira mensagem para {contact.nome}.")
                                     await crud_prospect.update_prospect_contact(db, pc_id=prospect_contact.id, situacao="Falha no Envio")
                             else:
-                                await log(db, f"   - IA decidiu não iniciar conversa com {contact.nome}.")
+                                await log(db, f"   - IA decidiu não iniciar conversa com {contact.nome}.")
                                 await crud_prospect.update_prospect_contact(db, pc_id=prospect_contact.id, situacao="Cancelado pela IA")
                             
                         else:
@@ -128,7 +136,7 @@ async def prospecting_agent_task(
 
                 except Exception as e:
                     logger.error(f"ERRO no ciclo do agente (Prospect ID: {prospect_id}): {e}", exc_info=True)
-                    await log(db, f"   - ERRO no ciclo: {e}")
+                    await log(db, f"   - ERRO no ciclo: {e}")
 
             if action_taken:
                 await asyncio.sleep(30)
@@ -143,7 +151,7 @@ async def prospecting_agent_task(
         if prospect_id in prospecting_status:
             del prospecting_status[prospect_id]
         async with SessionLocal() as db:
-             await log(db, "-> Agente finalizado.")
+            await log(db, "-> Agente finalizado.")
 
 # --- ROTAS ---
 
@@ -170,7 +178,7 @@ async def start_prospecting(prospect_id: int, background_tasks: BackgroundTasks,
     if not prospect:
         raise HTTPException(status_code=404, detail="Prospecção não encontrada.")
     if prospect.status in ["Concluído", "Em Andamento"]:
-         raise HTTPException(status_code=400, detail=f"A prospecção já está com o status '{prospect.status}' e não pode ser reiniciada/iniciada.")
+        raise HTTPException(status_code=400, detail=f"A prospecção já está com o status '{prospect.status}' e não pode ser reiniciada/iniciada.")
     background_tasks.add_task(prospecting_agent_task, prospect_id, current_user.id)
     return {"message": "Agente de prospecção iniciado em segundo plano."}
 
@@ -180,9 +188,6 @@ async def stop_prospecting(
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(dependencies.get_current_active_user)
 ):
-    """
-    Para uma campanha de prospecção, usando o status do banco de dados como fonte da verdade.
-    """
     prospect = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=current_user.id)
     if not prospect:
         raise HTTPException(status_code=404, detail="Prospecção não encontrada.")
