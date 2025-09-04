@@ -22,7 +22,7 @@ async def prospecting_agent_task(
     prospect_id: int, 
     user_id: int
 ):
-    """O agente inteligente de prospecção que opera em loop contínuo, agora com capacidade multimodal."""
+    """O agente inteligente de prospecção que opera com base em um histórico enriquecido pelo webhook."""
     prospecting_status[prospect_id] = "running"
     
     whatsapp_service = get_whatsapp_service()
@@ -56,29 +56,22 @@ async def prospecting_agent_task(
                             
                             await log(db, f"   - Processando resposta de {contact.nome} (ID Contato Prospecção: {prospect_contact.id}).")
                             
-                            # 1. Obter o histórico bruto completo da API
-                            full_history_from_api = await whatsapp_service.get_conversation_history(user.instance_name, contact.whatsapp)
-                            if not full_history_from_api:
-                                await log(db, f"   - Não foi possível obter histórico da API para {contact.nome}. Pulando.")
+                            try:
+                                conversation_history_db = json.loads(prospect_contact.conversa)
+                            except (json.JSONDecodeError, TypeError):
+                                conversation_history_db = []
+
+                            if not conversation_history_db:
+                                await log(db, f"   - Histórico no DB para {contact.nome} está vazio ou inválido. Pulando.")
                                 continue
                             
-                            # 2. Verificar se a última mensagem tem mídia e processá-la
-                            last_message = full_history_from_api[-1] if full_history_from_api else {}
-                            media_data = None
-                            if prospect_contact.media_type: # Usamos o campo do DB para decidir se processamos
-                                await log(db, f"   - Detectado media_type '{prospect_contact.media_type}' para {contact.nome}. Processando...")
-                                media_data = await whatsapp_service.get_media_and_convert(user.instance_name, last_message)
-                                if not media_data:
-                                    await log(db, f"   - FALHA ao processar mídia de {contact.nome}.")
+                            await log(db, f"   - Enviando histórico de {len(conversation_history_db)} mensagens do DB para a IA.")
+                            ia_response = gemini_service.generate_reply_message(config, contact, conversation_history_db)
                             
-                            # 3. Gerar a resposta da IA
-                            await log(db, f"   - Enviando histórico de {len(full_history_from_api)} mensagens e mídia ({'Sim' if media_data else 'Não'}) para a IA.")
-                            ia_response = gemini_service.generate_reply_message(config, contact, full_history_from_api, media_data)
                             message_to_send = ia_response.get("mensagem_para_enviar")
                             new_status = ia_response.get("nova_situacao", "Aguardando Resposta")
                             new_observation = ia_response.get("observacoes", "")
                             
-                            # 4. Enviar mensagem se houver uma
                             if message_to_send:
                                 success = await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, message_to_send)
                                 if success:
@@ -90,17 +83,14 @@ async def prospecting_agent_task(
                             else:
                                 await log(db, f"   - IA decidiu esperar antes de responder {contact.nome}.")
 
-                            # 5. Atualizar o banco de dados
-                            db_history = json.loads(prospect_contact.conversa)
-                            db_history.append({"role": "assistant", "content": message_to_send or "[Ação: Esperar]"})
+                            conversation_history_db.append({"role": "assistant", "content": message_to_send or "[Ação: Esperar]"})
                             
                             await crud_prospect.update_prospect_contact(
                                 db, 
                                 pc_id=prospect_contact.id, 
                                 situacao=new_status, 
-                                conversa=json.dumps(db_history),
-                                observacoes=new_observation,
-                                media_type=None # Limpa o media_type após o processamento
+                                conversa=json.dumps(conversation_history_db),
+                                observacoes=new_observation
                             )
                             await asyncio.sleep(20)
 

@@ -3,6 +3,9 @@ from sqlalchemy.future import select
 from app.db import models
 from app.db.schemas import UserCreate, UserUpdate
 from app.services.security import get_password_hash
+import logging
+
+logger = logging.getLogger(__name__)
 
 async def get_user_by_email(db: AsyncSession, email: str) -> models.User | None:
     """Busca um usuário pelo seu endereço de e-mail."""
@@ -49,13 +52,15 @@ async def update_user(db: AsyncSession, user: models.User, user_in: UserUpdate) 
     await db.refresh(user)
     return user
 
-async def decrement_user_tokens(db: AsyncSession, *, db_user: models.User, amount: int = 1) -> models.User:
-    """Diminui a quantidade de tokens de um usuário."""
-    if db_user.tokens >= amount:
+async def decrement_user_tokens(db: AsyncSession, *, db_user: models.User, amount: int = 1):
+    """Decrementa os tokens de um usuário pela quantidade especificada."""
+    if db_user.tokens is not None and db_user.tokens >= amount:
         db_user.tokens -= amount
         await db.commit()
         await db.refresh(db_user)
-    return db_user
+        logger.info(f"DEBUG: {amount} token(s) deduzido(s) do usuário {db_user.id}. Restantes: {db_user.tokens}")
+    else:
+        logger.warning(f"Usuário {db_user.id} não possui tokens suficientes para deduzir {amount} token(s).")
 
 async def get_user_by_instance(db: AsyncSession, instance_name: str) -> models.User | None:
     """Busca um usuário pelo nome da sua instância do WhatsApp."""

@@ -31,35 +31,50 @@ class GeminiService:
             text = text.replace(var, value)
         return text
 
-    def _format_api_history_to_gemini_chat(self, raw_history: List[dict]) -> List[dict]:
-        """
-        Converte o histórico bruto da API do WhatsApp para o formato de chat do Gemini,
-        extraindo texto e placeholders de mídia.
-        """
-        gemini_history = []
-        logger.info(f"DEBUG: Formatando {len(raw_history)} mensagens brutas para o Gemini.")
-        for msg in raw_history:
-            role = "model" if msg.get("key", {}).get("fromMe") else "user"
-            message_content = msg.get("message", {})
-            
-            content_text = ""
-            if message_content.get('conversation') or message_content.get('extendedTextMessage'):
-                content_text = message_content.get('conversation') or message_content.get('extendedTextMessage', {}).get('text', '')
-            elif message_content.get("imageMessage"):
-                content_text = "[Imagem Recebida]"
-            elif message_content.get("audioMessage"):
-                content_text = "[Áudio Recebido]"
-            elif message_content.get("documentMessage"):
-                file_name = message_content.get("documentMessage", {}).get("fileName", "documento")
-                content_text = f"[Documento Recebido: {file_name}]"
-            
-            if content_text.strip():
-                gemini_history.append({
-                    "role": role,
-                    "parts": [{"text": content_text}]
-                })
-        logger.info(f"DEBUG: Histórico formatado contém {len(gemini_history)} mensagens para a IA.")
-        return gemini_history
+    def _format_db_history_to_string(self, db_history: List[dict]) -> str:
+        """Converte o histórico do DB para uma string legível para o prompt."""
+        history_lines = []
+        for msg in db_history:
+            role_text = "Eu" if msg.get("role") == "assistant" else "Contato"
+            content = msg.get("content", "")
+            history_lines.append(f"- {role_text}: {content}")
+        return "\n".join(history_lines)
+
+    def transcribe_and_analyze_media(self, media_data: dict, db_history: List[dict]) -> str:
+        """Transcreve áudio ou analisa imagem/documento no contexto da conversa."""
+        logger.info(f"DEBUG: Iniciando transcrição/análise para mídia do tipo {media_data.get('mime_type')}")
+        
+        prompt_parts = []
+        
+        if 'audio' in media_data['mime_type']:
+            task = "Sua única tarefa é transcrever o áudio a seguir. Retorne apenas o texto transcrito, sem adicionar nenhuma outra palavra ou formatação."
+            prompt_parts.append(task)
+            prompt_parts.append(media_data)
+        else: # Imagem ou Documento
+            history_string = self._format_db_history_to_string(db_history)
+            task = f"""
+            **Contexto da Conversa Anterior:**
+            {history_string}
+
+            **Sua Tarefa:**
+            Você recebeu um arquivo (imagem ou documento) do contato. Analise o conteúdo do arquivo no contexto da conversa acima.
+            Sua resposta deve ser um resumo conciso e útil do conteúdo do arquivo, como se você estivesse fazendo uma anotação no histórico.
+            Exemplo se for uma planta baixa: "O contato enviou a planta do banheiro, destacando a área do box, apresentando informação tal"
+            Exemplo se for um catálogo: "O contato enviou um catálogo de produtos, apresentando informação tal"
+            Retorne APENAS o texto do resumo.
+            """
+            prompt_parts.append(task)
+            prompt_parts.append(media_data)
+
+        try:
+            media_model = genai.GenerativeModel('gemini-2.5-flash')
+            response = media_model.generate_content(prompt_parts)
+            transcription = response.text.strip()
+            logger.info(f"DEBUG: Transcrição/Análise gerada: '{transcription[:100]}...'")
+            return transcription
+        except Exception as e:
+            logger.error(f"Erro ao transcrever/analisar mídia: {e}")
+            return f"[Erro ao processar mídia: {media_data.get('mime_type')}]"
 
     def generate_initial_message(self, config: models.Config, contact: models.Contact, history_from_api: Optional[List[dict]] = None) -> dict:
         """Gera a mensagem inicial, considerando um histórico de texto pré-existente."""
@@ -69,7 +84,7 @@ class GeminiService:
         task_instruction = ""
         if history_from_api:
             history_lines = []
-            for msg in history_from_api: # O histórico já vem formatado
+            for msg in history_from_api:
                  role_text = "Eu" if msg.get("key", {}).get("fromMe") else "Contato"
                  message_content = msg.get("message", {})
                  text = message_content.get('conversation') or message_content.get('extendedTextMessage', {}).get('text', '[Mídia]')
@@ -106,20 +121,13 @@ class GeminiService:
         self, 
         config: models.Config, 
         contact: models.Contact, 
-        conversation_history_raw: List[dict],
-        media_input: Optional[dict] = None
+        conversation_history_db: List[dict]
     ) -> dict:
-        """
-        Gera uma resposta usando o histórico de chat estruturado e possível mídia.
-        """
+        """Gera uma resposta com base no histórico do DB (que já contém transcrições)."""
         persona_prompt = self._replace_variables(config.persona, contact)
-        # --- CORREÇÃO: Adicionando o prompt do objetivo da campanha ---
         objective_prompt = self._replace_variables(config.prompt, contact)
-
-        if media_input:
-            task_instruction = "A última mensagem do contato continha mídia (imagem, áudio ou PDF). Analise o arquivo no contexto da conversa e responda de forma relevante."
-        else:
-            task_instruction = "A última mensagem do contato foi em texto. Analise o histórico e responda."
+        
+        history_string = self._format_db_history_to_string(conversation_history_db)
 
         system_instruction = f"""
         **Sua Persona:**
@@ -128,11 +136,14 @@ class GeminiService:
         **Objetivo Principal da Campanha:**
         {objective_prompt}
 
+        **Histórico da Conversa com '{contact.nome}':**
+        {history_string}
+
         **Sua Tarefa:**
-        Você é um agente de prospecção. {task_instruction} Com base no histórico de conversa e no objetivo principal, decida a melhor ação:
-        - Se for uma pergunta, responda-a de forma concisa, sempre alinhado ao objetivo.
-        - Se o contato pedir para parar, agradeça e sugira encerrar.
+        Você é um agente de prospecção. Com base no histórico ACIMA, que já inclui transcrições de áudios e análises de arquivos, sua tarefa é formular a PRÓXIMA resposta. Decida a melhor ação:
+        - Se for uma pergunta, responda-a de forma concisa.
         - Se a conversa chegou a um ponto de agendamento, sugira horários.
+        - Se o contato pedir para parar, agradeça e sugira encerrar.
         - Se a última mensagem foi sua e o contato apenas confirmou algo (ex: "ok", "sim"), talvez seja melhor esperar.
         - Seu objetivo final é avançar na prospecção.
 
@@ -140,24 +151,17 @@ class GeminiService:
         Responda APENAS com um objeto JSON válido com TRÊS chaves:
         1. "mensagem_para_enviar": A resposta em texto. Se decidir esperar, o valor deve ser null.
         2. "nova_situacao": Um novo status para o contato (ex: "Aguardando Resposta", "Reunião Agendada").
-        3. "observacoes": Um resumo da interação para salvar internamente (ex: "Cliente enviou PDF com a planta.").
+        3. "observacoes": Um resumo da interação para salvar internamente (ex: "Cliente demonstrou interesse em agendar.").
         """
         
-        model_with_system_prompt = genai.GenerativeModel(
-            model_name='gemini-2.5-flash',
-            system_instruction=system_instruction
-        )
-
-        final_contents = self._format_api_history_to_gemini_chat(conversation_history_raw)
-
-        if media_input and final_contents:
-            final_contents[-1]["parts"].append(media_input)
+        final_prompt = "Com base em todas as instruções e no histórico fornecido, gere a resposta em JSON agora."
 
         try:
-            if not final_contents:
-                 raise ValueError("O histórico da conversa está vazio e não pode ser enviado para a IA.")
-
-            response = model_with_system_prompt.generate_content(final_contents)
+            model_with_system_prompt = genai.GenerativeModel(
+                model_name='gemini-2.5-flash',
+                system_instruction=system_instruction
+            )
+            response = model_with_system_prompt.generate_content(final_prompt)
             
             text_response = response.text
             start_index = text_response.find('{')
