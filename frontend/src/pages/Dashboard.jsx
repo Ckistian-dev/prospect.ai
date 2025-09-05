@@ -155,7 +155,7 @@ const Dashboard = () => {
                      <h3 className="font-bold text-lg text-gray-800 mb-4">Campanhas Recentes</h3>
                      <div className="space-y-2">
                         {data.recentCampaigns.map((campaign, index) => (
-                           <RecentCampaignItem key={index} {...campaign} />
+                           <RecentCampaignItem key={index} {...campaign} /> 
                         ))}
                      </div>
                 </div>

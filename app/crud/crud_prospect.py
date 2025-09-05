@@ -38,7 +38,7 @@ async def create_prospect(db: AsyncSession, prospect_in: ProspectCreate, user_id
         **prospect_in.model_dump(exclude={"contact_ids"}),
         user_id=user_id,
         status="Pendente",
-        log=f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Campanha criada.\n"
+        log=f"[{datetime.now(timezone(timedelta(hours=-3))).strftime('%Y-%m-%d %H:%M:%S')}] Campanha criada.\n"
     )
     db.add(db_prospect)
     await db.commit()
@@ -76,7 +76,7 @@ async def update_prospect(db: AsyncSession, *, db_prospect: models.Prospect, pro
 async def append_to_log(db: AsyncSession, prospect_id: int, message: str, new_status: Optional[str] = None):
     prospect = await db.get(models.Prospect, prospect_id)
     if prospect:
-        timestamp = datetime.now().strftime('%H:%M:%S')
+        timestamp = datetime.now(timezone(timedelta(hours=-3))).strftime('%H:%M:%S')
         prospect.log += f"[{timestamp}] {message}\n"
         if new_status:
             prospect.status = new_status
