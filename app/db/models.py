@@ -31,6 +31,7 @@ class Contact(Base):
     nome: Mapped[str] = mapped_column(String(255), nullable=False)
     whatsapp: Mapped[str] = mapped_column(String(50), nullable=True)
     categoria: Mapped[List[str]] = mapped_column(ARRAY(String), nullable=True)
+    observacoes = Column(Text, nullable=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
     # Relacionamentos
@@ -56,9 +57,10 @@ class Prospect(Base):
     nome_prospeccao = Column(String, index=True, nullable=False)
     status = Column(String, default="Pendente")
     log = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     user_id = Column(Integer, ForeignKey('users.id'))
     config_id = Column(Integer, ForeignKey('configs.id'))
+    followup_interval_minutes = Column(Integer, default=0) # Armazena o tempo em minutos. 0 = desativado.
     
     # CORREÇÃO: Padronizado para 'owner' para corresponder ao back_populates no User.
     owner = relationship("User", back_populates="prospects")
@@ -75,6 +77,7 @@ class ProspectContact(Base):
     observacoes: Mapped[str] = mapped_column(Text, nullable=True, default="")
     conversa = Column(Text, default="[]")
     media_type: Mapped[str] = mapped_column(String(50), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     prospect = relationship("Prospect", back_populates="contacts")
     contact = relationship("Contact")

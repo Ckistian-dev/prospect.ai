@@ -7,6 +7,7 @@ class ContactBase(BaseModel):
     nome: str
     whatsapp: str
     categoria: List[str] = []
+    observacoes: Optional[str] = None
 
 class ContactCreate(ContactBase):
     pass
@@ -15,6 +16,7 @@ class ContactUpdate(BaseModel):
     nome: Optional[str] = None
     whatsapp: Optional[str] = None
     categoria: Optional[List[str]] = None
+    observacoes: Optional[str] = None
 
 class Contact(ContactBase):
     id: int
@@ -62,6 +64,7 @@ class ProspectContact(BaseModel):
 class ProspectBase(BaseModel):
     nome_prospeccao: str
     config_id: int
+    followup_interval_minutes: int = 0
 
 class ProspectCreate(ProspectBase):
     contact_ids: List[int]

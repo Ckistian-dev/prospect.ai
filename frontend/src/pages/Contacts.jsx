@@ -4,11 +4,13 @@ import Modal from '../components/Modal';
 import { Plus, Edit, Trash2, Search, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, AlertTriangle, Upload, Download, Loader2 } from 'lucide-react';
 
 // --- Componente do Formulário (permanece o mesmo) ---
+// --- COMPONENTE DO FORMULÁRIO ATUALIZADO ---
 function ContactForm({ contact, onSave, onCancel, apiError }) {
   const [formData, setFormData] = useState({
     nome: '',
     whatsapp: '',
     categoria: '',
+    observacoes: '' // Novo campo
   });
 
   useEffect(() => {
@@ -17,9 +19,10 @@ function ContactForm({ contact, onSave, onCancel, apiError }) {
         nome: contact.nome || '',
         whatsapp: contact.whatsapp || '',
         categoria: contact.categoria || '',
+        observacoes: contact.observacoes || '' // Novo campo
       });
     } else {
-      setFormData({ nome: '', whatsapp: '', categoria: '' });
+      setFormData({ nome: '', whatsapp: '', categoria: '', observacoes: '' });
     }
   }, [contact]);
 
@@ -31,9 +34,9 @@ function ContactForm({ contact, onSave, onCancel, apiError }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     const dataToSave = {
-        ...formData,
-        categoria: formData.categoria.split(',').map(cat => cat.trim()).filter(Boolean),
-        id: contact?.id
+      ...formData,
+      categoria: formData.categoria.split(',').map(cat => cat.trim()).filter(Boolean),
+      id: contact?.id
     };
     onSave(dataToSave);
   };
@@ -42,7 +45,7 @@ function ContactForm({ contact, onSave, onCancel, apiError }) {
     <form onSubmit={handleSubmit}>
       <h2 className="text-2xl font-bold mb-6 text-gray-800">{contact?.id ? 'Editar Contato' : 'Adicionar Contato'}</h2>
       {apiError && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert">{apiError}</div>}
-      
+
       <div className="space-y-4">
         <div>
           <label htmlFor="nome" className="block text-sm font-medium text-gray-600 mb-1">Nome</label>
@@ -54,15 +57,13 @@ function ContactForm({ contact, onSave, onCancel, apiError }) {
         </div>
         <div>
           <label htmlFor="categoria" className="block text-sm font-medium text-gray-600 mb-1">Categorias</label>
-          <input 
-            type="text" 
-            name="categoria" 
-            value={formData.categoria} 
-            onChange={handleChange} 
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green" 
-            placeholder="Cliente, Fornecedor, VIP"
-          />
+          <input type="text" name="categoria" value={formData.categoria} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green" placeholder="Cliente, Fornecedor, VIP" />
           <p className="text-xs text-gray-500 mt-1">Separe as categorias por vírgula.</p>
+        </div>
+        <div>
+          <label htmlFor="observacoes" className="block text-sm font-medium text-gray-600 mb-1">Observações</label>
+          <textarea name="observacoes" value={formData.observacoes} onChange={handleChange} rows="3" className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green" placeholder="Ex: Prefere contato pela manhã, tem interesse no produto X..."></textarea>
+          <p className="text-xs text-gray-500 mt-1">Esta informação pode ser usada como variável ({"{{observacoes_contato}}"}) nos prompts.</p>
         </div>
       </div>
       <div className="flex justify-end gap-4 mt-8">
@@ -81,14 +82,14 @@ function Contacts() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [formApiError, setFormApiError] = useState('');
-  
+
   const [success, setSuccess] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef(null);
 
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  
+
   const [editingContact, setEditingContact] = useState(null);
   const [contactToDelete, setContactToDelete] = useState(null);
 
@@ -116,7 +117,7 @@ function Contacts() {
 
   useEffect(() => {
     const lowercasedFilter = searchTerm.toLowerCase();
-    const filteredData = contacts.filter(item => 
+    const filteredData = contacts.filter(item =>
       Object.values(item).some(val =>
         String(val).toLowerCase().includes(lowercasedFilter)
       )
@@ -137,7 +138,7 @@ function Contacts() {
     setFormApiError('');
     setIsFormModalOpen(true);
   };
-  
+
   const handleOpenDeleteModal = (contact) => {
     setContactToDelete(contact);
     setIsDeleteModalOpen(true);
@@ -167,7 +168,7 @@ function Contacts() {
       setFormApiError(err.response?.data?.detail || 'Não foi possível salvar. Verifique os dados e a conexão.');
     }
   };
-  
+
   const confirmDelete = async () => {
     if (!contactToDelete) return;
     setSuccess('');
@@ -225,7 +226,7 @@ function Contacts() {
       setError(err.response?.data?.detail || 'Falha ao importar contatos.');
     } finally {
       setIsProcessing(false);
-      if(fileInputRef.current) {
+      if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
     }
@@ -253,33 +254,33 @@ function Contacts() {
         </div>
         {/* Botões de Importar/Exportar movidos para cá */}
         <div className="flex items-center gap-4">
-            <input
-                type="file"
-                accept=".csv"
-                onChange={handleFileChange}
-                className="hidden"
-                ref={fileInputRef}
-                disabled={isProcessing}
-            />
-            <button
-                onClick={() => fileInputRef.current && fileInputRef.current.click()}
-                disabled={isProcessing}
-                className="flex items-center gap-2 bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-600 transition-colors disabled:bg-blue-300"
-            >
-                {isProcessing ? <Loader2 className="animate-spin" /> : <Upload size={18} />}
-                Importar CSV
-            </button>
-            <button
-                onClick={handleExport}
-                disabled={isProcessing || contacts.length === 0}
-                className="flex items-center gap-2 bg-green-500 text-white font-semibold py-2 px-4 rounded-lg hover:bg-green-600 transition-colors disabled:bg-green-300"
-            >
-                {isProcessing ? <Loader2 className="animate-spin" /> : <Download size={18} />}
-                Exportar CSV
-            </button>
+          <input
+            type="file"
+            accept=".csv"
+            onChange={handleFileChange}
+            className="hidden"
+            ref={fileInputRef}
+            disabled={isProcessing}
+          />
+          <button
+            onClick={() => fileInputRef.current && fileInputRef.current.click()}
+            disabled={isProcessing}
+            className="flex items-center gap-2 bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-600 transition-colors disabled:bg-blue-300"
+          >
+            {isProcessing ? <Loader2 className="animate-spin" /> : <Upload size={18} />}
+            Importar CSV
+          </button>
+          <button
+            onClick={handleExport}
+            disabled={isProcessing || contacts.length === 0}
+            className="flex items-center gap-2 bg-green-500 text-white font-semibold py-2 px-4 rounded-lg hover:bg-green-600 transition-colors disabled:bg-green-300"
+          >
+            {isProcessing ? <Loader2 className="animate-spin" /> : <Download size={18} />}
+            Exportar CSV
+          </button>
         </div>
       </div>
-      
+
       {/* Alertas de Sucesso e Erro */}
       {success && <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg relative mb-4" role="alert">{success}</div>}
       {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert">{error}</div>}
@@ -288,24 +289,24 @@ function Contacts() {
       <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
         {/* Botão de Adicionar Contato movido para junto da busca */}
         <div className="flex flex-wrap gap-4 justify-between items-center mb-4">
-            <div className="relative flex-grow">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                <input
-                    type="text"
-                    placeholder="Pesquisar em todos os campos..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-green"
-                />
-            </div>
-            <button onClick={handleOpenAddModal} className="flex items-center gap-2 bg-brand-green text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-brand-green-dark transition-all duration-300">
-                <Plus size={20} />
-                Adicionar Contato
-            </button>
+          <div className="relative flex-grow">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input
+              type="text"
+              placeholder="Pesquisar em todos os campos..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-green"
+            />
+          </div>
+          <button onClick={handleOpenAddModal} className="flex items-center gap-2 bg-brand-green text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-brand-green-dark transition-all duration-300">
+            <Plus size={20} />
+            Adicionar Contato
+          </button>
         </div>
-        
+
         {loading && <p className="text-center text-gray-500 py-4">Carregando contatos...</p>}
-        
+
         {!loading && !error && (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
@@ -314,6 +315,7 @@ function Contacts() {
                   <th className="p-4 text-sm font-semibold text-gray-600">Nome</th>
                   <th className="p-4 text-sm font-semibold text-gray-600">WhatsApp</th>
                   <th className="p-4 text-sm font-semibold text-gray-600">Categorias</th>
+                  <th className="p-4 text-sm font-semibold text-gray-600 uppercase">Observações</th>
                   <th className="p-4 text-sm font-semibold text-gray-600 text-right">Ações</th>
                 </tr>
               </thead>
@@ -335,6 +337,9 @@ function Contacts() {
                         )}
                       </div>
                     </td>
+                    <td className="p-4 text-gray-600 text-sm max-w-xs truncate" title={contact.observacoes}>
+                      {contact.observacoes || <span className="text-gray-400 italic">N/A</span>}
+                    </td>
                     <td className="p-4 text-right">
                       <div className="flex justify-end gap-4">
                         <button onClick={() => handleOpenEditModal(contact)} className="text-gray-500 hover:text-brand-green transition-colors"><Edit size={18} /></button>
@@ -353,11 +358,11 @@ function Contacts() {
           <div className="flex justify-between items-center mt-6">
             <span className="text-sm text-gray-500">Página {currentPage} de {totalPages}</span>
             <div className="flex items-center gap-2">
-              <button onClick={() => paginate(1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsLeft size={16}/></button>
-              <button onClick={() => paginate(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronLeft size={16}/></button>
+              <button onClick={() => paginate(1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsLeft size={16} /></button>
+              <button onClick={() => paginate(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronLeft size={16} /></button>
               <span className="px-2 text-sm text-gray-600 font-medium">{currentPage}</span>
-              <button onClick={() => paginate(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronRight size={16}/></button>
-              <button onClick={() => paginate(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsRight size={16}/></button>
+              <button onClick={() => paginate(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronRight size={16} /></button>
+              <button onClick={() => paginate(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsRight size={16} /></button>
             </div>
           </div>
         )}
@@ -385,7 +390,7 @@ function Contacts() {
             </h3>
             <div className="mt-2">
               <p className="text-sm text-gray-500">
-                Tem certeza que deseja excluir <span className="font-bold text-gray-700">{contactToDelete.nome}</span>? <br/>Esta ação não pode ser desfeita.
+                Tem certeza que deseja excluir <span className="font-bold text-gray-700">{contactToDelete.nome}</span>? <br />Esta ação não pode ser desfeita.
               </p>
             </div>
             <div className="mt-6 flex justify-center gap-4">

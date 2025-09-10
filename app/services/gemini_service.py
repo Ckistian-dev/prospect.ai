@@ -19,20 +19,23 @@ class GeminiService:
             raise
 
     def _replace_variables(self, text: str, contact_data: models.Contact) -> str:
+        """Substitui variáveis dinâmicas no texto, incluindo as novas observações."""
         now = datetime.now()
         days_in_portuguese = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
         first_name = contact_data.nome.split(" ")[0] if contact_data.nome else ""
+        
         replacements = {
             "{{nome_contato}}": first_name,
             "{{data_atual}}": now.strftime("%d/%m/%Y"),
             "{{dia_semana}}": days_in_portuguese[now.weekday()],
+            "{{observacoes_contato}}": contact_data.observacoes or "" # Usa string vazia se não houver observação
         }
+        
         for var, value in replacements.items():
             text = text.replace(var, value)
         return text
 
     def _format_db_history_to_string(self, db_history: List[dict]) -> str:
-        """Converte o histórico do DB para uma string legível para o prompt."""
         history_lines = []
         for msg in db_history:
             role_text = "Eu" if msg.get("role") == "assistant" else "Contato"
@@ -175,6 +178,46 @@ class GeminiService:
         except Exception as e:
             logger.error(f"Erro ao gerar resposta com Gemini: {e}")
             return {"mensagem_para_enviar": None, "nova_situacao": "Erro IA", "observacoes": f"Falha da IA: {e}"}
+        
+    def generate_followup_message(self, config: models.Config, contact: models.Contact, history: List[dict]) -> dict:
+        """Gera uma mensagem de follow-up para um contato que não respondeu."""
+        persona_prompt = self._replace_variables(config.persona, contact)
+        objective_prompt = self._replace_variables(config.prompt, contact)
+        history_str = self._format_db_history_to_string(history)
+        
+        prompt = f"""
+        **Sua Persona:**
+        {persona_prompt}
+        
+        **Objetivo Principal da Campanha:**
+        {objective_prompt}
+
+        **Histórico da Conversa com '{contact.nome}':**
+        {history_str}
+
+        **Sua Tarefa:**
+        A última mensagem foi sua e o contato não respondeu.
+        Sua tarefa é gerar uma mensagem de follow-up curta, amigável e educada para reengajar a conversa. Não seja insistente.
+        Você pode perguntar se ele teve tempo de ver a mensagem anterior ou se ainda tem interesse.
+
+        **Formato OBRIGATÓRIO da Resposta:**
+        Responda APENAS com um objeto JSON válido com DUAS chaves:
+        1. "mensagem_para_enviar": A mensagem de follow-up.
+        2. "nova_situacao": O novo status, que deve ser "Aguardando Resposta".
+        
+        Exemplo:
+        {{
+            "mensagem_para_enviar": "Olá, {contact.nome}! Tudo bem? Só passando para saber se você teve um tempinho para ver minha mensagem anterior. 😉",
+            "nova_situacao": "Aguardando Resposta"
+        }}
+        """
+        try:
+            response = self.model.generate_content(prompt)
+            clean_response = response.text.strip().replace("```json", "").replace("```", "")
+            return json.loads(clean_response)
+        except Exception as e:
+            logger.error(f"Erro ao gerar follow-up com Gemini: {e}")
+            return {"mensagem_para_enviar": None, "nova_situacao": "Erro IA"}
 
 _gemini_service_instance = None
 def get_gemini_service():

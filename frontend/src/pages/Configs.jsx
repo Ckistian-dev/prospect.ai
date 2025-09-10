@@ -4,6 +4,7 @@ import { Plus, Save, Trash2, FileText, ChevronRight, AlertTriangle, Loader2 } fr
 
 const availableVariables = [
   { name: 'Nome do Contato', value: '{{nome_contato}}' },
+  { name: 'Observações do Contato', value: '{{observacoes_contato}}' },
   { name: 'Data Atual', value: '{{data_atual}}' },
   { name: 'Dia da Semana', value: '{{dia_semana}}' },
 ];
