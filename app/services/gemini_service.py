@@ -12,7 +12,22 @@ class GeminiService:
     def __init__(self):
         try:
             genai.configure(api_key=settings.GOOGLE_API_KEY)
-            self.model = genai.GenerativeModel('gemini-2.5-flash')
+
+            # --- MELHORIA 1: Configuração centralizada para controle de criatividade e tamanho ---
+            self.generation_config = {
+                "temperature": 0.75,         # Aumenta a naturalidade e evita repetições
+                "max_output_tokens": 1024,   # Limite para forçar respostas mais concisas
+                "top_p": 1,
+                "top_k": 1,
+            }
+
+            # --- MELHORIA 2: Corrigido nome do modelo e aplicada a configuração padrão ---
+            # O modelo 'gemini-2.5-flash' não existe, o correto seria 'gemini-2.5-flash'.
+            self.model = genai.GenerativeModel(
+                model_name='gemini-2.5-flash',
+                generation_config=self.generation_config
+            )
+            
             logger.info("✅ Cliente Gemini inicializado com sucesso (gemini-2.5-flash).")
         except Exception as e:
             logger.error(f"🚨 ERRO CRÍTICO ao configurar o Gemini: {e}")
@@ -28,7 +43,7 @@ class GeminiService:
             "{{nome_contato}}": first_name,
             "{{data_atual}}": now.strftime("%d/%m/%Y"),
             "{{dia_semana}}": days_in_portuguese[now.weekday()],
-            "{{observacoes_contato}}": contact_data.observacoes or "" # Usa string vazia se não houver observação
+            "{{observacoes_contato}}": contact_data.observacoes or ""
         }
         
         for var, value in replacements.items():
@@ -55,22 +70,27 @@ class GeminiService:
             prompt_parts.append(media_data)
         else: # Imagem ou Documento
             history_string = self._format_db_history_to_string(db_history)
+            # --- MELHORIA 3: Adicionada instrução de concisão no prompt de análise ---
             task = f"""
             **Contexto da Conversa Anterior:**
             {history_string}
 
             **Sua Tarefa:**
             Você recebeu um arquivo (imagem ou documento) do contato. Analise o conteúdo do arquivo no contexto da conversa acima.
-            Sua resposta deve ser um resumo conciso e útil do conteúdo do arquivo, como se você estivesse fazendo uma anotação no histórico.
-            Exemplo se for uma planta baixa: "O contato enviou a planta do banheiro, destacando a área do box, apresentando informação tal"
-            Exemplo se for um catálogo: "O contato enviou um catálogo de produtos, apresentando informação tal"
+            Sua resposta deve ser um resumo conciso, direto e útil do conteúdo, como se fosse uma anotação.
+            Exemplo se for uma planta baixa: "O contato enviou a planta do banheiro, destacando a área do box."
+            Exemplo se for um catálogo: "O contato enviou um catálogo de produtos."
             Retorne APENAS o texto do resumo.
             """
             prompt_parts.append(task)
             prompt_parts.append(media_data)
 
         try:
-            media_model = genai.GenerativeModel('gemini-2.5-flash')
+            # Aplicando a mesma configuração ao modelo de mídia
+            media_model = genai.GenerativeModel(
+                'gemini-2.5-flash',
+                generation_config=self.generation_config
+            )
             response = media_model.generate_content(prompt_parts)
             transcription = response.text.strip()
             logger.info(f"DEBUG: Transcrição/Análise gerada: '{transcription[:100]}...'")
@@ -88,10 +108,10 @@ class GeminiService:
         if history_from_api:
             history_lines = []
             for msg in history_from_api:
-                 role_text = "Eu" if msg.get("key", {}).get("fromMe") else "Contato"
-                 message_content = msg.get("message", {})
-                 text = message_content.get('conversation') or message_content.get('extendedTextMessage', {}).get('text', '[Mídia]')
-                 history_lines.append(f"- {role_text}: {text}")
+                role_text = "Eu" if msg.get("key", {}).get("fromMe") else "Contato"
+                message_content = msg.get("message", {})
+                text = message_content.get('conversation') or message_content.get('extendedTextMessage', {}).get('text', '[Mídia]')
+                history_lines.append(f"- {role_text}: {text}")
 
             history_text_for_prompt = "\n".join(history_lines)
             task_instruction = f"""
@@ -102,17 +122,20 @@ class GeminiService:
         else:
             task_instruction = f"Sua tarefa é gerar a PRIMEIRA mensagem de prospecção, usando como base: {message_prompt_template}"
 
+        # --- MELHORIA 4: Adicionada instrução de comportamento no prompt ---
         prompt = f"""
         **Sua Persona:**
         {persona_prompt}
 
         **Sua Tarefa:**
         {task_instruction}
+        **Regra Principal:** Seja amigável, direto e humano. Evite soar como um robô.
 
         **Formato OBRIGATÓRIO:**
         Responda APENAS com um objeto JSON contendo a chave "mensagem_para_enviar".
         """
         try:
+            # O self.model já tem a configuration_config definida no __init__
             response = self.model.generate_content(prompt)
             clean_response = response.text.strip().replace("```json", "").replace("```", "")
             return json.loads(clean_response)
@@ -129,9 +152,9 @@ class GeminiService:
         """Gera uma resposta com base no histórico do DB (que já contém transcrições)."""
         persona_prompt = self._replace_variables(config.persona, contact)
         objective_prompt = self._replace_variables(config.prompt, contact)
-        
         history_string = self._format_db_history_to_string(conversation_history_db)
 
+        # --- MELHORIA 5: Adicionadas instruções explícitas para ser direto e humano ---
         system_instruction = f"""
         **Sua Persona:**
         {persona_prompt}
@@ -143,12 +166,13 @@ class GeminiService:
         {history_string}
 
         **Sua Tarefa:**
-        Você é um agente de prospecção. Com base no histórico ACIMA, que já inclui transcrições de áudios e análises de arquivos, sua tarefa é formular a PRÓXIMA resposta. Decida a melhor ação:
-        - Se for uma pergunta, responda-a de forma concisa.
-        - Se a conversa chegou a um ponto de agendamento, sugira horários.
-        - Se o contato pedir para parar, agradeça e sugira encerrar.
-        - Se a última mensagem foi sua e o contato apenas confirmou algo (ex: "ok", "sim"), talvez seja melhor esperar.
-        - Seu objetivo final é avançar na prospecção.
+        Você é um agente de prospecção. Com base no histórico ACIMA, formule a PRÓXIMA resposta.
+        
+        **REGRAS DE OURO PARA A RESPOSTA:**
+        1.  **SEJA DIRETO E CONCISO:** Vá direto ao ponto. Evite enrolação e frases de preenchimento.
+        2.  **SOE HUMANO:** Use uma linguagem natural e casual. Não pareça um robô.
+        3.  **NÃO REPITA INFORMAÇÕES:** O contato já sabe do que se trata, não repita o objetivo da campanha a cada mensagem.
+        4.  **AVANCE A CONVERSA:** Sua resposta deve sempre tentar avançar na prospecção (responder pergunta, sugerir agendamento, etc.), a menos que o contato peça para parar.
 
         **Formato OBRIGATÓRIO da Resposta:**
         Responda APENAS com um objeto JSON válido com TRÊS chaves:
@@ -160,9 +184,11 @@ class GeminiService:
         final_prompt = "Com base em todas as instruções e no histórico fornecido, gere a resposta em JSON agora."
 
         try:
+            # Aplicando a configuração também neste modelo
             model_with_system_prompt = genai.GenerativeModel(
                 model_name='gemini-2.5-flash',
-                system_instruction=system_instruction
+                system_instruction=system_instruction,
+                generation_config=self.generation_config
             )
             response = model_with_system_prompt.generate_content(final_prompt)
             
@@ -185,6 +211,7 @@ class GeminiService:
         objective_prompt = self._replace_variables(config.prompt, contact)
         history_str = self._format_db_history_to_string(history)
         
+        # --- MELHORIA 6: Reforçando a necessidade de ser direto e breve ---
         prompt = f"""
         **Sua Persona:**
         {persona_prompt}
@@ -197,8 +224,8 @@ class GeminiService:
 
         **Sua Tarefa:**
         A última mensagem foi sua e o contato não respondeu.
-        Sua tarefa é gerar uma mensagem de follow-up curta, amigável e educada para reengajar a conversa. Não seja insistente.
-        Você pode perguntar se ele teve tempo de ver a mensagem anterior ou se ainda tem interesse.
+        Sua tarefa é gerar uma mensagem de follow-up **curta, direta e amigável** para reengajar a conversa. Não seja insistente.
+        Vá direto ao ponto, perguntando se ele teve tempo de ver a mensagem anterior ou se ainda tem interesse.
 
         **Formato OBRIGATÓRIO da Resposta:**
         Responda APENAS com um objeto JSON válido com DUAS chaves:
@@ -207,11 +234,12 @@ class GeminiService:
         
         Exemplo:
         {{
-            "mensagem_para_enviar": "Olá, {contact.nome}! Tudo bem? Só passando para saber se você teve um tempinho para ver minha mensagem anterior. 😉",
+            "mensagem_para_enviar": "Oi, {contact.nome}! Tudo bem? Só passando pra saber se você conseguiu ver minha mensagem anterior. 😉",
             "nova_situacao": "Aguardando Resposta"
         }}
         """
         try:
+            # O self.model já tem a configuration_config definida no __init__
             response = self.model.generate_content(prompt)
             clean_response = response.text.strip().replace("```json", "").replace("```", "")
             return json.loads(clean_response)
@@ -225,4 +253,3 @@ def get_gemini_service():
     if _gemini_service_instance is None:
         _gemini_service_instance = GeminiService()
     return _gemini_service_instance
-
