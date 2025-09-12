@@ -1,7 +1,10 @@
 import google.generativeai as genai
+from google.api_core import exceptions # <-- IMPORTANTE: para capturar o erro específico
+import time # <-- IMPORTANTE: para a lógica de espera
 from app.core.config import settings
 import logging
 import json
+import re # <-- IMPORTANTE: para extrair o tempo de espera do erro
 from datetime import datetime
 from typing import Optional, List
 from app.db import models
@@ -13,17 +16,15 @@ class GeminiService:
         try:
             genai.configure(api_key=settings.GOOGLE_API_KEY)
 
-            # --- MELHORIA 1: Configuração centralizada para controle de criatividade e tamanho ---
             self.generation_config = {
-                "temperature": 0.75,         # Aumenta a naturalidade e evita repetições
+                "temperature": 0.75,
                 "top_p": 1,
                 "top_k": 1,
             }
 
-            # --- MELHORIA 2: Corrigido nome do modelo e aplicada a configuração padrão ---
-            # O modelo 'gemini-2.5-flash' não existe, o correto seria 'gemini-2.5-flash'.
+            # Corrigido para o nome de modelo correto gemini-2.5-flash
             self.model = genai.GenerativeModel(
-                model_name='gemini-2.5-flash',
+                model_name='gemini-2.5-flash', # Atenção: O modelo 'gemini-2.5-flash' não existe, o correto é 'gemini-2.5-flash'
                 generation_config=self.generation_config
             )
             
@@ -31,6 +32,44 @@ class GeminiService:
         except Exception as e:
             logger.error(f"🚨 ERRO CRÍTICO ao configurar o Gemini: {e}")
             raise
+
+    # --- NOVA LÓGICA DE RETENTATIVA ---
+    def _generate_with_retry(self, model: genai.GenerativeModel, prompt: any, max_retries: int = 3) -> genai.types.GenerateContentResponse:
+        """
+        Executa a chamada para a API Gemini com uma lógica de retentativa para erros de quota (429).
+        """
+        attempt = 0
+        while attempt < max_retries:
+            try:
+                # Tenta gerar o conteúdo
+                return model.generate_content(prompt)
+            except exceptions.ResourceExhausted as e:
+                attempt += 1
+                logger.warning(f"Quota da API excedida (429). Tentativa {attempt}/{max_retries}.")
+                
+                # Extrai o tempo de espera sugerido pela API a partir da mensagem de erro
+                # O padrão busca por "retry_delay { seconds: XX }"
+                match = re.search(r"retry_delay {\s*seconds: (\d+)\s*}", str(e))
+                
+                if match:
+                    wait_time = int(match.group(1))
+                    logger.info(f"API sugeriu aguardar {wait_time} segundos. Aguardando...")
+                    # Adiciona uma pequena margem para segurança
+                    time.sleep(wait_time + 2) 
+                else:
+                    # Se não encontrar a sugestão, usa um tempo de espera exponencial
+                    wait_time = (2 ** attempt) * 5 
+                    logger.warning(f"Não foi possível extrair o 'retry_delay'. Usando espera exponencial: {wait_time}s.")
+                    time.sleep(wait_time)
+            
+            except Exception as e:
+                 # Para outros tipos de erro, não tenta novamente e lança a exceção
+                logger.error(f"Erro inesperado ao gerar conteúdo com Gemini: {e}")
+                raise e
+
+        # Se todas as tentativas falharem, lança uma exceção final
+        raise Exception(f"Não foi possível obter uma resposta da API Gemini após {max_retries} tentativas.")
+
 
     def _replace_variables(self, text: str, contact_data: models.Contact) -> str:
         """Substitui variáveis dinâmicas no texto, incluindo as novas observações."""
@@ -67,9 +106,8 @@ class GeminiService:
             task = "Sua única tarefa é transcrever o áudio a seguir. Retorne apenas o texto transcrito, sem adicionar nenhuma outra palavra ou formatação."
             prompt_parts.append(task)
             prompt_parts.append(media_data)
-        else: # Imagem ou Documento
+        else:
             history_string = self._format_db_history_to_string(db_history)
-            # --- MELHORIA 3: Adicionada instrução de concisão no prompt de análise ---
             task = f"""
             **Contexto da Conversa Anterior:**
             {history_string}
@@ -85,21 +123,21 @@ class GeminiService:
             prompt_parts.append(media_data)
 
         try:
-            # Aplicando a mesma configuração ao modelo de mídia
-            media_model = genai.GenerativeModel(
-                'gemini-2.5-flash',
-                generation_config=self.generation_config
-            )
-            response = media_model.generate_content(prompt_parts)
+            media_model = genai.GenerativeModel('gemini-2.5-flash', generation_config=self.generation_config)
+            
+            # --- MODIFICADO: Usa a nova função com retentativa ---
+            response = self._generate_with_retry(media_model, prompt_parts)
+            
             transcription = response.text.strip()
             logger.info(f"DEBUG: Transcrição/Análise gerada: '{transcription[:100]}...'")
             return transcription
         except Exception as e:
-            logger.error(f"Erro ao transcrever/analisar mídia: {e}")
+            logger.error(f"Erro ao transcrever/analisar mídia após todas as tentativas: {e}")
             return f"[Erro ao processar mídia: {media_data.get('mime_type')}]"
 
     def generate_initial_message(self, config: models.Config, contact: models.Contact, history_from_api: Optional[List[dict]] = None) -> dict:
         """Gera a mensagem inicial, considerando um histórico de texto pré-existente."""
+        # (O resto da sua lógica para montar o prompt continua igual)
         persona_prompt = self._replace_variables(config.persona, contact)
         message_prompt_template = self._replace_variables(config.prompt, contact)
         
@@ -121,39 +159,35 @@ class GeminiService:
         else:
             task_instruction = f"Sua tarefa é gerar a PRIMEIRA mensagem de prospecção, usando como base: {message_prompt_template}"
 
-        # --- MELHORIA 4: Adicionada instrução de comportamento no prompt ---
         prompt = f"""
         **Sua Persona:**
         {persona_prompt}
 
         **Sua Tarefa:**
         {task_instruction}
+        
         **Regra Principal:** Seja amigável, direto e humano. Evite soar como um robô.
 
         **Formato OBRIGATÓRIO:**
         Responda APENAS com um objeto JSON contendo a chave "mensagem_para_enviar".
         """
         try:
-            # O self.model já tem a configuration_config definida no __init__
-            response = self.model.generate_content(prompt)
+            # --- MODIFICADO: Usa a nova função com retentativa ---
+            response = self._generate_with_retry(self.model, prompt)
+            
             clean_response = response.text.strip().replace("```json", "").replace("```", "")
             return json.loads(clean_response)
         except Exception as e:
-            logger.error(f"Erro ao gerar mensagem inicial com Gemini: {e}")
+            logger.error(f"Erro ao gerar mensagem inicial com Gemini após todas as tentativas: {e}")
             return {"mensagem_para_enviar": None}
 
-    def generate_reply_message(
-        self, 
-        config: models.Config, 
-        contact: models.Contact, 
-        conversation_history_db: List[dict]
-    ) -> dict:
+    def generate_reply_message(self, config: models.Config, contact: models.Contact, conversation_history_db: List[dict]) -> dict:
         """Gera uma resposta com base no histórico do DB (que já contém transcrições)."""
+        # (O resto da sua lógica para montar o prompt continua igual)
         persona_prompt = self._replace_variables(config.persona, contact)
         objective_prompt = self._replace_variables(config.prompt, contact)
         history_string = self._format_db_history_to_string(conversation_history_db)
 
-        # --- MELHORIA 5: Adicionadas instruções explícitas para ser direto e humano ---
         system_instruction = f"""
         **Sua Persona:**
         {persona_prompt}
@@ -183,13 +217,14 @@ class GeminiService:
         final_prompt = "Com base em todas as instruções e no histórico fornecido, gere a resposta em JSON agora."
 
         try:
-            # Aplicando a configuração também neste modelo
             model_with_system_prompt = genai.GenerativeModel(
                 model_name='gemini-2.5-flash',
                 system_instruction=system_instruction,
                 generation_config=self.generation_config
             )
-            response = model_with_system_prompt.generate_content(final_prompt)
+
+            # --- MODIFICADO: Usa a nova função com retentativa ---
+            response = self._generate_with_retry(model_with_system_prompt, final_prompt)
             
             text_response = response.text
             start_index = text_response.find('{')
@@ -201,16 +236,16 @@ class GeminiService:
             return json.loads(json_string)
             
         except Exception as e:
-            logger.error(f"Erro ao gerar resposta com Gemini: {e}")
+            logger.error(f"Erro ao gerar resposta com Gemini após todas as tentativas: {e}")
             return {"mensagem_para_enviar": None, "nova_situacao": "Erro IA", "observacoes": f"Falha da IA: {e}"}
-        
+
     def generate_followup_message(self, config: models.Config, contact: models.Contact, history: List[dict]) -> dict:
         """Gera uma mensagem de follow-up para um contato que não respondeu."""
+        # (O resto da sua lógica para montar o prompt continua igual)
         persona_prompt = self._replace_variables(config.persona, contact)
         objective_prompt = self._replace_variables(config.prompt, contact)
         history_str = self._format_db_history_to_string(history)
         
-        # --- MELHORIA 6: Reforçando a necessidade de ser direto e breve ---
         prompt = f"""
         **Sua Persona:**
         {persona_prompt}
@@ -238,12 +273,13 @@ class GeminiService:
         }}
         """
         try:
-            # O self.model já tem a configuration_config definida no __init__
-            response = self.model.generate_content(prompt)
+            # --- MODIFICADO: Usa a nova função com retentativa ---
+            response = self._generate_with_retry(self.model, prompt)
+
             clean_response = response.text.strip().replace("```json", "").replace("```", "")
             return json.loads(clean_response)
         except Exception as e:
-            logger.error(f"Erro ao gerar follow-up com Gemini: {e}")
+            logger.error(f"Erro ao gerar follow-up com Gemini após todas as tentativas: {e}")
             return {"mensagem_para_enviar": None, "nova_situacao": "Erro IA"}
 
 _gemini_service_instance = None
