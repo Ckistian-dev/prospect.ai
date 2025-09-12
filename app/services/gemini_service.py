@@ -16,7 +16,7 @@ class GeminiService:
             # --- MELHORIA 1: Configuração centralizada para controle de criatividade e tamanho ---
             self.generation_config = {
                 "temperature": 0.75,         # Aumenta a naturalidade e evita repetições
-                "max_output_tokens": 1024,   # Limite para forçar respostas mais concisas
+                "max_output_tokens": 2048,   # Limite para forçar respostas mais concisas
                 "top_p": 1,
                 "top_k": 1,
             }
