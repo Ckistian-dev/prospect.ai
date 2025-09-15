@@ -18,12 +18,12 @@ class GeminiService:
             genai.configure(api_key=settings.GOOGLE_API_KEY)
             self.generation_config = {"temperature": 0.75, "top_p": 1, "top_k": 1}
             # CORREÇÃO: O modelo 'gemini-2.5-flash' não existe. 
-            # Usei 'gemini-1.5-flash-latest' como um substituto moderno e correto.
+            # Usei 'gemini-2.5-flash' como um substituto moderno e correto.
             self.model = genai.GenerativeModel(
-                model_name='gemini-1.5-flash-latest', 
+                model_name='gemini-2.5-flash', 
                 generation_config=self.generation_config
             )
-            logger.info("✅ Cliente Gemini inicializado com sucesso (gemini-1.5-flash-latest).")
+            logger.info("✅ Cliente Gemini inicializado com sucesso (gemini-2.5-flash).")
         except Exception as e:
             logger.error(f"🚨 ERRO CRÍTICO ao configurar o Gemini: {e}")
             raise
