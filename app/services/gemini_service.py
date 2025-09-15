@@ -111,7 +111,8 @@ class GeminiService:
                         "mensagem_para_enviar": "O texto da mensagem a ser enviada ao contato. Se decidir que não deve enviar uma mensagem agora, o valor deve ser null.",
                         "nova_situacao": "Um status curto que descreva o estado atual da conversa (ex: 'Aguardando Resposta', 'Reunião Agendada', 'Lead Qualificado', 'Contato Frio').",
                         "observacoes": "Um resumo interno e conciso da interação para salvar no CRM (ex: 'Contato demonstrou interesse no produto X e pediu orçamento.')."
-                    }
+                    },
+                    "regra_importante_variaveis": "CRÍTICO: NUNCA inclua placeholders ou variáveis como `{{nome_contato}}` ou `[alguma informação]` no campo `mensagem_para_enviar`. O texto deve ser a mensagem final e completa, pronta para ser enviada diretamente ao cliente."
                 },
 
                 "configuracao_campanha": campaign_config,
