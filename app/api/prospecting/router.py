@@ -18,11 +18,8 @@ router = APIRouter()
 prospecting_status: Dict[int, str] = {}
 
 
-async def prospecting_agent_task(
-    prospect_id: int, 
-    user_id: int
-):
-    """O agente inteligente de prospecção que opera com a nova ordem de prioridades."""
+async def prospecting_agent_task(prospect_id: int, user_id: int):
+    """O agente inteligente de prospecção com lógica de ação única por ciclo para máxima responsividade."""
     prospecting_status[prospect_id] = "running"
     
     whatsapp_service = get_whatsapp_service()
@@ -31,144 +28,112 @@ async def prospecting_agent_task(
     async def log(db: AsyncSession, message: str, status_update: str = None):
         await crud_prospect.append_to_log(db, prospect_id=prospect_id, message=message, new_status=status_update)
 
+    async def process_contact_action(db: AsyncSession, contact_info, mode: str):
+        """Função auxiliar para processar uma ação para um contato."""
+        contact, prospect_contact = contact_info.Contact, contact_info.ProspectContact
+        # Obter os detalhes da prospecção novamente dentro da função para garantir que estão atualizados
+        prospect_details = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=user_id)
+        user = await crud_user.get_user(db, user_id=user_id)
+        config = await crud_config.get_config(db, config_id=prospect_details.config_id, user_id=user_id)
+        
+        await log(db, f"   - Preparando ação '{mode}' para {contact.nome}.")
+        
+        try:
+            history = json.loads(prospect_contact.conversa) if prospect_contact.conversa else []
+        except json.JSONDecodeError:
+            history = []
+
+        ia_response = gemini_service.generate_conversation_action(config, contact, history, mode)
+        
+        message_to_send = ia_response.get("mensagem_para_enviar")
+        new_status = ia_response.get("nova_situacao", "Aguardando Resposta")
+        new_observation = ia_response.get("observacoes", "")
+        
+        if message_to_send:
+            success = await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, message_to_send)
+            if success:
+                await log(db, f"   - Mensagem ({mode}) enviada para {contact.nome}.")
+                history.append({"role": "assistant", "content": message_to_send})
+                await crud_user.decrement_user_tokens(db, db_user=user)
+            else:
+                await log(db, f"   - FALHA ao enviar mensagem ({mode}) para {contact.nome}.")
+                new_status = "Falha no Envio"
+        else:
+            await log(db, f"   - IA decidiu esperar (ação: {mode}) para {contact.nome}.")
+            history.append({"role": "assistant", "content": f"[Ação Interna: Esperar - Modo: {mode}]"})
+
+        await crud_prospect.update_prospect_contact(
+            db, pc_id=prospect_contact.id, situacao=new_status,
+            conversa=json.dumps(history), observacoes=new_observation
+        )
+        # O AWAIT FOI REMOVIDO DAQUI PARA CENTRALIZAR NO LOOP PRINCIPAL
+        # await asyncio.sleep(20) 
+
     try:
         async with SessionLocal() as db:
-            await log(db, "-> Agente iniciado em modo de monitoramento contínuo.", status_update="Em Andamento")
-            user = await crud_user.get_user(db, user_id=user_id)
-            if not user or not user.instance_name:
-                await log(db, "ERRO: Usuário ou nome da instância não encontrado.", "Falha")
+            await log(db, "-> Agente iniciado.", status_update="Em Andamento")
+            # Apenas verifica se a prospecção existe no início. 
+            # Os detalhes serão carregados dentro da função de ação.
+            initial_prospect = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=user_id)
+            if not initial_prospect:
+                await log(db, "ERRO: Prospecção não encontrada.", "Falha")
                 return
 
         while prospecting_status.get(prospect_id) == "running":
             action_taken = False
             async with SessionLocal() as db:
                 try:
-                    user = await crud_user.get_user(db, user_id=user_id)
-                    prospect_details = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=user_id)
-                    config = await crud_config.get_config(db, config_id=prospect_details.config_id, user_id=user_id)
-
-                    # --- FRENTE 1: RESPONDER MENSAGENS (ALTA PRIORIDADE) ---
+                    # FRENTE 1: RESPONDER MENSAGENS (ALTA PRIORIDADE)
                     replies_to_process = await crud_prospect.get_prospect_contacts_by_status(db, prospect_id=prospect_id, status="Resposta Recebida")
                     if replies_to_process:
                         action_taken = True
-                        await log(db, f"-> Detectadas {len(replies_to_process)} respostas. Processando...")
-                        for contact_info in replies_to_process:
-                            contact, prospect_contact = contact_info.Contact, contact_info.ProspectContact
-                            
-                            await log(db, f"   - Processando resposta de {contact.nome} (ID Contato Prospecção: {prospect_contact.id}).")
-                            
-                            try:
-                                conversation_history_db = json.loads(prospect_contact.conversa)
-                            except (json.JSONDecodeError, TypeError):
-                                conversation_history_db = []
+                        await log(db, f"-> Prioridade alta: 1 de {len(replies_to_process)} respostas para processar...")
+                        # MUDANÇA: Processa apenas o PRIMEIRO da lista
+                        await process_contact_action(db, replies_to_process[0], 'reply')
+                        continue # Volta ao início do loop imediatamente
 
-                            if not conversation_history_db:
-                                await log(db, f"   - Histórico no DB para {contact.nome} está vazio ou inválido. Pulando.")
-                                continue
-                            
-                            await log(db, f"   - Enviando histórico de {len(conversation_history_db)} mensagens do DB para a IA.")
-                            ia_response = gemini_service.generate_reply_message(config, contact, conversation_history_db)
-                            
-                            message_to_send = ia_response.get("mensagem_para_enviar")
-                            new_status = ia_response.get("nova_situacao", "Aguardando Resposta")
-                            new_observation = ia_response.get("observacoes", "")
-                            
-                            if message_to_send:
-                                success = await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, message_to_send)
-                                if success:
-                                    await log(db, f"   - Resposta enviada para {contact.nome}.")
-                                    await crud_user.decrement_user_tokens(db, db_user=user)
-                                else:
-                                    await log(db, f"   - FALHA ao enviar resposta para {contact.nome}.")
-                                    new_status = "Falha no Envio"
-                            else:
-                                await log(db, f"   - IA decidiu esperar antes de responder {contact.nome}.")
+                    # FRENTE 2: FAZER FOLLOW-UP (MÉDIA PRIORIDADE)
+                    # É necessário buscar os detalhes da prospecção aqui para a função de followup
+                    prospect_details = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=user_id)
+                    followups = await crud_prospect.get_contacts_for_followup(db, prospect=prospect_details)
+                    if followups:
+                        action_taken = True
+                        await log(db, f"-> Prioridade média: 1 de {len(followups)} follow-ups para processar...")
+                        # MUDANÇA: Processa apenas o PRIMEIRO da lista
+                        await process_contact_action(db, followups[0], 'followup')
+                        continue # Volta ao início do loop imediatamente
 
-                            conversation_history_db.append({"role": "assistant", "content": message_to_send or "[Ação: Esperar]"})
-                            
-                            await crud_prospect.update_prospect_contact(
-                                db, 
-                                pc_id=prospect_contact.id, 
-                                situacao=new_status, 
-                                conversa=json.dumps(conversation_history_db),
-                                observacoes=new_observation
-                            )
-                            await asyncio.sleep(20)
-
-                    # --- FRENTE 2: INICIAR NOVAS CONVERSAS (MÉDIA PRIORIDADE) ---
-                    if not action_taken:
-                        pending_contacts = await crud_prospect.get_prospect_contacts_by_status(db, prospect_id=prospect_id, status="Aguardando Início")
-                        if pending_contacts:
-                            action_taken = True
-                            contact_info = pending_contacts[0]
-                            contact, prospect_contact = contact_info.Contact, contact_info.ProspectContact
-                            await log(db, f"   - Nenhuma resposta pendente. Iniciando novo contato: {contact.nome}...")
-                            
-                            history_from_api = await whatsapp_service.get_conversation_history(user.instance_name, contact.whatsapp)
-                            
-                            ia_response = gemini_service.generate_initial_message(config, contact, history_from_api)
-                            message_to_send = ia_response.get("mensagem_para_enviar")
-
-                            if message_to_send:
-                                success = await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, message_to_send)
-                                if success:
-                                    await log(db, f"   - Primeira mensagem enviada para {contact.nome}.")
-                                    conversa_json = json.dumps([{"role": "assistant", "content": message_to_send}])
-                                    await crud_prospect.update_prospect_contact(db, pc_id=prospect_contact.id, situacao="Aguardando Resposta", conversa=conversa_json)
-                                    await crud_user.decrement_user_tokens(db, db_user=user)
-                                else:
-                                    await log(db, f"   - FALHA ao enviar primeira mensagem para {contact.nome}.")
-                                    await crud_prospect.update_prospect_contact(db, pc_id=prospect_contact.id, situacao="Falha no Envio")
-                            else:
-                                await log(db, f"   - IA decidiu não iniciar conversa com {contact.nome}.")
-                                await crud_prospect.update_prospect_contact(db, pc_id=prospect_contact.id, situacao="Cancelado pela IA")
-
-                    # --- FRENTE 3: FAZER FOLLOW-UP (BAIXA PRIORIDADE) ---
-                    if not action_taken:
-                        followups = await crud_prospect.get_contacts_for_followup(db, prospect=prospect_details)
-                        if followups:
-                            action_taken = True
-                            await log(db, f"-> {len(followups)} follow-ups pendentes. Processando...")
-                            for contact_info in followups:
-                                contact, pc = contact_info.Contact, contact_info.ProspectContact
-                                await log(db, f"   - Preparando follow-up para {contact.nome}.")
-                                history = json.loads(pc.conversa)
-                                ia_resp = gemini_service.generate_followup_message(config, contact, history)
-                                msg, status = ia_resp.get("mensagem_para_enviar"), ia_resp.get("nova_situacao", "Aguardando Resposta")
-                                if msg:
-                                    if await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, msg):
-                                        await log(db, f"   - Follow-up enviado para {contact.nome}.")
-                                        await crud_user.decrement_user_tokens(db, db_user=user)
-                                        history.append({"role": "assistant", "content": msg})
-                                        await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao=status, conversa=json.dumps(history))
-                                    else:
-                                        await log(db, f"   - FALHA ao enviar follow-up para {contact.nome}.")
-                                        await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao="Falha no Envio")
-                                else:
-                                    await log(db, f"   - IA decidiu não fazer follow-up para {contact.nome}.")
-                                await asyncio.sleep(20)
+                    # FRENTE 3: INICIAR NOVAS CONVERSAS (BAIXA PRIORIDADE)
+                    pending_contacts = await crud_prospect.get_prospect_contacts_by_status(db, prospect_id=prospect_id, status="Aguardando Início")
+                    if pending_contacts:
+                        action_taken = True
+                        await log(db, "-> Baixa prioridade: Iniciando 1 nova conversa...")
+                        # (Esta parte já estava correta, processando apenas um)
+                        await process_contact_action(db, pending_contacts[0], 'initial')
+                        continue # Apenas por consistência, continua para o próximo ciclo
 
                     if not action_taken:
-                        await log(db, "-> Nenhuma ação pendente no momento. Monitorando...")
+                        await log(db, "-> Nenhuma ação pendente. Monitorando...")
 
                 except Exception as e:
                     logger.error(f"ERRO no ciclo do agente (Prospect ID: {prospect_id}): {e}", exc_info=True)
                     await log(db, f"   - ERRO no ciclo: {e}")
-
-            if action_taken:
-                await asyncio.sleep(30)
-            else:
-                await asyncio.sleep(10)
+            
+            # Define um tempo de espera único para cada ciclo do 'while'
+            # Se uma ação foi tomada, espera um pouco mais antes da próxima para não sobrecarregar.
+            # Se não fez nada, espera menos tempo para verificar por novidades mais cedo.
+            sleep_time = 25 if action_taken else 15
+            await asyncio.sleep(sleep_time)
 
     except Exception as e:
         logger.error(f"ERRO CRÍTICO NO AGENTE (Prospect ID: {prospect_id}): {e}", exc_info=True)
         async with SessionLocal() as db:
-            await log(db, f"\n-> ERRO CRÍTICO E FINALIZAÇÃO: {e}", status_update="Falha")
+            await log(db, f"-> ERRO CRÍTICO E FINALIZAÇÃO: {e}", status_update="Falha")
     finally:
         if prospect_id in prospecting_status:
             del prospecting_status[prospect_id]
         async with SessionLocal() as db:
-             await log(db, "-> Agente finalizado.")
+            await log(db, "-> Agente finalizado.")
 
 # (Restante das rotas: get, create, get_log, start, stop, get_sheet_data permanecem iguais)
 @router.get("/", response_model=List[Prospect], summary="Listar prospecções do usuário")

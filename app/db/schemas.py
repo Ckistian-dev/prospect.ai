@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, computed_field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 # --- Schemas de Contato ---
@@ -25,20 +25,23 @@ class Contact(ContactBase):
     class Config:
         from_attributes = True
 
-# --- Schemas de Configuração ---
+# --- Schemas de Configuração ATUALIZADOS ---
+
+# Base para criação e leitura. Reflete a nova estrutura do banco.
 class ConfigBase(BaseModel):
     nome_config: str
-    persona: str
-    prompt: str
+    prompt_config: Dict[str, Any] # <-- MUDANÇA PRINCIPAL: Substitui 'persona' e 'prompt'.
 
+# Schema para criar uma nova configuração. Herda a estrutura correta de ConfigBase.
 class ConfigCreate(ConfigBase):
     pass
 
+# Schema para ATUALIZAR. Permite que qualquer campo seja atualizado opcionalmente.
 class ConfigUpdate(BaseModel):
     nome_config: Optional[str] = None
-    persona: Optional[str] = None
-    prompt: Optional[str] = None
+    prompt_config: Optional[Dict[str, Any]] = None # <-- MUDANÇA PRINCIPAL
 
+# Schema completo para retornar dados da API. Também herda a estrutura correta.
 class Config(ConfigBase):
     id: int
     user_id: int

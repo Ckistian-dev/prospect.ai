@@ -1,5 +1,6 @@
 from sqlalchemy import ( Column, Integer, String, ForeignKey, Text, DateTime, func, ARRAY )
 from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import JSONB
 from typing import List
 from datetime import datetime
 
@@ -38,13 +39,19 @@ class Contact(Base):
     owner: Mapped["User"] = relationship(back_populates="contacts")
 
 class Config(Base):
-    """Modelo de Configuração de IA (Persona/Prompt)."""
+    """
+    Modelo de Configuração de IA.
+    Armazena toda a estrutura do prompt em um único campo JSON.
+    """
     __tablename__ = "configs"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     nome_config: Mapped[str] = mapped_column(String(100), nullable=False)
-    persona: Mapped[str] = mapped_column(Text, nullable=False)
-    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    
+    # CAMPO UNIFICADO: Substitui os antigos 'persona' e 'prompt'.
+    # Armazena um objeto JSON com toda a configuração da IA.
+    prompt_config: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
     # Relacionamentos
