@@ -169,6 +169,28 @@ async def stop_prospecting(prospect_id: int, db: AsyncSession = Depends(get_db),
     if prospect_id in prospecting_status and prospecting_status[prospect_id] == "running": prospecting_status[prospect_id] = "stopping"
     return {"message": "Sinal de parada enviado. A prospecção foi interrompida e seu status atualizado."}
 
+# --- NOVO ENDPOINT ADICIONADO AQUI ---
+@router.delete("/{prospect_id}", summary="Excluir uma prospecção")
+async def delete_prospect(prospect_id: int, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(dependencies.get_current_active_user)):
+    """
+    Exclui uma campanha de prospecção.
+    Impede a exclusão se a campanha estiver em andamento.
+    """
+    prospect = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=current_user.id)
+    if not prospect:
+        raise HTTPException(status_code=404, detail="Prospecção não encontrada.")
+
+    # Regra de segurança: não permitir exclusão de campanhas em andamento
+    if prospect.status == "Em Andamento":
+        raise HTTPException(
+            status_code=400, 
+            detail="Não é possível excluir uma campanha que está em andamento. Pare a campanha primeiro."
+        )
+
+    await crud_prospect.delete_prospect(db, prospect_to_delete=prospect)
+    
+    return {"detail": "Campanha de prospecção excluída com sucesso."}
+
 @router.get("/sheet/{prospect_id}", response_model=Dict[str, Any], summary="Obter dados de uma campanha")
 async def get_prospecting_sheet_data(prospect_id: int, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(dependencies.get_current_active_user)):
     prospect = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=current_user.id)

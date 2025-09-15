@@ -88,3 +88,4 @@ class ProspectContact(Base):
     
     prospect = relationship("Prospect", back_populates="contacts")
     contact = relationship("Contact")
+    prospect_id: Mapped[int] = mapped_column(ForeignKey("prospects.id", ondelete="CASCADE"))

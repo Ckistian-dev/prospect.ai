@@ -57,6 +57,17 @@ async def update_prospect(db: AsyncSession, *, db_prospect: models.Prospect, pro
     await db.refresh(db_prospect)
     return db_prospect
 
+async def delete_prospect(db: AsyncSession, prospect_to_delete: models.Prospect) -> models.Prospect:
+    """
+    Deleta uma prospecção do banco de dados.
+
+    Assume que a configuração do banco de dados (ForeignKey) lida com a exclusão em cascata
+    dos registros associados na tabela 'prospect_contacts'.
+    """
+    await db.delete(prospect_to_delete)
+    await db.commit()
+    return prospect_to_delete
+
 async def append_to_log(db: AsyncSession, prospect_id: int, message: str, new_status: Optional[str] = None):
     prospect = await db.get(models.Prospect, prospect_id)
     if prospect:
