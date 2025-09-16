@@ -95,7 +95,7 @@ class GeminiService:
             task_map = {
                 'initial': "Gerar a PRIMEIRA mensagem de prospecção para iniciar a conversa.",
                 'reply': "Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa.",
-                'followup': "Gerar uma mensagem de FOLLOW-UP caso necessário, senão apenas retorne 'null' no campo 'mensagem_para_enviar'"
+                'followup': "Analisar as mensagens e decidir entre continuar o fluxo, fazer um follow-up ou se não é necessário mais nada apenas retorne 'null' no campo 'mensagem_para_enviar'"
             }
             
             # 3. Formata o histórico
