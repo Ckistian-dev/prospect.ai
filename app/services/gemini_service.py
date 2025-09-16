@@ -16,9 +16,7 @@ class GeminiService:
     def __init__(self):
         try:
             genai.configure(api_key=settings.GOOGLE_API_KEY)
-            self.generation_config = {"temperature": 0.75, "top_p": 1, "top_k": 1}
-            # CORREÇÃO: O modelo 'gemini-2.5-flash' não existe. 
-            # Usei 'gemini-2.5-flash' como um substituto moderno e correto.
+            self.generation_config = {"temperature": 0.5, "top_p": 1, "top_k": 1}
             self.model = genai.GenerativeModel(
                 model_name='gemini-2.5-flash', 
                 generation_config=self.generation_config
@@ -34,7 +32,6 @@ class GeminiService:
         attempt = 0
         while attempt < max_retries:
             try:
-                # Agora usamos o modelo instanciado na classe
                 return self.model.generate_content(prompt)
             except exceptions.ResourceExhausted as e:
                 attempt += 1
@@ -71,52 +68,93 @@ class GeminiService:
         """Formata o histórico do banco de dados para um formato simples de JSON."""
         history_for_ia = []
         for msg in db_history:
-            # Simplificado para 'ia' e 'contato' para ser mais claro no prompt
             role = "ia" if msg.get("role") == "assistant" else "contato"
             content = msg.get("content", "")
             history_for_ia.append({"remetente": role, "mensagem": content})
         return history_for_ia
+
+    # --- FUNÇÃO AUXILIAR PARA TRANSCRIÇÃO REINTEGRADA ---
+    def _format_db_history_to_string(self, db_history: List[dict]) -> str:
+        """Formata o histórico para uma string simples, usada no contexto de análise de imagem."""
+        history_lines = []
+        for msg in db_history:
+            role_text = "Eu" if msg.get("role") == "assistant" else "Contato"
+            content = msg.get("content", "")
+            history_lines.append(f"- {role_text}: {content}")
+        return "\n".join(history_lines)
+
+    # --- FUNÇÃO 'transcribe_and_analyze_media' REINTEGRADA ---
+    def transcribe_and_analyze_media(self, media_data: dict, db_history: List[dict]) -> str:
+        """Transcreve áudio ou analisa imagem/documento no contexto da conversa."""
+        logger.info(f"Iniciando transcrição/análise para mídia do tipo {media_data.get('mime_type')}")
+        
+        prompt_parts = []
+        
+        # Lógica para transcrever áudio
+        if 'audio' in media_data['mime_type']:
+            task = "Sua única tarefa é transcrever o áudio a seguir. Retorne apenas o texto transcrito, sem adicionar nenhuma outra palavra ou formatação."
+            prompt_parts.append(task)
+            prompt_parts.append(media_data)
+        
+        # Lógica para analisar imagens ou documentos
+        else:
+            history_string = self._format_db_history_to_string(db_history)
+            task = f"""
+            **Contexto da Conversa Anterior:**
+            {history_string}
+
+            **Sua Tarefa:**
+            Você recebeu um arquivo (imagem ou documento) do contato. Analise o conteúdo do arquivo no contexto da conversa acima.
+            Sua resposta deve ser um resumo conciso, direto e útil do conteúdo, como se fosse uma anotação para o CRM.
+            Exemplo se for uma planta baixa: "O contato enviou a planta do banheiro, destacando a área do box."
+            Exemplo se for um catálogo: "O contato enviou um catálogo de produtos."
+            Retorne APENAS o texto do resumo.
+            """
+            prompt_parts.append(task)
+            prompt_parts.append(media_data)
+
+        try:
+            # Reutiliza o modelo principal da classe, que é multimodal
+            response = self._generate_with_retry(prompt_parts)
+            
+            transcription = response.text.strip()
+            logger.info(f"Transcrição/Análise gerada: '{transcription[:100]}...'")
+            return transcription
+        except Exception as e:
+            logger.error(f"Erro ao transcrever/analisar mídia: {e}")
+            return f"[Erro ao processar mídia: {media_data.get('mime_type')}]"
 
     def generate_conversation_action(
         self,
         config: models.Config,
         contact: models.Contact,
         conversation_history_db: List[dict],
-        mode: str  # 'initial', 'reply', ou 'followup'
+        mode: str
     ) -> dict:
         """
         Função unificada que constrói um ÚNICO prompt JSON com todas as instruções.
         """
         try:
-            # 1. Substitui as variáveis dinâmicas na configuração da campanha
             campaign_config = self._replace_variables_in_dict(config.prompt_config, contact)
-
-            # 2. Define a tarefa específica para a IA com base no modo
             task_map = {
                 'initial': "Gerar a PRIMEIRA mensagem de prospecção para iniciar a conversa.",
                 'reply': "Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa.",
-                'followup': "Analisar as mensagens e decidir entre continuar o fluxo, fazer um follow-up ou se não é necessário mais nada apenas retorne 'null' no campo 'mensagem_para_enviar'"
+                'followup': "Analisar as mensagens e decidir entre continuar o fluxo, fazer um follow-up ou se não é necessário mais nada apenas retorne 'null' no campo 'mensagem_para_enviar"
             }
-            
-            # 3. Formata o histórico
             formatted_history = self._format_history_for_prompt(conversation_history_db)
 
-            # 4. ### MUDANÇA PRINCIPAL: Constrói o prompt JSON único e completo ###
             master_prompt = {
                 "instrucao_geral": "Você é um assistente de prospecção e vendas. Sua tarefa é analisar todo este JSON e retornar sua resposta.",
-                
                 "formato_resposta_obrigatorio": {
                     "descricao": "Sua resposta DEVE ser um único objeto JSON válido, sem nenhum texto ou formatação adicional (como ```json). O objeto deve conter EXATAMENTE as três chaves a seguir:",
                     "chaves": {
                         "mensagem_para_enviar": "O texto da mensagem a ser enviada ao contato. Se decidir que não deve enviar uma mensagem agora, o valor deve ser null.",
-                        "nova_situacao": "Um status curto que descreva o estado atual da conversa (ex: 'Aguardando Resposta', 'Reunião Agendada', 'Lead Qualificado', 'Contato Frio').",
-                        "observacoes": "Um resumo interno e conciso da interação para salvar no CRM (ex: 'Contato demonstrou interesse no produto X e pediu orçamento.')."
+                        "nova_situacao": "Um status curto que descreva o estado atual da conversa (ex: 'Aguardando Resposta', 'Reunião Agendada', 'Lead Qualificado').",
+                        "observacoes": "Um resumo interno e conciso da interação para salvar no CRM (ex: 'Contato demonstrou interesse no produto X.')."
                     },
-                    "regra_importante_variaveis": "CRÍTICO: NUNCA inclua placeholders ou variáveis como `{{nome_contato}}` ou `[alguma informação]` no campo `mensagem_para_enviar`. O texto deve ser a mensagem final e completa, pronta para ser enviada diretamente ao cliente."
+                    "regra_importante_variaveis": "CRÍTICO: NUNCA inclua placeholders ou variáveis como `{{nome_contato}}` ou `[alguma informação]` no campo `mensagem_para_enviar`. O texto deve ser a mensagem final e completa, pronta para ser enviada diretamente ao cliente, pois as variáveis já foram substituídas."
                 },
-
                 "configuracao_campanha": campaign_config,
-                
                 "dados_atuais_conversa": {
                     "contato_nome": contact.nome,
                     "tarefa_imediata": task_map.get(mode, "Continuar a conversa de forma coerente."),
@@ -124,13 +162,8 @@ class GeminiService:
                 }
             }
 
-            # 5. Converte o dicionário inteiro para uma string JSON
             final_prompt_str = json.dumps(master_prompt, ensure_ascii=False, indent=2)
-            
-            # 6. Envia o prompt para a IA (sem usar mais a instrução de sistema)
             response = self._generate_with_retry(final_prompt_str)
-
-            # 7. Processa a resposta
             clean_response = response.text.strip().replace("```json", "").replace("```", "")
             return json.loads(clean_response)
 
