@@ -10,6 +10,8 @@ from app.db.database import get_db
 from app.db import models
 from app.db.schemas import Contact, ContactCreate, ContactUpdate
 from app.crud import crud_contact
+from datetime import datetime
+from fastapi.responses import Response
 
 router = APIRouter()
 
@@ -75,19 +77,18 @@ async def export_contacts_csv(
     current_user: models.User = Depends(dependencies.get_current_active_user),
 ):
     """Gera e retorna um arquivo CSV com todos os contatos do usuário."""
-    stream = io.StringIO()
-    writer = csv.writer(stream)
     
-    writer.writerow(["nome", "whatsapp", "categoria"])
+    # 1. Chama a função do CRUD para gerar a string CSV
+    csv_data = await crud_contact.export_contacts_to_csv_string(db, user_id=current_user.id)
     
-    contacts = await crud_contact.get_contacts_by_user(db, user_id=current_user.id)
+    # 2. Cria um nome de arquivo dinâmico com a data atual
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    filename = f"contatos_{today_str}.csv"
     
-    for contact in contacts:
-        categories = ",".join(contact.categoria) if contact.categoria else ""
-        writer.writerow([contact.nome, contact.whatsapp, categories])
-        
-    response = StreamingResponse(iter([stream.getvalue()]), media_type="text/csv")
-    response.headers["Content-Disposition"] = "attachment; filename=contatos.csv"
+    # 3. Cria a resposta HTTP
+    response = Response(content=csv_data, media_type="text/csv")
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    
     return response
 
 
@@ -97,33 +98,16 @@ async def import_contacts_csv(
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(dependencies.get_current_active_user),
 ):
-    """Recebe um arquivo CSV e cria os contatos para o usuário."""
-    if file.content_type not in ["text/csv", "application/vnd.ms-excel"]:
-        raise HTTPException(status_code=400, detail="Tipo de arquivo inválido. Por favor, envie um .csv")
+    """Recebe um arquivo CSV e cria os contatos para o usuário em lote."""
+    
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Tipo de arquivo inválido. Por favor, envie um arquivo .csv")
         
-    try:
-        contents = await file.read()
-        decoded_content = contents.decode('utf-8')
-        stream = io.StringIO(decoded_content)
-        reader = csv.DictReader(stream)
+    # 1. Chama a função do CRUD para processar o arquivo e salvar no banco
+    # O bloco try/except agora está dentro da função do CRUD, deixando a rota mais limpa
+    imported_count = await crud_contact.import_contacts_from_csv_file(
+        file=file, db=db, user_id=current_user.id
+    )
         
-        imported_count = 0
-        for row in reader:
-            if not row.get('nome') or not row.get('whatsapp'):
-                continue
-
-            categories = [cat.strip() for cat in row.get('categoria', '').split(',') if cat.strip()]
-
-            contact_in = ContactCreate(
-                nome=row['nome'],
-                whatsapp=row['whatsapp'],
-                categoria=categories
-            )
-            await crud_contact.create_contact(db=db, contact=contact_in, user_id=current_user.id)
-            imported_count += 1
-            
-        return {"message": f"{imported_count} contatos importados com sucesso!"}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao processar o arquivo: {e}")
+    return {"message": f"{imported_count} contatos importados com sucesso!"}
 
