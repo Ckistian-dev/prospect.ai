@@ -36,8 +36,6 @@ function MainProspecting() {
     log: false,
   });
 
-  // A função setProspects será usada no novo useEffect, então a adicionamos ao useCallback
-  // para manter a estabilidade da referência da função.
   const stopLogPolling = useCallback(() => {
     if (logIntervalRef.current) {
       clearInterval(logIntervalRef.current);
@@ -45,9 +43,14 @@ function MainProspecting() {
     }
   }, []);
 
-  const fetchLog = useCallback(async (prospectId) => {
+  const fetchLog = useCallback(async (prospectId, isSilent = false) => {
     if (!prospectId) return;
-    setLoadingStates(prev => ({ ...prev, log: true }));
+
+    // Só mostra o skeleton se NÃO for uma atualização silenciosa (ex: polling)
+    if (!isSilent) {
+      setLoadingStates(prev => ({ ...prev, log: true }));
+    }
+
     try {
       const response = await api.get(`/prospecting/${prospectId}/log`);
       setLog(response.data);
@@ -58,7 +61,10 @@ function MainProspecting() {
         setLog({ log: 'Log não encontrado para esta campanha.', status: 'Erro' });
       }
     } finally {
-      setLoadingStates(prev => ({ ...prev, log: false }));
+      // Garante que o estado de loading seja desativado
+      if (!isSilent) {
+        setLoadingStates(prev => ({ ...prev, log: false }));
+      }
     }
   }, [stopLogPolling]);
   
@@ -69,6 +75,7 @@ function MainProspecting() {
       const prospectsData = response.data;
       setProspects(prospectsData);
       
+      // Define a primeira prospecção como selecionada se nenhuma estiver
       if (!selectedProspect && prospectsData.length > 0) {
         setSelectedProspect(prospectsData[0]);
       }
@@ -82,21 +89,25 @@ function MainProspecting() {
   const startPolling = useCallback(() => {
     stopLogPolling();
     if (selectedProspect) {
-      logIntervalRef.current = setInterval(() => fetchLog(selectedProspect.id), 5000);
+      // Passa 'true' para indicar que esta é uma atualização silenciosa em segundo plano
+      logIntervalRef.current = setInterval(() => fetchLog(selectedProspect.id, true), 5000);
     }
   }, [selectedProspect, fetchLog, stopLogPolling]);
 
+  // Efeito para buscar as campanhas na montagem inicial do componente
   useEffect(() => {
     fetchProspects();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
+  
+  // Efeito para buscar o log (mostrando o loader) quando a seleção de campanha muda
   useEffect(() => {
     if (selectedProspect) {
-      fetchLog(selectedProspect.id);
+      fetchLog(selectedProspect.id, false);
     }
   }, [selectedProspect, fetchLog]);
 
+  // Efeito para controlar o início/parada do polling com base no status do log
   useEffect(() => {
     stopLogPolling();
     if (selectedProspect && log.status === 'Em Andamento') {
@@ -105,29 +116,16 @@ function MainProspecting() {
     return () => stopLogPolling();
   }, [selectedProspect, log.status, startPolling, stopLogPolling]);
   
-  // ==================================================================
-  // ✨ MUDANÇA PRINCIPAL: EFEITO PARA SINCRONIZAR O STATUS DA LISTA ✨
-  // Este efeito garante que a lista `prospects` sempre reflita o status 
-  // mais recente que obtemos do `log` da campanha selecionada.
-  // ==================================================================
+  // Efeito para sincronizar o status na lista da esquerda com o status do log atual
   useEffect(() => {
     if (selectedProspect && log.status) {
-      // Cria uma nova lista mapeando sobre a anterior
-      const updatedProspects = prospects.map(p => {
-        // Se o ID da campanha na lista for o mesmo da campanha selecionada...
-        if (p.id === selectedProspect.id) {
-          // ...retorna um novo objeto para essa campanha com o status atualizado do log.
-          return { ...p, status: log.status };
-        }
-        // Caso contrário, retorna a campanha como estava.
-        return p;
-      });
-      // Atualiza o estado da lista de campanhas.
-      setProspects(updatedProspects);
+      setProspects(prevProspects => 
+        prevProspects.map(p => 
+          p.id === selectedProspect.id ? { ...p, status: log.status } : p
+        )
+      );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [log.status, selectedProspect]); // Roda sempre que o status do log ou a seleção mudar
-
+  }, [log.status, selectedProspect]);
 
   const handleStart = async () => {
     if (!selectedProspect) return;
@@ -151,7 +149,7 @@ function MainProspecting() {
   
   const handleDelete = async () => {
     if (!selectedProspect) return;
-    const isConfirmed = window.confirm(`Tem certeza que deseja excluir a campanha "${selectedProspect.nome_prospeccao}"?`);
+    const isConfirmed = window.confirm(`Tem certeza que deseja excluir a campanha "${selectedProspect.nome_prospeccao}"? Esta ação não pode ser desfeita.`);
     if (isConfirmed) {
       try {
         await api.delete(`/prospecting/${selectedProspect.id}`);
@@ -208,11 +206,6 @@ function MainProspecting() {
                       className={`w-full text-left p-3 rounded-lg flex justify-between items-center transition-all duration-200 ${selectedProspect?.id === p.id ? 'bg-brand-green text-white font-semibold shadow-sm' : 'hover:bg-gray-100 hover:pl-4'}`}
                     >
                       <span className="truncate pr-2">{p.nome_prospeccao}</span>
-                      {/* ✨ LÓGICA SIMPLIFICADA ✨ 
-                        Agora que a lista `prospects` está sempre sincronizada, 
-                        podemos simplesmente exibir `p.status` para todas as campanhas. 
-                        Não precisamos mais da verificação ternária.
-                      */}
                       <span className={`text-xs px-2 py-1 rounded-full shrink-0 ${selectedProspect?.id === p.id ? 'bg-white/30 text-white' : 'bg-gray-200 text-gray-700'}`}>
                         {p.status}
                       </span>
@@ -245,7 +238,7 @@ function MainProspecting() {
         </div>
 
         <div className="lg:col-span-3 bg-white rounded-xl shadow-lg p-6 flex flex-col border min-h-0">
-          {loadingStates.log ? (
+          {loadingStates.log && !logIntervalRef.current ? (
             <LogSkeleton />
           ) : selectedProspect ? (
             <LogDisplay logText={log.log} />
@@ -262,9 +255,7 @@ function MainProspecting() {
           onClose={() => setIsModalOpen(false)}
           onSuccess={(newProspect) => {
             setIsModalOpen(false);
-            // Ao criar uma nova campanha, a adicionamos no topo da lista.
             setProspects(prev => [newProspect, ...prev]);
-            // E a selecionamos imediatamente.
             setSelectedProspect(newProspect);
           }}
         />
