@@ -4,6 +4,8 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any, Optional
+import random
+from datetime import datetime, timedelta
 
 from app.api import dependencies
 from app.db.database import get_db, SessionLocal
@@ -19,19 +21,23 @@ prospecting_status: Dict[int, str] = {}
 
 
 async def prospecting_agent_task(prospect_id: int, user_id: int):
-    """O agente inteligente de prospecção com lógica de ação única por ciclo para máxima responsividade."""
+    """O agente inteligente de prospecção com lógica de tempo não-bloqueante para máxima responsividade."""
     prospecting_status[prospect_id] = "running"
     
     whatsapp_service = get_whatsapp_service()
     gemini_service = get_gemini_service()
 
+    # --- MUDANÇA 1: Controle de tempo para novas mensagens ---
+    # Inicia permitindo que a primeira mensagem seja enviada imediatamente.
+    next_initial_message_allowed_at = datetime.utcnow()
+
     async def log(db: AsyncSession, message: str, status_update: str = None):
         await crud_prospect.append_to_log(db, prospect_id=prospect_id, message=message, new_status=status_update)
 
+    # A função process_contact_action permanece a mesma que na versão anterior
     async def process_contact_action(db: AsyncSession, contact_info, mode: str):
         """Função auxiliar para processar uma ação para um contato."""
         contact, prospect_contact = contact_info.Contact, contact_info.ProspectContact
-        # Obter os detalhes da prospecção novamente dentro da função para garantir que estão atualizados
         prospect_details = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=user_id)
         user = await crud_user.get_user(db, user_id=user_id)
         config = await crud_config.get_config(db, config_id=prospect_details.config_id, user_id=user_id)
@@ -66,14 +72,13 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
             db, pc_id=prospect_contact.id, situacao=new_status,
             conversa=json.dumps(history), observacoes=new_observation
         )
-        # O AWAIT FOI REMOVIDO DAQUI PARA CENTRALIZAR NO LOOP PRINCIPAL
-        # await asyncio.sleep(20) 
+        
+        await log(db, f"   - Pausa de 5 segundos após ação em {contact.nome}.")
+        await asyncio.sleep(5)
 
     try:
         async with SessionLocal() as db:
             await log(db, "-> Agente iniciado.", status_update="Em Andamento")
-            # Apenas verifica se a prospecção existe no início. 
-            # Os detalhes serão carregados dentro da função de ação.
             initial_prospect = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=user_id)
             if not initial_prospect:
                 await log(db, "ERRO: Prospecção não encontrada.", "Falha")
@@ -88,42 +93,52 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
                     if replies_to_process:
                         action_taken = True
                         await log(db, f"-> Prioridade alta: 1 de {len(replies_to_process)} respostas para processar...")
-                        # MUDANÇA: Processa apenas o PRIMEIRO da lista
                         await process_contact_action(db, replies_to_process[0], 'reply')
-                        continue # Volta ao início do loop imediatamente
+                        continue 
 
                     # FRENTE 2: FAZER FOLLOW-UP (MÉDIA PRIORIDADE)
-                    # É necessário buscar os detalhes da prospecção aqui para a função de followup
                     prospect_details = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=user_id)
                     followups = await crud_prospect.get_contacts_for_followup(db, prospect=prospect_details)
                     if followups:
                         action_taken = True
                         await log(db, f"-> Prioridade média: 1 de {len(followups)} follow-ups para processar...")
-                        # MUDANÇA: Processa apenas o PRIMEIRO da lista
                         await process_contact_action(db, followups[0], 'followup')
-                        continue # Volta ao início do loop imediatamente
+                        continue
 
+                    # --- MUDANÇA 2: LÓGICA DE VERIFICAÇÃO DE TEMPO ---
                     # FRENTE 3: INICIAR NOVAS CONVERSAS (BAIXA PRIORIDADE)
-                    pending_contacts = await crud_prospect.get_prospect_contacts_by_status(db, prospect_id=prospect_id, status="Aguardando Início")
-                    if pending_contacts:
-                        action_taken = True
-                        await log(db, "-> Baixa prioridade: Iniciando 1 nova conversa...")
-                        # (Esta parte já estava correta, processando apenas um)
-                        await process_contact_action(db, pending_contacts[0], 'initial')
-                        continue # Apenas por consistência, continua para o próximo ciclo
+                    # Só executa se o tempo de "descanso" para novas mensagens já tiver passado.
+                    if datetime.utcnow() >= next_initial_message_allowed_at:
+                        pending_contacts = await crud_prospect.get_prospect_contacts_by_status(db, prospect_id=prospect_id, status="Aguardando Início")
+                        if pending_contacts:
+                            action_taken = True
+                            await log(db, "-> Baixa prioridade: Iniciando 1 nova conversa...")
+                            await process_contact_action(db, pending_contacts[0], 'initial')
 
+                            # --- MUDANÇA 3: ATUALIZA O PRÓXIMO HORÁRIO PERMITIDO ---
+                            # Define o novo tempo de espera aleatório para a PRÓXIMA mensagem inicial.
+                            random_delay_seconds = random.randint(45, 120)
+                            next_initial_message_allowed_at = datetime.utcnow() + timedelta(seconds=random_delay_seconds)
+                            
+                            # Log para informar quando a próxima tentativa ocorrerá
+                            next_time_str = next_initial_message_allowed_at.strftime('%H:%M:%S')
+                            await log(db, f"-> Nova mensagem enviada. Próxima tentativa de envio permitida após as {next_time_str} (em {random_delay_seconds}s).")
+                            continue
+                    
                     if not action_taken:
-                        await log(db, "-> Nenhuma ação pendente. Monitorando...")
+                        # Loga apenas se nenhuma ação foi tomada e o tempo de envio não chegou
+                        if datetime.utcnow() < next_initial_message_allowed_at:
+                             await log(db, f"-> Nenhuma ação prioritária. Aguardando intervalo para novas mensagens...")
+                        else:
+                             await log(db, "-> Nenhuma ação pendente. Monitorando...")
 
                 except Exception as e:
                     logger.error(f"ERRO no ciclo do agente (Prospect ID: {prospect_id}): {e}", exc_info=True)
                     await log(db, f"   - ERRO no ciclo: {e}")
             
-            # Define um tempo de espera único para cada ciclo do 'while'
-            # Se uma ação foi tomada, espera um pouco mais antes da próxima para não sobrecarregar.
-            # Se não fez nada, espera menos tempo para verificar por novidades mais cedo.
-            sleep_time = 25 if action_taken else 15
-            await asyncio.sleep(sleep_time)
+            # --- MUDANÇA 4: SLEEP CURTO E CONSTANTE ---
+            # Pausa padrão e curta do ciclo para manter a responsividade a respostas.
+            await asyncio.sleep(15)
 
     except Exception as e:
         logger.error(f"ERRO CRÍTICO NO AGENTE (Prospect ID: {prospect_id}): {e}", exc_info=True)
@@ -133,7 +148,11 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
         if prospect_id in prospecting_status:
             del prospecting_status[prospect_id]
         async with SessionLocal() as db:
-            await log(db, "-> Agente finalizado.")
+            prospect = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=user_id)
+            if prospect and prospect.status not in ["Parado", "Falha"]:
+                 await log(db, "-> Agente finalizado.")
+            else:
+                 await log(db, "-> Agente finalizado conforme solicitado ou por falha.")
 
 # (Restante das rotas: get, create, get_log, start, stop, get_sheet_data permanecem iguais)
 @router.get("/", response_model=List[Prospect], summary="Listar prospecções do usuário")
