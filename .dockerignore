@@ -1,0 +1,25 @@
+# .dockerignore
+
+# Ignora o Dockerfile e arquivos de configuração relacionados
+Dockerfile
+.dockerignore
+nixpacks.toml
+
+# Ignora arquivos do Git
+.git
+.gitignore
+
+# Ignora ambientes virtuais locais (eles são criados DENTRO do contêiner)
+.venv
+venv/
+*.venv
+
+# Ignora caches do Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignora caches e configurações de IDEs
+.vscode/
+.idea/
