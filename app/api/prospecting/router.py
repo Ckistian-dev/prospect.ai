@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any, Optional
 import random
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app.api import dependencies
 from app.db.database import get_db, SessionLocal
@@ -116,12 +117,24 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
                             await process_contact_action(db, pending_contacts[0], 'initial')
 
                             # --- MUDANÇA 3: ATUALIZA O PRÓXIMO HORÁRIO PERMITIDO ---
-                            # Define o novo tempo de espera aleatório para a PRÓXIMA mensagem inicial.
                             random_delay_seconds = random.randint(45, 120)
+                            # A lógica interna continua usando UTC, que é a melhor prática
                             next_initial_message_allowed_at = datetime.utcnow() + timedelta(seconds=random_delay_seconds)
-                            
-                            # Log para informar quando a próxima tentativa ocorrerá
-                            next_time_str = next_initial_message_allowed_at.strftime('%H:%M:%S')
+
+                            # --- CORREÇÃO DE FUSO HORÁRIO APENAS PARA O LOG ---
+                            # Pega o próximo horário permitido em UTC e o converte para o fuso horário de São Paulo (BRT)
+                            try:
+                                utc_time = datetime.utcnow() + timedelta(seconds=random_delay_seconds)
+                                # Define explicitamente que o tempo é UTC
+                                aware_utc_time = utc_time.replace(tzinfo=ZoneInfo("UTC"))
+                                # Converte para o fuso local
+                                local_time = aware_utc_time.astimezone(ZoneInfo("America/Sao_Paulo"))
+                                next_time_str = local_time.strftime('%H:%M:%S')
+                            except Exception:
+                                # Fallback caso zoneinfo não esteja disponível, mostrando UTC para evitar erro
+                                next_time_str = (datetime.utcnow() + timedelta(seconds=random_delay_seconds)).strftime('%H:%M:%S') + " (UTC)"
+                            # --- FIM DA CORREÇÃO ---
+
                             await log(db, f"-> Nova mensagem enviada. Próxima tentativa de envio permitida após as {next_time_str} (em {random_delay_seconds}s).")
                             continue
                     
