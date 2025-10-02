@@ -19,7 +19,8 @@ python-dotenv
 # --- Autenticação & Segurança ---
 # Bibliotecas para lidar com senhas, tokens JWT e segurança
 python-jose[cryptography]==3.3.0
-passlib[bcrypt]
+passlib
+bcrypt==4.3.0
 
 # --- APIs Externas & Clientes HTTP ---
 # Para fazer requisições a outras APIs e serviços
