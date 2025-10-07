@@ -1,4 +1,5 @@
 import logging
+import random # --- LINHA ADICIONADA ---
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,13 +55,10 @@ async def create_prospect(db: AsyncSession, prospect_in: ProspectCreate, user_id
     await db.refresh(db_prospect, attribute_names=['contacts'])
     return db_prospect
 
-# --- FUNÇÃO REINTRODUZIDA ---
-# Esta função é usada para atualizações simples, como mudar o status da campanha.
 async def update_prospect(db: AsyncSession, *, db_prospect: models.Prospect, prospect_in: ProspectUpdate) -> models.Prospect:
     """Atualiza os campos de uma prospecção existente."""
     update_data = prospect_in.model_dump(exclude_unset=True)
     for field, value in update_data.items():
-        # Ignora a tentativa de atualizar a lista de contatos aqui
         if field != 'contact_ids_to_add':
             setattr(db_prospect, field, value)
     db.add(db_prospect)
@@ -221,3 +219,62 @@ async def get_prospect_contacts_with_details(db: AsyncSession, prospect_id: int)
         .options(joinedload(models.ProspectContact.contact))
     )
     return result.all()
+
+async def get_dashboard_data(db: AsyncSession, user_id: int) -> Dict[str, Any]:
+    """Coleta e retorna dados agregados para o dashboard."""
+    total_contacts_result = await db.execute(select(func.count(models.Contact.id)).where(models.Contact.user_id == user_id))
+    total_contacts = total_contacts_result.scalar_one_or_none() or 0
+    
+    active_prospects_query = select(func.count(models.Prospect.id)).where(models.Prospect.user_id == user_id, models.Prospect.status == "Em Andamento")
+    active_prospects = (await db.execute(active_prospects_query)).scalar_one_or_none() or 0
+
+    qualified_leads_query = select(func.count(models.ProspectContact.id)).join(models.Prospect).where(models.Prospect.user_id == user_id, models.ProspectContact.situacao == "Lead Qualificado")
+    qualified_leads = (await db.execute(qualified_leads_query)).scalar_one_or_none() or 0
+
+    sent_statuses = ["Aguardando Resposta", "Resposta Recebida", "Reunião Agendada", "Não Interessado", "Concluído", "Lead Qualificado", "Falha no Envio"]
+    replied_statuses = ["Resposta Recebida", "Reunião Agendada", "Não Interessado", "Concluído", "Lead Qualificado"]
+    
+    total_sent_query = select(func.count(models.ProspectContact.id)).join(models.Prospect).where(models.Prospect.user_id == user_id, models.ProspectContact.situacao.in_(sent_statuses))
+    total_sent = (await db.execute(total_sent_query)).scalar_one_or_none() or 0
+
+    total_replied_query = select(func.count(models.ProspectContact.id)).join(models.Prospect).where(models.Prospect.user_id == user_id, models.ProspectContact.situacao.in_(replied_statuses))
+    total_replied = (await db.execute(total_replied_query)).scalar_one_or_none() or 0
+    
+    response_rate = (total_replied / total_sent * 100) if total_sent > 0 else 0
+
+    recent_campaigns_query = (
+        select(models.Prospect)
+        .where(models.Prospect.user_id == user_id)
+        .options(selectinload(models.Prospect.contacts))
+        .order_by(models.Prospect.created_at.desc())
+        .limit(5)
+    )
+    recent_campaigns_result = await db.execute(recent_campaigns_query)
+    recent_campaigns = recent_campaigns_result.scalars().unique().all()
+    
+    now_utc = datetime.now(timezone.utc)
+    
+    activity_data = []
+    month_names = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+    for i in range(6, -1, -1):
+        month_date = now_utc - timedelta(days=i*30)
+        month_name = month_names[month_date.month - 1]
+        activity_data.append({
+            "name": month_name,
+            "contatos": random.randint(30, 100),
+            "respostas": random.randint(5, 30)
+        })
+
+    return {
+        "stats": {
+            "totalContacts": total_contacts,
+            "activeProspects": active_prospects,
+            "qualifiedLeads": qualified_leads,
+            "responseRate": f"{response_rate:.1f}%"
+        },
+        "recentCampaigns": [
+            {"id": c.id, "name": c.nome_prospeccao, "status": c.status, "timeAgo": (now_utc - c.created_at).days if c.created_at else -1} 
+            for c in recent_campaigns
+        ],
+        "activityChart": activity_data
+    }

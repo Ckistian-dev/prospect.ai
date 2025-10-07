@@ -165,7 +165,7 @@ class GeminiService:
             # ... (lógica interna do prompt permanece a mesma)
             campaign_config = self._replace_variables_in_dict(config.prompt_config, contact)
             task_map = {
-                'initial': "Gerar a PRIMEIRA mensagem de prospecção para iniciar a conversa, caso ela já não tenha iniciado.",
+                'initial': "Gerar a primeira mensagem de prospecção para iniciar a conversa, caso ela já não tenha iniciado.",
                 'reply': "Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa.",
                 'followup': "Analisar as mensagens e decidir entre continuar o fluxo, fazer um follow-up ou se não é necessário mais nada apenas retorne 'null' no campo 'mensagem_para_enviar"
             }
