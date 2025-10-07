@@ -17,6 +17,28 @@ class WhatsAppService:
         self.api_key = settings.EVOLUTION_API_KEY
         self.headers = {"apikey": self.api_key, "Content-Type": "application/json"}
 
+    # --- NOVO MÉTODO PARA NORMALIZAR NÚMEROS ---
+    def _normalize_number(self, number: str) -> str:
+        """
+        Garante que o número de celular brasileiro seja enviado sem o nono dígito.
+        Ex: Converte '5545999861237' (13 dígitos) para '554599861237' (12 dígitos).
+        """
+        clean_number = "".join(filter(str.isdigit, str(number)))
+        
+        # A regra se aplica a números com 13 dígitos (55 + DDD + 9 + 8 dígitos)
+        if len(clean_number) == 13 and clean_number.startswith("55"):
+            # A parte do número após o código de país (55) e DDD (XX)
+            subscriber_part = clean_number[4:]
+            if subscriber_part.startswith('9'):
+                # Retorna o número sem o primeiro '9' da parte do assinante
+                normalized = clean_number[:4] + subscriber_part[1:]
+                logger.info(f"Normalizando número {clean_number} para {normalized}")
+                return normalized
+        
+        # Se não se encaixar na regra, retorna o número limpo original
+        return clean_number
+
+    # ... (outros métodos como get_connection_status, etc., permanecem iguais)
     async def get_connection_status(self, instance_name: str) -> dict:
         if not instance_name:
             return {"status": "no_instance_name"}
@@ -45,7 +67,6 @@ class WhatsAppService:
             return {"status": "qrcode", "qrcode": qr_code_string}
 
     async def _create_instance(self, instance_name: str):
-        """Cria a instância usando o payload completo e correto."""
         payload = {
             "instanceName": instance_name,
             "integration": "WHATSAPP-BAILEYS",
@@ -96,15 +117,17 @@ class WhatsAppService:
             error_detail = e.response.text if hasattr(e, 'response') else str(e)
             return {"status": "error", "detail": error_detail}
 
+    # --- MÉTODO ATUALIZADO ---
     async def send_text_message(self, instance_name: str, number: str, text: str) -> bool:
         if not all([instance_name, number, text]):
             return False
         
-        clean_number = "".join(filter(str.isdigit, str(number)))
+        # Normaliza o número ANTES de enviar para a API
+        normalized_number = self._normalize_number(number)
         url = f"{self.api_url}/message/sendText/{instance_name}"
         
         payload = {
-            "number": clean_number,
+            "number": normalized_number,
             "text": text,
             "options": { "delay": 1200, "presence": "composing" }
         }
@@ -113,63 +136,52 @@ class WhatsAppService:
             async with httpx.AsyncClient() as client:
                 response = await client.post(url, headers=self.headers, json=payload)
                 response.raise_for_status()
-                logger.info(f"DEBUG: Mensagem enviada com sucesso para {clean_number}.")
+                logger.info(f"DEBUG: Mensagem enviada com sucesso para {normalized_number}.")
                 return True
         except httpx.HTTPStatusError as e:
-            logger.error(f"Erro ao enviar mensagem para {clean_number}. Status: {e.response.status_code}. Resposta: {e.response.text}")
+            logger.error(f"Erro ao enviar mensagem para {normalized_number}. Status: {e.response.status_code}. Resposta: {e.response.text}")
             return False
         except Exception as e:
-            logger.error(f"Erro inesperado ao enviar mensagem para {clean_number}: {e}")
+            logger.error(f"Erro inesperado ao enviar mensagem para {normalized_number}: {e}")
             return False
 
-    async def get_conversation_history(self, instance_name: str, number: str) -> Optional[List[dict]]:
-        """
-        Busca o histórico de mensagens e retorna a lista de objetos de mensagem brutos da API.
-        """
-        if not instance_name or not number: return None
-        clean_number = "".join(filter(str.isdigit, str(number)))
-        
-        jids_to_try = set()
-        if clean_number.startswith("55") and len(clean_number) >= 12:
-            prefix = clean_number[:4]
-            if len(clean_number) == 13 and clean_number[4] == '9':
-                jids_to_try.add(f"{clean_number}@s.whatsapp.net")
-                jids_to_try.add(f"{prefix + clean_number[5:]}@s.whatsapp.net")
-            elif len(clean_number) == 12:
-                jids_to_try.add(f"{clean_number}@s.whatsapp.net")
-                jids_to_try.add(f"{prefix}9{clean_number[4:]}@s.whatsapp.net")
-        
-        if not jids_to_try:
-            jids_to_try.add(f"{clean_number}@s.whatsapp.net")
+    # --- MÉTODO ATUALIZADO ---
+    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 32) -> List[Dict[str, Any]]:
+        if not instance_name or not number:
+            return []
 
-        for jid in jids_to_try:
-            url = f"{self.api_url}/chat/findMessages/{instance_name}"
-            payload = {"page": 1, "pageSize": 100, "where": {"key": {"remoteJid": jid}}}
-            
-            try:
-                async with httpx.AsyncClient(timeout=60.0) as client:
-                    logger.info(f"DEBUG: Buscando histórico para JID: {jid}")
-                    response = await client.post(url, headers=self.headers, json=payload)
-                    response.raise_for_status()
-                    data = response.json()
-                    
-                    messages = data.get("messages", {}).get("records", [])
-                    if messages:
-                        logger.info(f"DEBUG: {len(messages)} mensagens encontradas para JID: {jid}")
-                        sorted_messages = sorted(messages, key=lambda msg: int(msg.get("messageTimestamp", 0)))
-                        return sorted_messages
-            except Exception as e:
-                error_details = getattr(e, 'response', str(e))
-                if hasattr(error_details, 'text'):
-                    error_details = error_details.text
-                logger.error(f"DEBUG: Erro ao buscar histórico para JID {jid}: {error_details}")
-                continue
+        # Normaliza o número ANTES de criar o JID para a busca
+        normalized_number = self._normalize_number(number)
+        url = f"{self.api_url}/chat/findMessages/{instance_name}"
+        jid = f"{normalized_number}@s.whatsapp.net"
+        
+        payload = {
+            "page": 1,
+            "offset": count,
+            "where": {
+                "key": {
+                    "remoteJid": jid
+                }
+            }
+        }
 
-        logger.warning(f"DEBUG: Nenhum histórico encontrado para o número {clean_number} em nenhuma variação.")
-        return None
-    
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                logger.info(f"Buscando as últimas {count} mensagens para o JID normalizado: {jid}...")
+                response = await client.post(url, headers=self.headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+
+                mensagens = data.get("messages", {}).get("records", [])
+                
+                logger.info(f"Histórico para {jid} carregado. Total de {len(mensagens)} mensagens encontradas.")
+                return mensagens
+
+        except Exception as e:
+            logger.error(f"Não foi possível buscar o histórico para {number} (normalizado para {normalized_number}). Erro: {e}")
+            return []
+
     async def get_media_and_convert(self, instance_name: str, message: dict) -> Optional[dict]:
-        """Baixa mídia, converte áudio para MP3 e retorna dados para o Gemini."""
         message_content = message.get("message", {})
         if not message_content: return None
 
@@ -220,4 +232,3 @@ def get_whatsapp_service():
     if _whatsapp_service_instance is None:
         _whatsapp_service_instance = WhatsAppService()
     return _whatsapp_service_instance
-

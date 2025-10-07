@@ -25,23 +25,18 @@ class Contact(ContactBase):
     class Config:
         from_attributes = True
 
-# --- Schemas de Configuração ATUALIZADOS ---
-
-# Base para criação e leitura. Reflete a nova estrutura do banco.
+# --- Schemas de Configuração ---
 class ConfigBase(BaseModel):
     nome_config: str
-    prompt_config: Dict[str, Any] # <-- MUDANÇA PRINCIPAL: Substitui 'persona' e 'prompt'.
+    prompt_config: Dict[str, Any]
 
-# Schema para criar uma nova configuração. Herda a estrutura correta de ConfigBase.
 class ConfigCreate(ConfigBase):
     pass
 
-# Schema para ATUALIZAR. Permite que qualquer campo seja atualizado opcionalmente.
 class ConfigUpdate(BaseModel):
     nome_config: Optional[str] = None
-    prompt_config: Optional[Dict[str, Any]] = None # <-- MUDANÇA PRINCIPAL
+    prompt_config: Optional[Dict[str, Any]] = None
 
-# Schema completo para retornar dados da API. Também herda a estrutura correta.
 class Config(ConfigBase):
     id: int
     user_id: int
@@ -50,32 +45,43 @@ class Config(ConfigBase):
         from_attributes = True
 
 
-# --- NOVO SCHEMA PARA A TABELA DE LIGAÇÃO ---
-# Este schema ensina o Pydantic a ler os dados da tabela prospect_contacts
+# --- Schema para a Tabela de Ligação (Atualizado) ---
 class ProspectContact(BaseModel):
     id: int
     prospect_id: int
     contact_id: int
     situacao: str
+    observacoes: Optional[str] = None
     conversa: str
+    # --- CORREÇÃO AQUI ---
+    # Alterado para ser opcional, permitindo que o valor seja None.
+    updated_at: Optional[datetime] = None
+
 
     class Config:
         from_attributes = True
 
 
-# --- Schemas de Prospecção (Reestruturados) ---
+# --- Schemas de Prospecção ---
 class ProspectBase(BaseModel):
     nome_prospeccao: str
     config_id: int
     followup_interval_minutes: int = 0
+    initial_message_interval_seconds: int = 90
+
 
 class ProspectCreate(ProspectBase):
     contact_ids: List[int]
+    
 
 class ProspectUpdate(BaseModel):
     nome_prospeccao: Optional[str] = None
     config_id: Optional[int] = None
     status: Optional[str] = None
+    followup_interval_minutes: Optional[int] = None
+    initial_message_interval_seconds: Optional[int] = None
+    contact_ids_to_add: Optional[List[int]] = None
+
 
 class Prospect(ProspectBase):
     id: int
@@ -83,13 +89,11 @@ class Prospect(ProspectBase):
     status: str
     log: str
     created_at: datetime
-    # CORREÇÃO: Especifica que a lista 'contacts' conterá itens no formato do schema 'ProspectContact'
     contacts: List[ProspectContact]
 
     @computed_field
     @property
     def contact_ids(self) -> List[int]:
-        # Esta função continua a mesma, mas agora opera sobre uma lista bem definida
         return [pc.contact_id for pc in self.contacts]
 
     class Config:
@@ -110,11 +114,14 @@ class UserCreate(UserBase):
 class UserUpdate(BaseModel):
     instance_name: Optional[str] = None
     tokens: Optional[int] = None
+    spreadsheet_id: Optional[str] = None
 
 class User(UserBase):
     id: int
     instance_name: Optional[str] = None
     tokens: int
+    spreadsheet_id: Optional[str] = None
+
 
     class Config:
         from_attributes = True
@@ -126,4 +133,3 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Optional[str] = None
-

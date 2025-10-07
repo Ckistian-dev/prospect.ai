@@ -2,13 +2,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 
-from app.api.auth import router as auth_router
-from app.api.contacts import router as contacts_router
-from app.api.configs import router as configs_router
-from app.api.whatsapp import router as whatsapp_router
-from app.api.prospecting import router as prospecting_router
-from app.api.webhook import router as webhook_router
-from app.api.dashboard import router as dashboard_router
+from app.api import auth as auth_router
+from app.api import contacts as contacts_router
+from app.api import configs as configs_router
+from app.api import whatsapp as whatsapp_router
+from app.api import prospecting as prospecting_router
+from app.api import webhook as webhook_router
+from app.api import dashboard as dashboard_router
 
 from app.db.database import engine
 from app.db import models

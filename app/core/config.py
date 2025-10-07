@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     EVOLUTION_API_KEY: str
 
     # Google Gemini API
-    GOOGLE_API_KEY: str
+    GOOGLE_API_KEYS: str
 
     # URL Base para Webhooks
     WEBHOOK_URL: str

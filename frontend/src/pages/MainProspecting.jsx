@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axiosConfig';
-import { Plus, Play, Pause, Trash2 } from 'lucide-react';
+import { Plus, Play, Pause, Trash2, MoreVertical, Edit, Loader2 } from 'lucide-react';
 import CreateProspectingModal from '../components/prospecting/CreateProspectingModal';
 import LogDisplay from '../components/prospecting/LogDisplay';
 
@@ -29,11 +29,21 @@ function MainProspecting() {
   const [selectedProspect, setSelectedProspect] = useState(null);
   const [log, setLog] = useState({ log: '', status: 'Pendente' });
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingProspect, setEditingProspect] = useState(null);
   const logIntervalRef = useRef(null);
+
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const menuRef = useRef(null);
 
   const [loadingStates, setLoadingStates] = useState({
     campaigns: true,
     log: false,
+  });
+
+  const [actionLoading, setActionLoading] = useState({
+    start: false,
+    stop: false,
+    delete: false,
   });
 
   const stopLogPolling = useCallback(() => {
@@ -46,7 +56,6 @@ function MainProspecting() {
   const fetchLog = useCallback(async (prospectId, isSilent = false) => {
     if (!prospectId) return;
 
-    // Só mostra o skeleton se NÃO for uma atualização silenciosa (ex: polling)
     if (!isSilent) {
       setLoadingStates(prev => ({ ...prev, log: true }));
     }
@@ -61,7 +70,6 @@ function MainProspecting() {
         setLog({ log: 'Log não encontrado para esta campanha.', status: 'Erro' });
       }
     } finally {
-      // Garante que o estado de loading seja desativado
       if (!isSilent) {
         setLoadingStates(prev => ({ ...prev, log: false }));
       }
@@ -75,9 +83,11 @@ function MainProspecting() {
       const prospectsData = response.data;
       setProspects(prospectsData);
       
-      // Define a primeira prospecção como selecionada se nenhuma estiver
       if (!selectedProspect && prospectsData.length > 0) {
         setSelectedProspect(prospectsData[0]);
+      } else if (prospectsData.length === 0) {
+        setSelectedProspect(null);
+        setLog({ log: '', status: 'Pendente' });
       }
     } catch (error) {
       console.error("Erro ao buscar prospecções:", error);
@@ -89,25 +99,20 @@ function MainProspecting() {
   const startPolling = useCallback(() => {
     stopLogPolling();
     if (selectedProspect) {
-      // Passa 'true' para indicar que esta é uma atualização silenciosa em segundo plano
       logIntervalRef.current = setInterval(() => fetchLog(selectedProspect.id, true), 5000);
     }
   }, [selectedProspect, fetchLog, stopLogPolling]);
 
-  // Efeito para buscar as campanhas na montagem inicial do componente
   useEffect(() => {
     fetchProspects();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   
-  // Efeito para buscar o log (mostrando o loader) quando a seleção de campanha muda
   useEffect(() => {
     if (selectedProspect) {
       fetchLog(selectedProspect.id, false);
     }
   }, [selectedProspect, fetchLog]);
 
-  // Efeito para controlar o início/parada do polling com base no status do log
   useEffect(() => {
     stopLogPolling();
     if (selectedProspect && log.status === 'Em Andamento') {
@@ -116,7 +121,6 @@ function MainProspecting() {
     return () => stopLogPolling();
   }, [selectedProspect, log.status, startPolling, stopLogPolling]);
   
-  // Efeito para sincronizar o status na lista da esquerda com o status do log atual
   useEffect(() => {
     if (selectedProspect && log.status) {
       setProspects(prevProspects => 
@@ -127,23 +131,41 @@ function MainProspecting() {
     }
   }, [log.status, selectedProspect]);
 
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
   const handleStart = async () => {
     if (!selectedProspect) return;
+    setActionLoading(prev => ({ ...prev, start: true }));
     try {
       await api.post(`/prospecting/${selectedProspect.id}/start`);
       fetchLog(selectedProspect.id);
     } catch (error) {
       alert(`Erro ao iniciar: ${error.response?.data?.detail || 'Erro desconhecido'}`);
+    } finally {
+      setActionLoading(prev => ({ ...prev, start: false }));
     }
   };
 
   const handleStop = async () => {
     if (!selectedProspect) return;
+    setActionLoading(prev => ({ ...prev, stop: true }));
     try {
       await api.post(`/prospecting/${selectedProspect.id}/stop`);
       fetchLog(selectedProspect.id);
     } catch (error) {
       alert(`Erro ao parar: ${error.response?.data?.detail || 'Erro desconhecido'}`);
+    } finally {
+      setActionLoading(prev => ({ ...prev, stop: false }));
     }
   };
   
@@ -151,6 +173,7 @@ function MainProspecting() {
     if (!selectedProspect) return;
     const isConfirmed = window.confirm(`Tem certeza que deseja excluir a campanha "${selectedProspect.nome_prospeccao}"? Esta ação não pode ser desfeita.`);
     if (isConfirmed) {
+      setActionLoading(prev => ({ ...prev, delete: true }));
       try {
         await api.delete(`/prospecting/${selectedProspect.id}`);
         const updatedProspects = prospects.filter(p => p.id !== selectedProspect.id);
@@ -164,6 +187,8 @@ function MainProspecting() {
         }
       } catch (error) {
         alert(`Erro ao excluir: ${error.response?.data?.detail || 'Erro desconhecido'}`);
+      } finally {
+        setActionLoading(prev => ({ ...prev, delete: false }));
       }
     }
   };
@@ -173,7 +198,34 @@ function MainProspecting() {
     setSelectedProspect(prospect);
   }
 
+  const handleOpenCreateModal = () => {
+    setEditingProspect(null);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (prospect) => {
+    if (prospect.status === 'Em Andamento') {
+      alert('Pare a campanha antes de editá-la.');
+      return;
+    }
+    setEditingProspect(prospect);
+    setIsModalOpen(true);
+  };
+
+  const handleSuccess = (updatedOrNewProspect) => {
+    if (editingProspect) {
+      setProspects(prev => prev.map(p => p.id === updatedOrNewProspect.id ? updatedOrNewProspect : p));
+      setSelectedProspect(updatedOrNewProspect);
+    } else {
+      setProspects(prev => [updatedOrNewProspect, ...prev]);
+      setSelectedProspect(updatedOrNewProspect);
+    }
+    setEditingProspect(null);
+    setIsModalOpen(false);
+  };
+
   const isRunning = log.status === 'Em Andamento';
+  const isAnyActionLoading = actionLoading.start || actionLoading.stop || actionLoading.delete;
 
   return (
     <div className="p-4 md:p-8 bg-gray-50 h-full flex flex-col">
@@ -183,7 +235,7 @@ function MainProspecting() {
           <p className="text-gray-500 mt-1">Crie, gerencie e execute suas campanhas de prospecção.</p>
         </div>
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={handleOpenCreateModal}
           className="mt-4 md:mt-0 flex items-center gap-2 bg-brand-green text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-brand-green-dark transition-all duration-300"
         >
           <Plus size={20} />
@@ -200,16 +252,47 @@ function MainProspecting() {
                 Array.from({ length: 5 }).map((_, index) => <CampaignSkeleton key={index} />)
               ) : prospects.length > 0 ? (
                 prospects.map(p => (
-                  <li key={p.id}>
+                  <li key={p.id} className={`relative rounded-lg flex justify-between items-center group transition-all duration-200 ${selectedProspect?.id === p.id ? 'bg-brand-green text-white font-semibold shadow-sm' : 'hover:bg-gray-100'}`}>
                     <button
                       onClick={() => handleSelectProspect(p)}
-                      className={`w-full text-left p-3 rounded-lg flex justify-between items-center transition-all duration-200 ${selectedProspect?.id === p.id ? 'bg-brand-green text-white font-semibold shadow-sm' : 'hover:bg-gray-100 hover:pl-4'}`}
+                      className="flex-grow text-left p-3 flex items-center"
                     >
                       <span className="truncate pr-2">{p.nome_prospeccao}</span>
                       <span className={`text-xs px-2 py-1 rounded-full shrink-0 ${selectedProspect?.id === p.id ? 'bg-white/30 text-white' : 'bg-gray-200 text-gray-700'}`}>
                         {p.status}
                       </span>
                     </button>
+                    <div className="relative pr-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenMenuId(openMenuId === p.id ? null : p.id);
+                        }}
+                        className={`p-1 rounded-full transition-colors ${selectedProspect?.id === p.id ? 'hover:bg-white/20' : 'hover:bg-gray-200'}`}
+                        title="Opções"
+                      >
+                        <MoreVertical size={20} />
+                      </button>
+                      
+                      {openMenuId === p.id && (
+                        <div ref={menuRef} className="absolute right-0 top-full mt-2 z-20 w-48 bg-white rounded-md shadow-lg border animate-in fade-in-5">
+                          <ul className="py-1">
+                            <li>
+                              <button
+                                onClick={() => {
+                                  handleOpenEditModal(p);
+                                  setOpenMenuId(null);
+                                }}
+                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2 disabled:text-gray-400"
+                                disabled={p.status === 'Em Andamento'}
+                              >
+                                <Edit size={14} /> Editar Campanha
+                              </button>
+                            </li>
+                          </ul>
+                        </div>
+                      )}
+                    </div>
                   </li>
                 ))
               ) : (
@@ -222,15 +305,18 @@ function MainProspecting() {
             {selectedProspect ? (
               <div className="space-y-3">
                 <div className="flex gap-4">
-                  <button onClick={handleStart} disabled={isRunning || log.status === 'Concluído' || loadingStates.log} className="flex-1 flex items-center justify-center gap-2 bg-green-500 text-white font-bold py-3 rounded-lg shadow-md hover:bg-green-600 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
-                    <Play size={18} /> Iniciar
+                  <button onClick={handleStart} disabled={isAnyActionLoading || isRunning || log.status === 'Concluído' || loadingStates.log} className="flex-1 flex items-center justify-center gap-2 bg-green-500 text-white font-bold py-3 rounded-lg shadow-md hover:bg-green-600 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
+                    {actionLoading.start ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
+                    {actionLoading.start ? 'Iniciando...' : 'Iniciar'}
                   </button>
-                  <button onClick={handleStop} disabled={!isRunning || loadingStates.log} className="flex-1 flex items-center justify-center gap-2 bg-orange-500 text-white font-bold py-3 rounded-lg shadow-md hover:bg-orange-600 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
-                    <Pause size={18} /> Parar
+                  <button onClick={handleStop} disabled={isAnyActionLoading || !isRunning || loadingStates.log} className="flex-1 flex items-center justify-center gap-2 bg-orange-500 text-white font-bold py-3 rounded-lg shadow-md hover:bg-orange-600 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
+                    {actionLoading.stop ? <Loader2 size={18} className="animate-spin" /> : <Pause size={18} />}
+                    {actionLoading.stop ? 'Parando...' : 'Parar'}
                   </button>
                 </div>
-                <button onClick={handleDelete} disabled={isRunning || loadingStates.log} className="w-full flex items-center justify-center gap-2 bg-red-600 text-white font-semibold py-2 rounded-lg shadow-md hover:bg-red-700 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
-                  <Trash2 size={16}/> Excluir Campanha
+                <button onClick={handleDelete} disabled={isAnyActionLoading || isRunning || loadingStates.log} className="w-full flex items-center justify-center gap-2 bg-red-600 text-white font-semibold py-2 rounded-lg shadow-md hover:bg-red-700 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
+                  {actionLoading.delete ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16}/>}
+                  {actionLoading.delete ? 'Excluindo...' : 'Excluir Campanha'}
                 </button>
               </div>
             ) : <p className="text-center text-gray-500">Selecione uma campanha.</p>}
@@ -244,7 +330,7 @@ function MainProspecting() {
             <LogDisplay logText={log.log} />
           ) : (
             <div className="flex items-center justify-center h-full">
-                <p className="text-gray-500">Selecione uma campanha para ver o log.</p>
+              <p className="text-gray-500">Selecione uma campanha para ver o log.</p>
             </div>
           )}
         </div>
@@ -252,12 +338,12 @@ function MainProspecting() {
       
       {isModalOpen && (
         <CreateProspectingModal 
-          onClose={() => setIsModalOpen(false)}
-          onSuccess={(newProspect) => {
+          prospectToEdit={editingProspect}
+          onClose={() => {
             setIsModalOpen(false);
-            setProspects(prev => [newProspect, ...prev]);
-            setSelectedProspect(newProspect);
+            setEditingProspect(null);
           }}
+          onSuccess={handleSuccess}
         />
       )}
     </div>

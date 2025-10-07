@@ -67,9 +67,8 @@ class Prospect(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     user_id = Column(Integer, ForeignKey('users.id'))
     config_id = Column(Integer, ForeignKey('configs.id'))
-    followup_interval_minutes = Column(Integer, default=0) # Armazena o tempo em minutos. 0 = desativado.
-    
-    # CORREÇÃO: Padronizado para 'owner' para corresponder ao back_populates no User.
+    followup_interval_minutes = Column(Integer, default=0)
+    initial_message_interval_seconds = Column(Integer, default=90, nullable=False)
     owner = relationship("User", back_populates="prospects")
     config = relationship("Config")
     
@@ -80,7 +79,7 @@ class ProspectContact(Base):
     id = Column(Integer, primary_key=True, index=True)
     prospect_id = Column(Integer, ForeignKey('prospects.id'))
     contact_id = Column(Integer, ForeignKey('contacts.id'))
-    situacao = Column(String, default="Aguardando Início")
+    situacao = Column(Text, default="Aguardando Início")
     observacoes: Mapped[str] = mapped_column(Text, nullable=True, default="")
     conversa = Column(Text, default="[]")
     media_type: Mapped[str] = mapped_column(String(50), nullable=True)

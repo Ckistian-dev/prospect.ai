@@ -37,20 +37,26 @@ async def create_user(db: AsyncSession, user: UserCreate) -> models.User:
     await db.refresh(db_user)
     return db_user
 
-async def update_user(db: AsyncSession, user: models.User, user_in: UserUpdate) -> models.User:
+# --- FUNÇÃO CORRIGIDA ---
+async def update_user(db: AsyncSession, db_user: models.User, user_in: UserUpdate) -> models.User:
     """Atualiza os dados de um usuário existente."""
+    # O nome do parâmetro 'user' foi alterado para 'db_user' para corresponder à chamada
     update_data = user_in.model_dump(exclude_unset=True)
     if "password" in update_data:
         hashed_password = get_password_hash(update_data["password"])
-        user.hashed_password = hashed_password
+        db_user.hashed_password = hashed_password
         del update_data["password"]
 
     for key, value in update_data.items():
-        setattr(user, key, value)
+        # A variável 'user' foi alterada para 'db_user' aqui também
+        setattr(db_user, key, value)
 
     await db.commit()
-    await db.refresh(user)
-    return user
+    # E aqui
+    await db.refresh(db_user)
+    # E aqui
+    return db_user
+# --- FIM DA CORREÇÃO ---
 
 async def decrement_user_tokens(db: AsyncSession, *, db_user: models.User, amount: int = 1):
     """Decrementa os tokens de um usuário pela quantidade especificada."""
