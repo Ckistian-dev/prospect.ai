@@ -45,7 +45,7 @@ class Config(ConfigBase):
         from_attributes = True
 
 
-# --- Schema para a Tabela de Ligação (Atualizado) ---
+# --- Schema para a Tabela de Ligação ---
 class ProspectContact(BaseModel):
     id: int
     prospect_id: int
@@ -53,13 +53,15 @@ class ProspectContact(BaseModel):
     situacao: str
     observacoes: Optional[str] = None
     conversa: str
-    # --- CORREÇÃO AQUI ---
-    # Alterado para ser opcional, permitindo que o valor seja None.
     updated_at: Optional[datetime] = None
-
 
     class Config:
         from_attributes = True
+
+# --- NOVO SCHEMA ADICIONADO ---
+class ProspectContactUpdate(BaseModel):
+    situacao: Optional[str] = None
+    observacoes: Optional[str] = None
 
 
 # --- Schemas de Prospecção ---
@@ -69,10 +71,8 @@ class ProspectBase(BaseModel):
     followup_interval_minutes: int = 0
     initial_message_interval_seconds: int = 90
 
-
 class ProspectCreate(ProspectBase):
     contact_ids: List[int]
-    
 
 class ProspectUpdate(BaseModel):
     nome_prospeccao: Optional[str] = None
@@ -81,7 +81,6 @@ class ProspectUpdate(BaseModel):
     followup_interval_minutes: Optional[int] = None
     initial_message_interval_seconds: Optional[int] = None
     contact_ids_to_add: Optional[List[int]] = None
-
 
 class Prospect(ProspectBase):
     id: int
@@ -122,7 +121,6 @@ class User(UserBase):
     tokens: int
     spreadsheet_id: Optional[str] = None
 
-
     class Config:
         from_attributes = True
 
@@ -133,3 +131,4 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Optional[str] = None
+

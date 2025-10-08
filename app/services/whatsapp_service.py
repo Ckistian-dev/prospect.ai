@@ -8,8 +8,13 @@ import os
 import subprocess
 import uuid
 import tempfile
+import asyncio
 
 logger = logging.getLogger(__name__)
+
+class MessageSendError(Exception):
+    """Exceção customizada para falhas no envio de mensagens."""
+    pass
 
 class WhatsAppService:
     def __init__(self):
@@ -17,28 +22,16 @@ class WhatsAppService:
         self.api_key = settings.EVOLUTION_API_KEY
         self.headers = {"apikey": self.api_key, "Content-Type": "application/json"}
 
-    # --- NOVO MÉTODO PARA NORMALIZAR NÚMEROS ---
     def _normalize_number(self, number: str) -> str:
-        """
-        Garante que o número de celular brasileiro seja enviado sem o nono dígito.
-        Ex: Converte '5545999861237' (13 dígitos) para '554599861237' (12 dígitos).
-        """
         clean_number = "".join(filter(str.isdigit, str(number)))
-        
-        # A regra se aplica a números com 13 dígitos (55 + DDD + 9 + 8 dígitos)
         if len(clean_number) == 13 and clean_number.startswith("55"):
-            # A parte do número após o código de país (55) e DDD (XX)
             subscriber_part = clean_number[4:]
             if subscriber_part.startswith('9'):
-                # Retorna o número sem o primeiro '9' da parte do assinante
                 normalized = clean_number[:4] + subscriber_part[1:]
                 logger.info(f"Normalizando número {clean_number} para {normalized}")
                 return normalized
-        
-        # Se não se encaixar na regra, retorna o número limpo original
         return clean_number
 
-    # ... (outros métodos como get_connection_status, etc., permanecem iguais)
     async def get_connection_status(self, instance_name: str) -> dict:
         if not instance_name:
             return {"status": "no_instance_name"}
@@ -70,15 +63,11 @@ class WhatsAppService:
         payload = {
             "instanceName": instance_name,
             "integration": "WHATSAPP-BAILEYS",
-            "qrcode": True,
-            "groupsIgnore": True,
-            "alwaysOnline": False,
-            "readMessages": False,
-            "readStatus": False,
             "syncFullHistory": True,
+            "qrcode": True,
             "webhook": {
                 "url": settings.WEBHOOK_URL,
-                "byEvents": True,
+                "enabled": True,
                 "events": [
                     "MESSAGES_UPSERT",
                     "CONNECTION_UPDATE"
@@ -95,7 +84,7 @@ class WhatsAppService:
             return await self._get_qrcode(instance_name)
         except httpx.HTTPStatusError as e:
             if e.response.status_code != 404:
-                error_detail = e.response.text if hasattr(e.response, 'text') else str(e)
+                error_detail = e.response.text
                 logger.error(f"Erro ao conectar na instância '{instance_name}': {error_detail}")
                 return {"status": "error", "detail": error_detail}
         
@@ -110,6 +99,7 @@ class WhatsAppService:
     async def disconnect_instance(self, instance_name: str) -> dict:
         try:
             async with httpx.AsyncClient() as client:
+                await client.delete(f"{self.api_url}/instance/logout/{instance_name}", headers={"apikey": self.api_key})
                 response = await client.delete(f"{self.api_url}/instance/delete/{instance_name}", headers={"apikey": self.api_key})
                 if response.status_code not in [200, 201, 404]: response.raise_for_status()
                 return {"status": "disconnected"}
@@ -117,77 +107,48 @@ class WhatsAppService:
             error_detail = e.response.text if hasattr(e, 'response') else str(e)
             return {"status": "error", "detail": error_detail}
 
-    # --- MÉTODO ATUALIZADO ---
-    async def send_text_message(self, instance_name: str, number: str, text: str) -> bool:
+    # --- MÉTODO ATUALIZADO COM LÓGICA DE RETENTATIVAS ---
+    async def send_text_message(self, instance_name: str, number: str, text: str):
         if not all([instance_name, number, text]):
-            return False
+            raise ValueError("Instance name, number, and text must be provided.")
         
-        # Normaliza o número ANTES de enviar para a API
         normalized_number = self._normalize_number(number)
         url = f"{self.api_url}/message/sendText/{instance_name}"
         
         payload = {
             "number": normalized_number,
-            "text": text,
-            "options": { "delay": 1200, "presence": "composing" }
+            "options": { "delay": 1200, "presence": "composing" },
+            "text": text
         }
         
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(url, headers=self.headers, json=payload)
-                response.raise_for_status()
-                logger.info(f"DEBUG: Mensagem enviada com sucesso para {normalized_number}.")
-                return True
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Erro ao enviar mensagem para {normalized_number}. Status: {e.response.status_code}. Resposta: {e.response.text}")
-            return False
-        except Exception as e:
-            logger.error(f"Erro inesperado ao enviar mensagem para {normalized_number}: {e}")
-            return False
-
-    # --- MÉTODO ATUALIZADO ---
-    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 32) -> List[Dict[str, Any]]:
-        if not instance_name or not number:
-            return []
-
-        # Normaliza o número ANTES de criar o JID para a busca
-        normalized_number = self._normalize_number(number)
-        url = f"{self.api_url}/chat/findMessages/{instance_name}"
-        jid = f"{normalized_number}@s.whatsapp.net"
-        
-        payload = {
-            "page": 1,
-            "offset": count,
-            "where": {
-                "key": {
-                    "remoteJid": jid
-                }
-            }
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                logger.info(f"Buscando as últimas {count} mensagens para o JID normalizado: {jid}...")
-                response = await client.post(url, headers=self.headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
-
-                mensagens = data.get("messages", {}).get("records", [])
-                
-                logger.info(f"Histórico para {jid} carregado. Total de {len(mensagens)} mensagens encontradas.")
-                return mensagens
-
-        except Exception as e:
-            logger.error(f"Não foi possível buscar o histórico para {number} (normalizado para {normalized_number}). Erro: {e}")
-            return []
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(url, headers=self.headers, json=payload, timeout=30.0)
+                    response.raise_for_status()
+                    logger.info(f"DEBUG: Mensagem enviada com sucesso para {normalized_number} na tentativa {attempt + 1}.")
+                    return # Encerra a função com sucesso
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                logger.warning(f"Falha ao enviar para {normalized_number} (tentativa {attempt + 1}/{max_retries}). Erro: {e}")
+                if attempt < max_retries - 1:
+                    wait_time = 5 * (attempt + 2) # Espera 10s, 15s
+                    logger.info(f"Aguardando {wait_time} segundos para nova tentativa...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Falha CRÍTICA ao enviar mensagem para {normalized_number} após {max_retries} tentativas.")
+                    raise MessageSendError(f"Falha no envio após {max_retries} tentativas: {e}") from e
+            except Exception as e:
+                error_message = f"Erro inesperado ao enviar mensagem para {normalized_number} na tentativa {attempt + 1}: {e}"
+                logger.error(error_message, exc_info=True)
+                # Para erros verdadeiramente inesperados, levanta a exceção imediatamente
+                raise MessageSendError(error_message) from e
 
     async def get_media_and_convert(self, instance_name: str, message: dict) -> Optional[dict]:
         message_content = message.get("message", {})
         if not message_content: return None
-
         url = f"{self.api_url}/chat/getBase64FromMediaMessage/{instance_name}"
         payload = {"message": message}
-        
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(url, json=payload, headers=self.headers, timeout=60)
@@ -200,31 +161,59 @@ class WhatsAppService:
 
             if "imageMessage" in message_content:
                 return {"mime_type": "image/jpeg", "data": media_bytes}
-
             if "documentMessage" in message_content:
                 mime_type = message_content["documentMessage"].get("mimetype", "application/octet-stream")
                 return {"mime_type": mime_type, "data": media_bytes}
-
             if "audioMessage" in message_content:
                 with tempfile.TemporaryDirectory() as temp_dir:
                     ogg_path = os.path.join(temp_dir, f"{uuid.uuid4()}.ogg")
                     mp3_path = os.path.join(temp_dir, f"{uuid.uuid4()}.mp3")
-                    
                     with open(ogg_path, "wb") as f: f.write(media_bytes)
-                    
                     command = ["ffmpeg", "-y", "-i", ogg_path, "-acodec", "libmp3lame", mp3_path]
                     subprocess.run(command, check=True, capture_output=True, text=True)
-                    
                     with open(mp3_path, "rb") as f: mp3_bytes = f.read()
-                    
                     return {"mime_type": "audio/mp3", "data": mp3_bytes}
-
         except subprocess.CalledProcessError as e:
             logger.error(f"Erro do FFmpeg (verifique se está instalado e no PATH): {e.stderr}")
         except Exception as e:
             logger.error(f"Falha ao processar mídia da mensagem: {e}")
-        
         return None
+    
+    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 32) -> List[Dict[str, Any]]:
+        if not instance_name or not number:
+            return []
+        normalized_number = self._normalize_number(number)
+        url = f"{self.api_url}/chat/findMessages/{instance_name}"
+        jid = f"{normalized_number}@s.whatsapp.net"
+        payload = {"page": 1, "offset": count, "where": {"key": {"remoteJid": jid}}}
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                logger.info(f"Buscando as últimas {count} mensagens para {jid}...")
+                response = await client.post(url, headers=self.headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                mensagens = data.get("messages", {}).get("records", [])
+                logger.info(f"Histórico para {jid} carregado com sucesso. Total de {len(mensagens)} mensagens encontradas.")
+                return mensagens
+        except Exception as e:
+            logger.error(f"Não foi possível buscar o histórico para {number}. Erro: {e}")
+            return []
+            
+    async def check_whatsapp_numbers(self, instance_name: str, numbers: List[str]) -> Optional[List[Dict[str, Any]]]:
+        if not instance_name or not numbers:
+            return None
+        normalized_numbers = [self._normalize_number(num) for num in numbers]
+        url = f"{self.api_url}/chat/whatsappNumbers/{instance_name}"
+        payload = {"numbers": normalized_numbers}
+        try:
+            async with httpx.AsyncClient() as client:
+                logger.info(f"Verificando a existência no WhatsApp para os números: {normalized_numbers}")
+                response = await client.post(url, headers=self.headers, json=payload, timeout=60)
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"Falha ao verificar números no WhatsApp: {e}")
+            return None
 
 _whatsapp_service_instance = None
 def get_whatsapp_service():
@@ -232,3 +221,4 @@ def get_whatsapp_service():
     if _whatsapp_service_instance is None:
         _whatsapp_service_instance = WhatsAppService()
     return _whatsapp_service_instance
+

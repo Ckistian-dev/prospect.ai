@@ -13,7 +13,7 @@ const Modal = ({ children, onClose }) => {
     >
       {/* Conteúdo do Modal */}
       <div 
-        className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 relative animate-fade-in-up"
+        className="bg-white rounded-xl shadow-2xl w-full max-w-md min-w-fit p-6 relative animate-fade-in-up"
         // Impede que o clique dentro do modal se propague para o fundo e o feche
         onClick={e => e.stopPropagation()} 
       >

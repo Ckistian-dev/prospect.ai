@@ -1,5 +1,5 @@
 import logging
-import random # --- LINHA ADICIONADA ---
+import random
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -143,11 +143,23 @@ async def get_prospects_para_processar(db: AsyncSession, prospect: models.Prospe
 
     return None
 
+async def get_prospect_contact_by_id(db: AsyncSession, prospect_contact_id: int) -> Optional[models.ProspectContact]:
+    """Busca um ProspectContact específico pelo seu ID."""
+    result = await db.execute(
+        select(models.ProspectContact).where(models.ProspectContact.id == prospect_contact_id)
+    )
+    return result.scalars().first()
+
+async def delete_prospect_contact(db: AsyncSession, prospect_contact_to_delete: models.ProspectContact):
+    """Remove um contato de uma prospecção (deleta a linha de associação)."""
+    await db.delete(prospect_contact_to_delete)
+    await db.commit()
+
 async def update_prospect_contact(db: AsyncSession, pc_id: int, situacao: str, conversa: Optional[str] = None, observacoes: Optional[str] = None):
     """Atualiza os dados de um único contato dentro de uma prospecção."""
     prospect_contact = await db.get(models.ProspectContact, pc_id)
     if prospect_contact:
-        prospect_contact.situacao = situacao
+        if situacao is not None: prospect_contact.situacao = situacao
         if conversa is not None: prospect_contact.conversa = conversa
         if observacoes is not None: prospect_contact.observacoes = observacoes
         prospect_contact.updated_at = datetime.now(timezone.utc)
@@ -278,3 +290,4 @@ async def get_dashboard_data(db: AsyncSession, user_id: int) -> Dict[str, Any]:
         ],
         "activityChart": activity_data
     }
+
