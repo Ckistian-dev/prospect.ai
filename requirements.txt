@@ -27,6 +27,7 @@ bcrypt==4.3.0
 httpx
 google-generativeai
 requests
+pandas
 
 # --- Utilitários ---
 # Outras ferramentas úteis para o projeto
