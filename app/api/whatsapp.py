@@ -43,7 +43,6 @@ async def get_status(
     instance_name = current_user.instance_name
     if not instance_name:
         return {"status": "no_instance_name"}
-    # Apenas retorna o status para o frontend, sem lógica de salvar
     result = await whatsapp_service.get_connection_status(instance_name)
     return result
 
