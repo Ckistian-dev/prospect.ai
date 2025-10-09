@@ -1,7 +1,7 @@
 from sqlalchemy import ( Column, Integer, String, ForeignKey, Text, DateTime, func, ARRAY )
 from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 
 # Base declarativa para os modelos do SQLAlchemy.
@@ -15,9 +15,14 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    instance_name: Mapped[str] = mapped_column(String(100), nullable=True)
+    instance_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    
+    # --- NOVO CAMPO ADICIONADO ---
+    # Armazena o UUID da instância da Evolution API, obtido na conexão.
+    instance_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    
     tokens: Mapped[int] = mapped_column(Integer, default=0)
-    spreadsheet_id: Mapped[str] = mapped_column(String(255), nullable=True)
+    spreadsheet_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Relacionamentos
     configs: Mapped[List["Config"]] = relationship(back_populates="owner")
@@ -30,8 +35,8 @@ class Contact(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     nome: Mapped[str] = mapped_column(String(255), nullable=False)
-    whatsapp: Mapped[str] = mapped_column(String(50), nullable=True)
-    categoria: Mapped[List[str]] = mapped_column(ARRAY(String), nullable=True)
+    whatsapp: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    categoria: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String), nullable=True)
     observacoes = Column(Text, nullable=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
@@ -39,19 +44,12 @@ class Contact(Base):
     owner: Mapped["User"] = relationship(back_populates="contacts")
 
 class Config(Base):
-    """
-    Modelo de Configuração de IA.
-    Armazena toda a estrutura do prompt em um único campo JSON.
-    """
+    """Modelo de Configuração de IA."""
     __tablename__ = "configs"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     nome_config: Mapped[str] = mapped_column(String(100), nullable=False)
-    
-    # CAMPO UNIFICADO: Substitui os antigos 'persona' e 'prompt'.
-    # Armazena um objeto JSON com toda a configuração da IA.
     prompt_config: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
     # Relacionamentos
@@ -69,22 +67,21 @@ class Prospect(Base):
     config_id = Column(Integer, ForeignKey('configs.id'))
     followup_interval_minutes = Column(Integer, default=0)
     initial_message_interval_seconds = Column(Integer, default=90, nullable=False)
+    
     owner = relationship("User", back_populates="prospects")
     config = relationship("Config")
-    
     contacts = relationship("ProspectContact", back_populates="prospect", cascade="all, delete-orphan")
 
 class ProspectContact(Base):
     __tablename__ = 'prospect_contacts'
     id = Column(Integer, primary_key=True, index=True)
-    prospect_id = Column(Integer, ForeignKey('prospects.id'))
+    prospect_id: Mapped[int] = mapped_column(ForeignKey("prospects.id", ondelete="CASCADE"))
     contact_id = Column(Integer, ForeignKey('contacts.id'))
     situacao = Column(Text, default="Aguardando Início")
-    observacoes: Mapped[str] = mapped_column(Text, nullable=True, default="")
+    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="")
     conversa = Column(Text, default="[]")
-    media_type: Mapped[str] = mapped_column(String(50), nullable=True)
+    media_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     prospect = relationship("Prospect", back_populates="contacts")
     contact = relationship("Contact")
-    prospect_id: Mapped[int] = mapped_column(ForeignKey("prospects.id", ondelete="CASCADE"))

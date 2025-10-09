@@ -9,6 +9,9 @@ import subprocess
 import uuid
 import tempfile
 import asyncio
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,30 @@ class WhatsAppService:
         self.api_url = settings.EVOLUTION_API_URL
         self.api_key = settings.EVOLUTION_API_KEY
         self.headers = {"apikey": self.api_key, "Content-Type": "application/json"}
+        
+        try:
+            # --- ALTERAÇÃO AQUI: Adicionamos limites ao pool de conexões ---
+            self.evolution_db_engine = create_async_engine(
+                settings.EVOLUTION_DATABASE_URL,
+                pool_size=5,          # Número de conexões mantidas no pool
+                max_overflow=10,      # Conexões extras permitidas em picos de uso
+                pool_timeout=30       # Tempo em segundos para esperar por uma conexão
+            )
+            self.AsyncSessionLocal = sessionmaker(
+                bind=self.evolution_db_engine, class_=AsyncSession, expire_on_commit=False
+            )
+            logger.info("✅ Conexão com o banco de dados da Evolution API configurada com sucesso.")
+        except Exception as e:
+            logger.error(f"🚨 ERRO CRÍTICO ao configurar a conexão com o banco da Evolution API: {e}")
+            self.evolution_db_engine = None
+
+    # --- NOVO MÉTODO ADICIONADO AQUI ---
+    async def close_db_connection(self):
+        """Fecha todas as conexões no pool do engine do banco de dados da Evolution."""
+        if self.evolution_db_engine:
+            logger.info("Encerrando conexões com o banco de dados da Evolution API...")
+            await self.evolution_db_engine.dispose()
+            logger.info("Conexões com o banco de dados da Evolution API encerradas.")
 
     def _normalize_number(self, number: str) -> str:
         clean_number = "".join(filter(str.isdigit, str(number)))
@@ -28,7 +55,6 @@ class WhatsAppService:
             subscriber_part = clean_number[4:]
             if subscriber_part.startswith('9'):
                 normalized = clean_number[:4] + subscriber_part[1:]
-                logger.info(f"Normalizando número {clean_number} para {normalized}")
                 return normalized
         return clean_number
 
@@ -43,21 +69,39 @@ class WhatsAppService:
                 )
                 response.raise_for_status()
                 data = response.json()
-                state = data.get("instance", {}).get("state")
-                return {"status": "connected"} if state == "open" else {"status": state or "disconnected"}
+                
+                # --- ALTERAÇÃO PRINCIPAL AQUI ---
+                # Em vez de retornar só o status, retornamos um objeto mais completo.
+                instance_info = data.get("instance", {})
+                state = instance_info.get("state")
+                
+                # Construímos uma resposta padronizada para o nosso endpoint usar
+                return {
+                    "status": "connected" if state == "open" else state or "disconnected",
+                    "instance": instance_info  # Passamos o objeto da instância completo
+                }
+
         except httpx.HTTPStatusError as e:
             return {"status": "disconnected"} if e.response.status_code == 404 else {"status": "api_error", "detail": e.response.text}
         except Exception as e:
             return {"status": "api_error", "detail": str(e)}
 
-    async def _get_qrcode(self, instance_name: str) -> dict:
+
+
+    async def _get_qrcode_and_instance_data(self, instance_name: str) -> Optional[Dict[str, Any]]:
         async with httpx.AsyncClient(timeout=90.0) as client:
             response = await client.get(f"{self.api_url}/instance/connect/{instance_name}", headers={"apikey": self.api_key})
             response.raise_for_status()
             data = response.json()
             qr_code_string = data.get('code') or data.get('qrcode', {}).get('code')
             if not qr_code_string: raise Exception("API não retornou um QR Code válido.")
-            return {"status": "qrcode", "qrcode": qr_code_string}
+            
+            instance_data = data.get("instance", {})
+            instance_data['qrcode'] = qr_code_string
+            
+            return instance_data
+
+
 
     async def _create_instance(self, instance_name: str):
         payload = {
@@ -78,19 +122,34 @@ class WhatsAppService:
             response = await client.post(f"{self.api_url}/instance/create", headers=self.headers, json=payload)
             response.raise_for_status()
             logger.info(f"Instância '{instance_name}' criada com sucesso.")
+            return response.json()
 
     async def create_and_connect_instance(self, instance_name: str) -> dict:
         try:
-            return await self._get_qrcode(instance_name)
+            # Tenta conectar primeiro (se a instância já existe)
+            instance_data = await self._get_qrcode_and_instance_data(instance_name)
+            return {"status": "qrcode", "instance": instance_data}
         except httpx.HTTPStatusError as e:
             if e.response.status_code != 404:
-                error_detail = e.response.text
+                error_detail = e.response.text if hasattr(e.response, 'text') else str(e)
                 logger.error(f"Erro ao conectar na instância '{instance_name}': {error_detail}")
                 return {"status": "error", "detail": error_detail}
-        
+
+        # Se deu 404, significa que a instância não existe, então criamos
         try:
-            await self._create_instance(instance_name)
-            return await self._get_qrcode(instance_name)
+            creation_data = await self._create_instance(instance_name)
+            
+            # --- CORREÇÃO FINAL APLICADA AQUI ---
+            # Usamos .get("instanceId") com base no seu exemplo de resposta.
+            new_instance_id = creation_data.get("instance", {}).get("instanceId")
+
+            instance_data_with_qrcode = await self._get_qrcode_and_instance_data(instance_name)
+            
+            if new_instance_id:
+                # Injetamos o ID com a chave correta que o router espera
+                instance_data_with_qrcode['instanceId'] = new_instance_id
+            
+            return {"status": "qrcode", "instance": instance_data_with_qrcode}
         except Exception as e:
             error_detail = e.response.text if hasattr(e, 'response') else str(e)
             logger.error(f"Erro ao criar a instância '{instance_name}': {error_detail}")
@@ -99,7 +158,6 @@ class WhatsAppService:
     async def disconnect_instance(self, instance_name: str) -> dict:
         try:
             async with httpx.AsyncClient() as client:
-                await client.delete(f"{self.api_url}/instance/logout/{instance_name}", headers={"apikey": self.api_key})
                 response = await client.delete(f"{self.api_url}/instance/delete/{instance_name}", headers={"apikey": self.api_key})
                 if response.status_code not in [200, 201, 404]: response.raise_for_status()
                 return {"status": "disconnected"}
@@ -107,7 +165,6 @@ class WhatsAppService:
             error_detail = e.response.text if hasattr(e, 'response') else str(e)
             return {"status": "error", "detail": error_detail}
 
-    # --- MÉTODO ATUALIZADO COM LÓGICA DE RETENTATIVAS ---
     async def send_text_message(self, instance_name: str, number: str, text: str):
         if not all([instance_name, number, text]):
             raise ValueError("Instance name, number, and text must be provided.")
@@ -128,11 +185,11 @@ class WhatsAppService:
                     response = await client.post(url, headers=self.headers, json=payload, timeout=30.0)
                     response.raise_for_status()
                     logger.info(f"DEBUG: Mensagem enviada com sucesso para {normalized_number} na tentativa {attempt + 1}.")
-                    return # Encerra a função com sucesso
+                    return
             except (httpx.RequestError, httpx.HTTPStatusError) as e:
                 logger.warning(f"Falha ao enviar para {normalized_number} (tentativa {attempt + 1}/{max_retries}). Erro: {e}")
                 if attempt < max_retries - 1:
-                    wait_time = 5 * (attempt + 2) # Espera 10s, 15s
+                    wait_time = 5 * (attempt + 2)
                     logger.info(f"Aguardando {wait_time} segundos para nova tentativa...")
                     await asyncio.sleep(wait_time)
                 else:
@@ -141,7 +198,6 @@ class WhatsAppService:
             except Exception as e:
                 error_message = f"Erro inesperado ao enviar mensagem para {normalized_number} na tentativa {attempt + 1}: {e}"
                 logger.error(error_message, exc_info=True)
-                # Para erros verdadeiramente inesperados, levanta a exceção imediatamente
                 raise MessageSendError(error_message) from e
 
     async def get_media_and_convert(self, instance_name: str, message: dict) -> Optional[dict]:
@@ -178,27 +234,39 @@ class WhatsAppService:
         except Exception as e:
             logger.error(f"Falha ao processar mídia da mensagem: {e}")
         return None
-    
-    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 32) -> List[Dict[str, Any]]:
-        if not instance_name or not number:
-            return []
-        normalized_number = self._normalize_number(number)
-        url = f"{self.api_url}/chat/findMessages/{instance_name}"
-        jid = f"{normalized_number}@s.whatsapp.net"
-        payload = {"page": 1, "offset": count, "where": {"key": {"remoteJid": jid}}}
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                logger.info(f"Buscando as últimas {count} mensagens para {jid}...")
-                response = await client.post(url, headers=self.headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
-                mensagens = data.get("messages", {}).get("records", [])
-                logger.info(f"Histórico para {jid} carregado com sucesso. Total de {len(mensagens)} mensagens encontradas.")
-                return mensagens
-        except Exception as e:
-            logger.error(f"Não foi possível buscar o histórico para {number}. Erro: {e}")
+
+    async def fetch_chat_history(self, instance_id: str, number: str, count: int = 32) -> List[Dict[str, Any]]:
+        if not self.evolution_db_engine:
+            logger.error("A conexão com o banco de dados da Evolution não foi configurada. Não é possível buscar o histórico.")
             return []
             
+        if not instance_id or not number:
+            return []
+            
+        normalized_number = self._normalize_number(number)
+        jid = f"{normalized_number}@s.whatsapp.net"
+        
+        query = text(f"""
+            SELECT key, message, "messageTimestamp"
+            FROM "Message"
+            WHERE "instanceId" = :instance_id AND key->>'remoteJid' = :jid
+            ORDER BY "messageTimestamp" DESC
+            LIMIT :limit
+        """)
+        
+        try:
+            async with self.AsyncSessionLocal() as session:
+                result = await session.execute(query, {"instance_id": instance_id, "jid": jid, "limit": count})
+                rows = result.fetchall()
+                
+                messages = [{"key": row[0], "message": row[1], "messageTimestamp": row[2]} for row in rows]
+                
+                logger.info(f"Histórico para {jid} carregado do banco. Total de {len(messages)} mensagens encontradas.")
+                return messages
+        except Exception as e:
+            logger.error(f"Não foi possível buscar o histórico do banco de dados para {number}. Erro: {e}", exc_info=True)
+            return []
+
     async def check_whatsapp_numbers(self, instance_name: str, numbers: List[str]) -> Optional[List[Dict[str, Any]]]:
         if not instance_name or not numbers:
             return None

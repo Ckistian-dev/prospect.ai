@@ -189,12 +189,6 @@ function Prospects() {
         if (selectedProspect) {
             fetchProspectData(); // Busca inicial quando a campanha muda
         }
-        const interval = setInterval(() => {
-            if (selectedProspect) {
-                fetchProspectData(); // Polling
-            }
-        }, 15000); // Polling a cada 15 segundos
-        return () => clearInterval(interval);
     }, [selectedProspect, fetchProspectData]);
 
 

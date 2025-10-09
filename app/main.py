@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.services.whatsapp_service import get_whatsapp_service
 import logging
 
 from app.api import auth as auth_router
@@ -33,6 +34,13 @@ app = FastAPI(
     version="2.0.0",
     on_startup=[create_db_and_tables] # Adiciona o evento de startup
 )
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Este evento é acionado quando a aplicação FastAPI está sendo desligada."""
+    logging.info("O evento de shutdown foi acionado.")
+    whatsapp_service = get_whatsapp_service()
+    await whatsapp_service.close_db_connection()
 
 # Configuração do CORS
 app.add_middleware(

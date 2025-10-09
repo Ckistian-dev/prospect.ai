@@ -58,7 +58,6 @@ class ProspectContact(BaseModel):
     class Config:
         from_attributes = True
 
-# --- NOVO SCHEMA ADICIONADO ---
 class ProspectContactUpdate(BaseModel):
     situacao: Optional[str] = None
     observacoes: Optional[str] = None
@@ -103,7 +102,7 @@ class ProspectLog(BaseModel):
     status: str
 
 
-# --- Schemas de Usuário ---
+# --- Schemas de Usuário (ATUALIZADO) ---
 class UserBase(BaseModel):
     email: EmailStr
 
@@ -112,12 +111,16 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     instance_name: Optional[str] = None
+    # --- NOVO CAMPO ADICIONADO ---
+    instance_id: Optional[str] = None
     tokens: Optional[int] = None
     spreadsheet_id: Optional[str] = None
 
 class User(UserBase):
     id: int
     instance_name: Optional[str] = None
+    # --- NOVO CAMPO ADICIONADO ---
+    instance_id: Optional[str] = None
     tokens: int
     spreadsheet_id: Optional[str] = None
 

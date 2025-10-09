@@ -78,7 +78,12 @@ async def _synchronize_and_process_history(
     whatsapp_service: WhatsAppService,
     gemini_service: GeminiService
 ) -> List[Dict[str, Any]]:
-    # ... (código inalterado)
+    
+    if not user.instance_id:
+        logger.warning(f"Usuário {user.id} não possui um instance_id configurado. Não é possível buscar o histórico.")
+        # Retorna o histórico do DB para não perder o que já existe
+        return json.loads(prospect_contact.conversa) if prospect_contact.conversa else []
+
     logger.info(f"Iniciando sincronização de histórico para o contato de prospecção ID {prospect_contact.id}...")
     try:
         db_history = json.loads(prospect_contact.conversa) if prospect_contact.conversa else []
@@ -91,7 +96,9 @@ async def _synchronize_and_process_history(
     
     processed_message_ids = {msg['id'] for msg in clean_db_history}
     contact_details = await crud_prospect.get_contact_details_from_prospect_contact(db, prospect_contact.id)
-    raw_history_api = await whatsapp_service.fetch_chat_history(user.instance_name, contact_details.whatsapp, count=32)
+    
+    # Usa user.instance_id (UUID) em vez de user.instance_name
+    raw_history_api = await whatsapp_service.fetch_chat_history(user.instance_id, contact_details.whatsapp, count=32)
 
     if not raw_history_api:
         logger.warning("Não foi possível buscar o histórico da API. Verifique a instância da Evolution API.")
@@ -157,7 +164,6 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
                     pc, contact = contact_to_process
                     mode = "reply" if pc.situacao == "Resposta Recebida" else ("followup" if pc.situacao == "Aguardando Resposta" else "initial")
                     
-                    # Envolve todo o processamento de um contato em um try/except para robustez
                     try:
                         if mode == 'initial':
                             interval_seconds = prospect_campaign.initial_message_interval_seconds
@@ -190,7 +196,7 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
                         persona_config = await crud_config.get_config(db, config_id=prospect_campaign.config_id, user_id=user_id)
                         if not persona_config:
                             await log(db, f"ERRO: Persona não encontrada para o contato '{contact.nome}'. Pulando.", status_update="Em Andamento")
-                            await crud_prospect.update_prospect_contact(db, pc.id, situacao="Erro: Persona não encontrada"); continue
+                            await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao="Erro: Persona não encontrada"); continue
 
                         await log(db, f"   - Sincronizando histórico de '{contact.nome}' com a API do WhatsApp...")
                         full_history = await _synchronize_and_process_history(db, pc, user, persona_config, whatsapp_service, gemini_service)
@@ -223,32 +229,17 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
                             
                             all_sent_successfully = True
                             for i, part in enumerate(message_parts):
-                                part_sent = False
-                                max_retries = 3
-                                for attempt in range(max_retries):
-                                    try:
-                                        await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, part)
-                                        part_sent = True
-                                        await log(db, f"   - Mensagem {i+1}/{len(message_parts)} enviada para '{contact.nome}' (tentativa {attempt + 1}).")
-                                        pending_id = f"sent_{datetime.now(timezone.utc).isoformat()}"
-                                        history_after_response.append({"id": pending_id, "role": "assistant", "content": part})
-                                        
-                                        if i < len(message_parts) - 1:
-                                            await asyncio.sleep(random.uniform(4, 10))
-                                        
-                                        break
-                                    except MessageSendError as e:
-                                        logger.error(f"Falha ao enviar parte {i+1} para '{contact.nome}' na tentativa {attempt + 1}/{max_retries}. Erro: {e}")
-                                        if attempt < max_retries - 1:
-                                            wait_time = 5 * (attempt + 2)
-                                            await log(db, f"   - Tentando novamente em {wait_time} segundos...")
-                                            await asyncio.sleep(wait_time)
-                                        else:
-                                            await log(db, f"   - FALHA CRÍTICA ao enviar mensagem {i+1}/{len(message_parts)} para '{contact.nome}' após {max_retries} tentativas.")
-                                            new_status = "Falha no Envio"
-                                            all_sent_successfully = False
-                                
-                                if not part_sent:
+                                try:
+                                    await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, part)
+                                    await log(db, f"   - Mensagem {i+1}/{len(message_parts)} enviada para '{contact.nome}'.")
+                                    pending_id = f"sent_{datetime.now(timezone.utc).isoformat()}"
+                                    history_after_response.append({"id": pending_id, "role": "assistant", "content": part})
+                                    if i < len(message_parts) - 1:
+                                        await asyncio.sleep(random.uniform(4, 10))
+                                except MessageSendError as e:
+                                    all_sent_successfully = False
+                                    new_status = "Falha no Envio"
+                                    await log(db, f"   - FALHA CRÍTICA ao enviar mensagem {i+1}/{len(message_parts)} para '{contact.nome}'. Erro: {e}")
                                     break
                             
                             if mode == 'initial' and all_sent_successfully:
@@ -295,7 +286,6 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
         if prospect and prospect.status == "Em Andamento":
             await log(db, "-> Agente finalizado inesperadamente.", status_update="Pausado")
 
-# ... (Resto do arquivo com as rotas da API, sem alterações)
 def start_agent_for_prospect(prospect_id: int, user_id: int, background_tasks: BackgroundTasks):
     if not prospecting_status.get(prospect_id, False):
         background_tasks.add_task(prospecting_agent_task, prospect_id, user_id)

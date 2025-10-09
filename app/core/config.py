@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     # Evolution API
     EVOLUTION_API_URL: str
     EVOLUTION_API_KEY: str
+    EVOLUTION_DATABASE_URL: str
 
     # Google Gemini API
     GOOGLE_API_KEYS: str
