@@ -249,7 +249,9 @@ class WhatsAppService:
         query = text(f"""
             SELECT key, message, "messageTimestamp"
             FROM "Message"
-            WHERE "instanceId" = :instance_id AND key->>'remoteJid' = :jid
+            WHERE 
+                "instanceId" = :instance_id AND 
+                (key->>'remoteJid' = :jid OR key->>'remoteJidAlt' = :jid)
             ORDER BY "messageTimestamp" DESC
             LIMIT :limit
         """)
@@ -266,7 +268,7 @@ class WhatsAppService:
         except Exception as e:
             logger.error(f"Não foi possível buscar o histórico do banco de dados para {number}. Erro: {e}", exc_info=True)
             return []
-
+        
     async def check_whatsapp_numbers(self, instance_name: str, numbers: List[str]) -> Optional[List[Dict[str, Any]]]:
         if not instance_name or not numbers:
             return None

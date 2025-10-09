@@ -60,7 +60,7 @@ async def set_prospect_status_to_received(data: dict):
             _contact, prospect_contact, _prospect = prospect_info
 
             # Verifica se o contato está em um estado que impede o processamento de novas mensagens
-            situacoes_de_parada = ["Não Interessado", "Concluído", "Lead Qualificado", "Falha no Envio"]
+            situacoes_de_parada = ["Não Interessado", "Concluído", "Falha no Envio"]
             if prospect_contact.situacao in situacoes_de_parada:
                 logger.info(f"Mensagem de {contact_number} ignorada. Contato da Prospecção ID {prospect_contact.id} com status '{prospect_contact.situacao}'.")
                 return
