@@ -190,7 +190,7 @@ function Prospects() {
             fetchProspectData(); // Busca inicial quando a campanha muda
         }
     }, [selectedProspect, fetchProspectData]);
-
+    
 
     useEffect(() => {
         const lowercasedFilter = searchTerm.toLowerCase();

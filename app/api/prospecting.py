@@ -98,7 +98,7 @@ async def _synchronize_and_process_history(
     contact_details = await crud_prospect.get_contact_details_from_prospect_contact(db, prospect_contact.id)
     
     # Usa user.instance_id (UUID) em vez de user.instance_name
-    raw_history_api = await whatsapp_service.fetch_chat_history(user.instance_id, contact_details.whatsapp, count=32)
+    raw_history_api = await whatsapp_service.fetch_chat_history(user.instance_id, contact_details.whatsapp, count=999)
 
     if not raw_history_api:
         logger.warning("Não foi possível buscar o histórico da API. Verifique a instância da Evolution API.")

@@ -236,7 +236,7 @@ class WhatsAppService:
         return None
 
     # --- MÉTODO ATUALIZADO COM A LÓGICA DE DUPLA VERIFICAÇÃO ---
-    async def fetch_chat_history(self, instance_id: str, number: str, count: int = 32) -> List[Dict[str, Any]]:
+    async def fetch_chat_history(self, instance_id: str, number: str, count: int = 999) -> List[Dict[str, Any]]:
         if not self.evolution_db_engine:
             logger.error("A conexão com o banco de dados da Evolution não foi configurada. Não é possível buscar o histórico.")
             return []
