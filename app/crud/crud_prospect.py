@@ -189,7 +189,7 @@ async def get_contact_details_from_prospect_contact(db: AsyncSession, pc_id: int
     )
     return result.scalars().first()
 
-async def find_active_prospect_contact_by_number(db: AsyncSession, user_id: int, number: str) -> Optional[Tuple[models.Contact, models.ProspectContact, models.Prospect]]:
+async def find_prospect_contact_by_number(db: AsyncSession, user_id: int, number: str) -> Optional[Tuple[models.Contact, models.ProspectContact, models.Prospect]]:
     """Encontra um contato em uma campanha ativa, lidando com a variação do nono dígito."""
     clean_number = "".join(filter(str.isdigit, str(number)))
     possible_numbers = {clean_number}
@@ -215,7 +215,6 @@ async def find_active_prospect_contact_by_number(db: AsyncSession, user_id: int,
         .where(
             models.Contact.whatsapp.in_(list(possible_numbers)),
             models.Prospect.user_id == user_id,
-            models.Prospect.status == "Em Andamento"
         )
         .order_by(models.Prospect.created_at.desc())
     )

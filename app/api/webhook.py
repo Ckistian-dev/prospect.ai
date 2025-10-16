@@ -51,8 +51,7 @@ async def set_prospect_status_to_received(data: dict):
                 return
 
             # A busca no banco de dados agora usa o número já padronizado
-            # (Lembrando que a função find_active_prospect_contact_by_number já é robusta e busca por variações)
-            prospect_info = await crud_prospect.find_active_prospect_contact_by_number(db, user_id=user.id, number=normalized_contact_number)
+            prospect_info = await crud_prospect.find_prospect_contact_by_number(db, user_id=user.id, number=normalized_contact_number)
             if not prospect_info:
                 logger.info(f"Webhook (Prospect): Nenhuma prospecção ativa encontrada para o número {contact_number} (buscado como {normalized_contact_number})")
                 return
