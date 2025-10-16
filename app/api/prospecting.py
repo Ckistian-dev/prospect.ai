@@ -235,7 +235,7 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
                                     pending_id = f"sent_{datetime.now(timezone.utc).isoformat()}"
                                     history_after_response.append({"id": pending_id, "role": "assistant", "content": part})
                                     if i < len(message_parts) - 1:
-                                        await asyncio.sleep(random.uniform(4, 10))
+                                        await asyncio.sleep(random.uniform(5, 30))
                                 except MessageSendError as e:
                                     all_sent_successfully = False
                                     new_status = "Falha no Envio"
@@ -274,9 +274,9 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
             await log(SessionLocal(), f"ERRO CRÍTICO no ciclo do agente: {outer_e}", status_update="Falha")
         
         if not action_taken:
-            await asyncio.sleep(25)
+            await asyncio.sleep(30)
         else:
-            await asyncio.sleep(random.uniform(5, 15))
+            await asyncio.sleep(random.uniform(5, 30))
 
     if prospect_id in prospecting_status:
         del prospecting_status[prospect_id]
