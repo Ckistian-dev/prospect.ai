@@ -126,7 +126,7 @@ async def get_prospects_para_processar(db: AsyncSession, prospect: models.Prospe
         followup_query = (
             select(models.ProspectContact, models.Contact)
             .join(models.Contact, models.ProspectContact.contact_id == models.Contact.id)
-            .where(models.ProspectContact.prospect_id == prospect.id, models.ProspectContact.situacao == "Aguardando Resposta", models.ProspectContact.updated_at < time_limit)
+            .where(models.ProspectContact.prospect_id == prospect.id, models.ProspectContact.updated_at < time_limit)
             .order_by(models.ProspectContact.updated_at.asc()).limit(1)
         )
         next_contact = (await db.execute(followup_query)).first()
