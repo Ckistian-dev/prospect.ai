@@ -162,7 +162,7 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
                 if contact_to_process:
                     action_taken = True
                     pc, contact = contact_to_process
-                    mode = "reply" if pc.situacao == "Resposta Recebida" else ("followup" if pc.situacao == "Aguardando Resposta" else "initial")
+                    mode = "reply" if pc.situacao == "Resposta Recebida" else ("initial" if pc.situacao == "Aguardando Início" else "followup")
                     
                     try:
                         if mode == 'initial':
@@ -173,7 +173,7 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
                                 wait_time = interval_seconds - time_since_last
                                 await log(db, f"-> Intervalo para novas conversas ativo. Aguardando aprox. {int(wait_time)}s.")
                                 action_taken = False 
-                                await asyncio.sleep(min(wait_time, 25))
+                                await asyncio.sleep(min(wait_time, 30))
                                 continue
                             
                             await log(db, f"-> Verificando se '{contact.whatsapp}' é um número de WhatsApp válido...")
