@@ -112,6 +112,9 @@ async def append_to_log(db: AsyncSession, prospect_id: int, message: str, new_st
 
 async def get_prospects_para_processar(db: AsyncSession, prospect: models.Prospect) -> Optional[Tuple[models.ProspectContact, models.Contact]]:
     """Busca o próximo contato a ser processado com base na prioridade."""
+
+    # 1. Prioridade Máxima: Respostas recebidas que precisam de atenção.
+    # (Esta parte permanece inalterada)
     replies_query = (
         select(models.ProspectContact, models.Contact)
         .join(models.Contact, models.ProspectContact.contact_id == models.Contact.id)
@@ -119,19 +122,41 @@ async def get_prospects_para_processar(db: AsyncSession, prospect: models.Prospe
         .order_by(models.ProspectContact.updated_at.asc()).limit(1)
     )
     next_contact = (await db.execute(replies_query)).first()
-    if next_contact: return next_contact
+    if next_contact:
+        return next_contact
 
+    # 2. Segunda Prioridade: Follow-ups para contatos que não responderam.
     if prospect.followup_interval_minutes and prospect.followup_interval_minutes > 0:
         time_limit = datetime.now(timezone.utc) - timedelta(minutes=prospect.followup_interval_minutes)
+
+        # --- LÓGICA DE EXCLUSÃO AQUI ---
+        # Definimos todos os status que devem ser ignorados pela lógica de follow-up.
+        situacoes_a_ignorar = [
+            "Não Interessado", 
+            "Concluído", 
+            "Falha no Envio",
+            "Resposta Recebida", # Já tratado pela primeira query (maior prioridade)
+            "Aguardando Início"   # Já tratado pela última query (menor prioridade)
+        ]
+
         followup_query = (
             select(models.ProspectContact, models.Contact)
             .join(models.Contact, models.ProspectContact.contact_id == models.Contact.id)
-            .where(models.ProspectContact.prospect_id == prospect.id, models.ProspectContact.updated_at < time_limit)
+            .where(
+                models.ProspectContact.prospect_id == prospect.id,
+                # A condição principal: a situação NÃO PODE ESTAR na lista de ignorados.
+                models.ProspectContact.situacao.notin_(situacoes_a_ignorar),
+                # E o tempo de espera foi atingido.
+                models.ProspectContact.updated_at < time_limit
+            )
             .order_by(models.ProspectContact.updated_at.asc()).limit(1)
         )
         next_contact = (await db.execute(followup_query)).first()
-        if next_contact: return next_contact
+        if next_contact:
+            return next_contact
 
+    # 3. Terceira Prioridade: Iniciar conversa com novos contatos.
+    # (Esta parte permanece inalterada)
     initial_query = (
         select(models.ProspectContact, models.Contact)
         .join(models.Contact, models.ProspectContact.contact_id == models.Contact.id)
@@ -139,7 +164,8 @@ async def get_prospects_para_processar(db: AsyncSession, prospect: models.Prospe
         .order_by(models.ProspectContact.id.asc()).limit(1)
     )
     next_contact = (await db.execute(initial_query)).first()
-    if next_contact: return next_contact
+    if next_contact:
+        return next_contact
 
     return None
 
