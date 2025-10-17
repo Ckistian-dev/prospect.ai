@@ -133,7 +133,7 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
     whatsapp_service = get_whatsapp_service()
     gemini_service = get_gemini_service()
     
-    last_initial_message_sent_at = datetime.now(timezone.utc) - timedelta(days=1)
+    last_message_sent_at = datetime.now(timezone.utc) - timedelta(days=1)
     
     async def log(db: AsyncSession, message: str, status_update: str = None):
         await crud_prospect.append_to_log(db, prospect_id=prospect_id, message=message, new_status=status_update)
@@ -165,9 +165,9 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
                     mode = "reply" if pc.situacao == "Resposta Recebida" else ("initial" if pc.situacao == "Aguardando Início" else "followup")
                     
                     try:
-                        if mode == 'initial':
+                        if mode in ['initial', 'followup']:
                             interval_seconds = prospect_campaign.initial_message_interval_seconds
-                            time_since_last = (datetime.now(timezone.utc) - last_initial_message_sent_at).total_seconds()
+                            time_since_last = (datetime.now(timezone.utc) - last_message_sent_at).total_seconds()
                             
                             if time_since_last < interval_seconds:
                                 wait_time = interval_seconds - time_since_last
@@ -176,19 +176,20 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
                                 await asyncio.sleep(min(wait_time, 30))
                                 continue
                             
-                            await log(db, f"-> Verificando se '{contact.whatsapp}' é um número de WhatsApp válido...")
-                            check_result = await whatsapp_service.check_whatsapp_numbers(user.instance_name, [contact.whatsapp])
+                            if mode == 'initial':
+                                await log(db, f"-> Verificando se '{contact.whatsapp}' é um número de WhatsApp válido...")
+                                check_result = await whatsapp_service.check_whatsapp_numbers(user.instance_name, [contact.whatsapp])
 
-                            if not check_result or not check_result[0].get("exists"):
-                                await log(db, f"   - NÚMERO INVÁLIDO. '{contact.whatsapp}' não é uma conta de WhatsApp.")
-                                await crud_prospect.update_prospect_contact(
-                                    db, pc_id=pc.id, situacao="Sem Whatsapp", 
-                                    observacoes="Número não registrado no WhatsApp."
-                                )
-                                await db.commit()
-                                continue
-                            else:
-                                await log(db, f"   - Número válido. Prosseguindo.")
+                                if not check_result or not check_result[0].get("exists"):
+                                    await log(db, f"   - NÚMERO INVÁLIDO. '{contact.whatsapp}' não é uma conta de WhatsApp.")
+                                    await crud_prospect.update_prospect_contact(
+                                        db, pc_id=pc.id, situacao="Sem Whatsapp", 
+                                        observacoes="Número não registrado no WhatsApp."
+                                    )
+                                    await db.commit()
+                                    continue
+                                else:
+                                    await log(db, f"   - Número válido. Prosseguindo.")
 
                         motivo_map = {'reply': 'Nova Resposta Recebida', 'followup': 'Tempo de Follow-up Atingido', 'initial': 'Início de Nova Conversa'}
                         await log(db, f"-> Contato selecionado: '{contact.nome}'. Motivo: {motivo_map.get(mode)}.")
@@ -242,8 +243,8 @@ async def prospecting_agent_task(prospect_id: int, user_id: int):
                                     await log(db, f"   - FALHA CRÍTICA ao enviar mensagem {i+1}/{len(message_parts)} para '{contact.nome}'. Erro: {e}")
                                     break
                             
-                            if mode == 'initial' and all_sent_successfully:
-                                last_initial_message_sent_at = datetime.now(timezone.utc)
+                            if mode in ['initial', 'followup'] and all_sent_successfully:
+                                last_message_sent_at = datetime.now(timezone.utc)
                         else:
                             await log(db, "   - Decisão da IA: Nenhuma mensagem a ser enviada neste momento.")
                             pending_id = f"internal_{datetime.now(timezone.utc).isoformat()}"
