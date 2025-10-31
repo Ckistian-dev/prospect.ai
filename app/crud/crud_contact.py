@@ -30,7 +30,6 @@ async def get_contacts_by_user(db: AsyncSession, user_id: int) -> List[models.Co
     )
     return result.scalars().all()
 
-# --- FUNÇÃO ADICIONADA ---
 async def get_contact_by_whatsapp(db: AsyncSession, whatsapp: str, user_id: int) -> Optional[models.Contact]:
     """Busca um contato específico pelo número de WhatsApp para um usuário."""
     result = await db.execute(
