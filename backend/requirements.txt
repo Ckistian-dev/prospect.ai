@@ -1,0 +1,42 @@
+# --- Web Framework & Server ---
+# Responsáveis por criar e servir a aplicação web/API
+fastapi
+uvicorn[standard]
+python-multipart
+
+# --- Database (PostgreSQL com SQLAlchemy Async) ---
+# ORM e drivers para comunicação com o banco de dados de forma assíncrona
+sqlalchemy
+psycopg
+asyncpg
+
+# --- Configuração e Validação de Dados ---
+# Para gerenciar configurações de ambiente e validar dados de entrada/saída
+pydantic-settings
+pydantic[email]
+python-dotenv
+
+# --- Autenticação & Segurança ---
+# Bibliotecas para lidar com senhas, tokens JWT e segurança
+python-jose[cryptography]==3.3.0
+passlib
+bcrypt==4.3.0
+
+# --- APIs Externas & Clientes HTTP ---
+# Para fazer requisições a outras APIs e serviços
+httpx
+google-generativeai
+google-auth[httpx]
+google-api-python-client
+google-auth-oauthlib
+requests
+pandas
+
+# --- Utilitários ---
+# Outras ferramentas úteis para o projeto
+qrcode
+
+
+# --- Rabbit MQ ---
+# bibliotecas para lidar com o Rabbit MQ
+pika

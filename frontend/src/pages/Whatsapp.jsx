@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api/axiosConfig';
-import QRCode from 'qrcode.react';
-import { Wifi, WifiOff, Loader2, ServerCrash, LogOut, Save, Edit, AlertCircle, ScanLine, RefreshCw } from 'lucide-react';
+import { Wifi, WifiOff, Loader2, ServerCrash, LogOut, Save, Edit, AlertCircle, ScanLine, RefreshCw, Link, Link2Off, Cloud, CloudCog } from 'lucide-react';
 
 const StatusDisplay = ({ statusInfo, qrCode, onConnect, onDisconnect, onRefresh, isChecking, error, disabled }) => {
     // O botão de atualizar agora aparece em todos os estados, exceto quando está conectado ou a carregar.
@@ -43,14 +42,27 @@ const StatusDisplay = ({ statusInfo, qrCode, onConnect, onDisconnect, onRefresh,
                 );
             
             case 'loading':
-            case 'loading_qr':
-                return <div><Loader2 size={64} className="mx-auto text-brand-green animate-spin mb-4" /><p className="text-gray-600">{statusInfo.status === 'loading_qr' ? 'A gerar QR Code...' : 'A verificar...'}</p></div>;
-
-            // Os estados 'connecting' e 'close' agora mostram o QR Code diretamente.
+            case 'loading_qr': // Estado para quando o QR Code está sendo gerado
+                return <div><Loader2 size={64} className="mx-auto text-brand-green animate-spin mb-4" /><p className="text-gray-600">{statusInfo.status === 'loading_qr' ? 'Gerando QR Code...' : 'A verificar...'}</p></div>;
+            
+            // --- MELHORIA: Unificar estados que levam à exibição do QR Code ---
             case 'connecting':
             case 'close':
             case 'qrcode':
-                return <div><ScanLine size={32} className="mx-auto text-brand-green mb-2" /><h2 className="text-2xl font-bold text-gray-800 mb-4">Leia o QR Code para Conectar</h2><div className="p-4 bg-white inline-block rounded-lg shadow-inner">{qrCode ? <QRCode value={qrCode} size={256} /> : <Loader2 size={64} className="animate-spin text-brand-green" />}</div><p className="text-gray-600 mt-4">Abra o WhatsApp no seu telemóvel e leia o código.</p></div>;
+                return (
+                    <div>
+                        <ScanLine size={32} className="mx-auto text-brand-green mb-2" />
+                        <h2 className="text-2xl font-bold text-gray-800 mb-4 text-center">Leia o QR Code para Conectar</h2>
+                        <div className="mx-auto p-4 flex items-center justify-center">
+                            {qrCode ? (
+                                <img 
+                                    src={qrCode.startsWith('data:image') ? qrCode : `data:image/png;base64,${qrCode}`}
+                                    alt="QR Code" width="256" height="256" />
+                            ) : <Loader2 size={64} className="animate-spin text-brand-green" />}
+                        </div>
+                        <p className="text-gray-600 mt-4">Abra o WhatsApp no seu telemóvel e leia o código.</p>
+                    </div>
+                );
             
             case 'error':
             case 'api_error':
@@ -80,6 +92,83 @@ const StatusDisplay = ({ statusInfo, qrCode, onConnect, onDisconnect, onRefresh,
     );
 };
 
+const GoogleContactsCard = () => {
+    const [status, setStatus] = useState('loading'); // loading, connected, disconnected, error
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const checkGoogleStatus = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            const response = await api.get('/google-contacts/status');
+            setStatus(response.data.status);
+        } catch (err) {
+            setError('Não foi possível verificar o estado da conexão com o Google.');
+            setStatus('error');
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        checkGoogleStatus();
+    }, [checkGoogleStatus]);
+
+    const handleGoogleConnect = async () => {
+        setIsLoading(true);
+        try {
+            const { data } = await api.get('/google-contacts/auth/url');
+            window.location.href = data.authorization_url;
+        } catch (err) {
+            setError('Não foi possível iniciar a conexão com o Google. Tente novamente.');
+            setIsLoading(false);
+        }
+    };
+
+    const handleGoogleDisconnect = async () => {
+        if (window.confirm('Tem a certeza que deseja desconectar a sua conta Google? A sincronização automática será interrompida.')) {
+            setIsLoading(true);
+            try {
+                await api.post('/google-contacts/disconnect');
+                setStatus('disconnected');
+            } catch (err) {
+                setError('Não foi possível desconectar. Tente novamente.');
+            } finally {
+                setIsLoading(false);
+            }
+        }
+    };
+
+    const handleManualSync = async () => {
+        setIsLoading(true);
+        try {
+            const response = await api.post('/google-contacts/sync');
+            alert(`Sincronização concluída! ${response.data.details.success} contatos sincronizados, ${response.data.details.failed} falharam.`);
+        } catch (err) {
+            setError('Ocorreu um erro durante a sincronização manual.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200 max-w-lg mx-auto">
+            <div className="flex items-center gap-4 mb-4">
+                <Cloud size={28} className="text-blue-500" />
+                <h2 className="text-xl font-bold text-gray-800">Sincronização Google Contacts</h2>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+                Conecte sua conta Google (a mesma usada no seu celular) para salvar os contatos da prospecção. Isso ajuda o WhatsApp a reconhecer os números, evitando bloqueios.
+                <br/><strong>Importante:</strong> A sincronização de contatos deve estar ativa no seu telemóvel.
+            </p>
+            {status === 'loading' && <div className="text-center"><Loader2 className="animate-spin mx-auto text-brand-green" /></div>}
+            {status === 'disconnected' && <button onClick={handleGoogleConnect} disabled={isLoading} className="w-full flex items-center justify-center gap-2 bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-600 transition-all disabled:bg-gray-400"><Link size={18} /> Conectar Conta Google</button>}
+            {status === 'connected' && <div className="space-y-3"><button onClick={handleManualSync} disabled={isLoading} className="w-full flex items-center justify-center gap-2 bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-gray-700 transition-all disabled:bg-gray-400"><CloudCog size={18} /> Sincronizar Contatos Manualmente</button><button onClick={handleGoogleDisconnect} disabled={isLoading} className="w-full flex items-center justify-center gap-2 bg-red-500 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-600 transition-all disabled:bg-gray-400"><Link2Off size={18} /> Desconectar</button></div>}
+            {status === 'error' && <p className="text-red-600 text-sm">{error}</p>}
+        </div>
+    );
+};
+
 function Whatsapp() {
     const [statusInfo, setStatusInfo] = useState({ status: 'loading' });
     const [qrCode, setQrCode] = useState('');
@@ -87,6 +176,21 @@ function Whatsapp() {
     const [instanceName, setInstanceName] = useState('');
     const [isEditing, setIsEditing] = useState(false);
     const [isChecking, setIsChecking] = useState(false);
+
+    // Lógica para lidar com o callback do Google OAuth
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        if (code) {
+            api.post(`/google-contacts/auth/callback?code=${code}`)
+                .then(() => {
+                    // Limpa a URL e recarrega a página ou atualiza o estado
+                    window.history.pushState({}, document.title, "/whatsapp");
+                    window.location.reload(); // Simples, mas eficaz
+                })
+                .catch(err => console.error("Falha no callback do Google", err));
+        }
+    }, []);
  
     const handleConnect = useCallback(async () => {
         if (isChecking) return;
@@ -116,22 +220,18 @@ function Whatsapp() {
         setIsChecking(true);
         setError('');
         try {
+            // A verificação de status agora é mais simples.
             const response = await api.get('/whatsapp/status');
-            const newStatus = response.data.status;
-
-            if ((newStatus === 'close' || newStatus === 'connecting')) {
-                // Se o estado é 'close', significa que precisamos do QR Code.
-                // Chamamos a função de conectar para obtê-lo.
-                await handleConnect();
-            } else {
-                // Para qualquer outro estado (open, disconnected, etc.), apenas atualizamos a UI.
-                setStatusInfo(response.data);
-                // E garantimos que o QR Code antigo seja limpo se não for mais necessário.
+            setStatusInfo(response.data);
+            
+            // Limpa o QR code se o status não for mais 'qrcode'.
+            // Isso acontece se a página for recarregada e o status já for 'conectado'.
+            if (response.data.status !== 'qrcode') {
                 setQrCode('');
             }
-        } catch {
-            setStatusInfo({ status: 'error' });
-            setError('Não foi possível verificar o estado.');
+        } catch (err) {
+            setError('Não foi possível verificar o estado. Tente atualizar a página.');
+            setStatusInfo({ status: 'api_error' });
         } finally {
             setIsChecking(false);
         }
@@ -171,8 +271,8 @@ function Whatsapp() {
             try {
                 await api.post('/whatsapp/disconnect');
                 setQrCode('');
-                // Após desconectar, chama o checkStatus para atualizar a UI para 'desconectado'.
-                await checkStatus();
+                // Apenas atualiza o estado local para 'desconectado' para uma resposta de UI mais rápida.
+                setStatusInfo({ status: 'disconnected' });
             } catch (err) {
                 alert('Não foi possível desconectar a instância.');
             } finally {
@@ -200,39 +300,25 @@ function Whatsapp() {
  
     return (
         <div className="p-6 md:p-10 bg-gray-50 min-h-full">
-            <div className="mb-8">
-                <h1 className="text-3xl font-bold text-gray-800">Conexão WhatsApp</h1>
-                <p className="text-gray-500 mt-1">Faça a gestão da conexão com a API da Evolution.</p>
+            <div className="mb-8 text-center">
+                <h1 className="text-3xl font-bold text-gray-800">Conexões</h1>
+                <p className="text-gray-500 mt-1">Faça a gestão das suas conexões com o WhatsApp e outros serviços.</p>
             </div>
-            <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200 max-w-lg mx-auto">
-                <div className="mb-6 p-4 bg-gray-100 rounded-lg border border-gray-200">
-                    <label className="block text-sm font-medium text-gray-600 mb-2">Nome da Instância</label>
-                    <div className="flex items-center gap-2">
-                        <input
-                            type="text" value={instanceName} onChange={(e) => setInstanceName(e.target.value)} disabled={!isEditing}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green disabled:bg-gray-200 disabled:text-gray-500"
-                            placeholder="ex: meu-whatsapp"
-                        />
-                        {statusInfo.status !== 'connected' && statusInfo.status !== 'open' && (
-                            isEditing ? (
-                                <button onClick={handleSaveInstanceName} title="Salvar" className="p-2 bg-green-500 text-white rounded-md hover:bg-green-600"><Save size={20}/></button>
-                            ) : (
-                                <button onClick={() => setIsEditing(true)} title="Editar" className="p-2 bg-gray-200 text-gray-600 rounded-md hover:bg-gray-300"><Edit size={20}/></button>
-                            )
-                        )}
-                    </div>
-                    {isEditing && <p className="text-xs text-gray-500 mt-1">O nome deve ser único e sem espaços.</p>}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-5xl mx-auto">
+                <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                    <h2 className="text-xl font-bold text-gray-800 mb-4">Conexão WhatsApp</h2>
+                    <StatusDisplay 
+                        statusInfo={statusInfo} 
+                        qrCode={qrCode} 
+                        onConnect={handleConnect} 
+                        onDisconnect={handleDisconnect} 
+                        onRefresh={checkStatus}
+                        isChecking={isChecking}
+                        error={error} 
+                        disabled={!instanceName || isEditing}
+                    />
                 </div>
-                <StatusDisplay 
-                    statusInfo={statusInfo} 
-                    qrCode={qrCode} 
-                    onConnect={handleConnect} 
-                    onDisconnect={handleDisconnect} 
-                    onRefresh={checkStatus}
-                    isChecking={isChecking}
-                    error={error} 
-                    disabled={!instanceName || isEditing}
-                />
+                <GoogleContactsCard />
             </div>
         </div>
     );

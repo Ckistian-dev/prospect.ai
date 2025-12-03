@@ -1,1 +1,0 @@
-# Este arquivo vazio informa ao Python que este diretório deve ser tratado como um pacote.

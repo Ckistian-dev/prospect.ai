@@ -1,0 +1,137 @@
+services:
+  # --- Banco de Dados PostgreSQL ---
+  db:
+    image: postgres:15-alpine
+    container_name: prospectai_db
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data/
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh # Script para criar o DB da Evolution
+    env_file:
+      - ./.env
+    environment:
+      - POSTGRES_USER=${DATABASE_USER}
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD}
+      - POSTGRES_DB=${DATABASE_NAME},${EVOLUTION_DB_NAME} # Cria os dois bancos de dados na inicialização
+    ports:
+      - "5436:5432" # Exponha apenas se precisar acessar o DB de fora do Docker
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER} -d ${DATABASE_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Cache Redis ---
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    ports:
+      - "6379:6379" # Exponha apenas se precisar acessar o Redis de fora do Docker
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Evolution API ---
+  evolution_api:
+    image: evoapicloud/evolution-api:latest # Imagem oficial da Evolution API
+    container_name: evolution_api
+    # Adiciona um atraso para garantir que o script init-db.sh tenha tempo de ser executado
+    command: /bin/sh -c "sleep 10 && /usr/bin/npm start"
+    restart: always
+    ports:
+      - "8080:8080" # Porta da API Baileys
+    volumes:
+      # Mapeia o diretório de instâncias da Evolution para uma pasta local
+      - ./data/evolution:/evolution/instances
+    networks:
+      - app-network
+    env_file:
+      - ./.env
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    environment:
+      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY} # Chave de API global para a Evolution
+      - CORS_ORIGIN=* # Permite acesso de qualquer origem (ajuste se necessário)
+      # --- Configurações do Banco de Dados para a Evolution ---
+      # O banco de dados já é criado pelo serviço 'db'.
+      # A Evolution API usará a connection string para se conectar e aplicar as migrações.
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://${DATABASE_USER}:${DATABASE_PASSWORD}@db:5432/${EVOLUTION_DB_NAME}
+      # --- Configurações do Redis ---
+      - REDIS_ENABLED=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # Configurações de Cache do Redis (baseado na sua documentação)
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://redis:6379/6
+      - CACHE_REDIS_PREFIX_KEY=evolution
+      - CACHE_REDIS_SAVE_INSTANCES=false
+
+  # --- API Principal (FastAPI) ---
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: prospectai_api
+    command: /opt/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./.env
+    depends_on:
+      db: 
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      evolution_api:
+        condition: service_started
+    environment:
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672/
+      - GOOGLE_API_KEYS=${GOOGLE_API_KEYS}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - DATABASE_URL=postgresql+asyncpg://${DATABASE_USER}:${DATABASE_PASSWORD}@db:5432/${DATABASE_NAME} # Adicionado para clareza
+      - EVOLUTION_API_URL=http://evolution_api:8080 # Aponta para o contêiner da Evolution
+      - EVOLUTION_API_KEY=${EVOLUTION_API_KEY} # Chave de autenticação global
+      - EVOLUTION_INSTANCE_NAME=prospectai_instance # Nome da instância que sua API vai usar
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - FRONTEND_URL=${FRONTEND_URL}
+    networks:
+      - app-network
+
+  # --- Worker para o Agente de Prospecção ---
+  agent_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent_worker
+    # O comando inicia o script do worker. O 'sleep' dá tempo para a API e o DB iniciarem completamente.
+    command: ["/bin/sh", "-c", "sleep 15 && /opt/venv/bin/python -m app.agent_worker"]
+    volumes:
+      - .:/app
+    env_file:
+      - ./.env
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started # Depende da API para garantir que os serviços estejam disponíveis
+    networks:
+      - app-network
+
+# --- Definição da Rede e Volumes ---
+networks:
+  app-network:
+    driver: bridge

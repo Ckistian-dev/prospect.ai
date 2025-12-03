@@ -9,6 +9,8 @@ import Prospects from './pages/Prospects';
 import Configs from './pages/Configs';
 import Whatsapp from './pages/Whatsapp';
 import MainProspecting from './pages/MainProspecting'; 
+import PrivacyPolicy from './pages/PrivacyPolicy'; // Nova importação
+import TermsOfService from './pages/TermsOfService'; // Nova importação
 
 import MainLayout from './components/MainLayout';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -19,6 +21,10 @@ function App() {
   // O componente agora retorna diretamente o <Routes>, sem o <Router> ao redor
   return (
     <Routes>
+      {/* Rotas Públicas */}
+      <Route path="/politicies" element={<PrivacyPolicy />} />
+      <Route path="/services-terms" element={<TermsOfService />} />
+
       <Route path="/login" element={<Login setIsAuthenticated={setIsAuthenticated} />} />
       
       <Route path="/" element={ <ProtectedRoute> <MainLayout /> </ProtectedRoute> }>
@@ -38,4 +44,3 @@ function App() {
 }
 
 export default App;
-
