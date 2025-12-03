@@ -21,24 +21,28 @@ function App() {
   // O componente agora retorna diretamente o <Routes>, sem o <Router> ao redor
   return (
     <Routes>
-      {/* Rotas Públicas */}
-      <Route path="/politicies" element={<PrivacyPolicy />} />
-      <Route path="/services-terms" element={<TermsOfService />} />
-
-      <Route path="/login" element={<Login setIsAuthenticated={setIsAuthenticated} />} />
-      
-      <Route path="/" element={ <ProtectedRoute> <MainLayout /> </ProtectedRoute> }>
+      {/* Rotas Protegidas (dentro do MainLayout) */}
+      <Route path="/" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="contacts" element={<Contacts />} />
         <Route path="prospects" element={<Prospects />} />
         <Route path="configs" element={<Configs />} />
         <Route path="whatsapp" element={<Whatsapp />} />
         <Route path="prospecting" element={<MainProspecting />} />
+        {/* Redireciona a raiz "/" para "/dashboard" dentro do layout protegido */}
         <Route index element={<Navigate to="/dashboard" />} />
       </Route>
-      
-      {/* Rota genérica para redirecionar qualquer outra coisa para o login */}
-      <Route path="*" element={<Navigate to="/login" />} />
+
+      {/* Rotas Públicas */}
+      <Route path="/login" element={<Login setIsAuthenticated={setIsAuthenticated} />} />
+      <Route path="/politicies" element={<PrivacyPolicy />} />
+      <Route path="/services-terms" element={<TermsOfService />} />
+
+      {/* 
+        Redirecionamento para a página de login se nenhuma outra rota corresponder.
+        Isso garante que rotas desconhecidas não mostrem uma página em branco.
+      */}
+      <Route path="*" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
     </Routes>
   );
 }
