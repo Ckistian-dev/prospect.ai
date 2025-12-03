@@ -7,7 +7,7 @@ const PrivacyPolicy = () => {
         <h1 className="text-3xl font-bold text-gray-900 mb-6 text-center">Política de Privacidade</h1>
         
         <div className="prose prose-lg text-gray-700 max-w-none">
-          <p><strong>Última atualização:</strong> [INSERIR DATA]</p>
+          <p><strong>Última atualização:</strong> 03/12/2025</p>
 
           <h2 className="text-2xl font-semibold mt-8 mb-4">1. Introdução</h2>
           <p>
@@ -49,7 +49,7 @@ const PrivacyPolicy = () => {
           <p>
             Se tiver dúvidas ou comentários sobre esta Política de Privacidade, entre em contato connosco em:
             <br />
-            [INSERIR SEU E-MAIL DE CONTATO]
+            desenvolvimento@cjssolucoes.com
           </p>
         </div>
       </div>

@@ -7,7 +7,7 @@ const TermsOfService = () => {
         <h1 className="text-3xl font-bold text-gray-900 mb-6 text-center">Termos de Serviço</h1>
 
         <div className="prose prose-lg text-gray-700 max-w-none">
-          <p><strong>Última atualização:</strong> [INSERIR DATA]</p>
+          <p><strong>Última atualização:</strong> 03/12/2025</p>
 
           <h2 className="text-2xl font-semibold mt-8 mb-4">1. Acordo com os Termos</h2>
           <p>
@@ -40,7 +40,7 @@ const TermsOfService = () => {
           </p>
 
           <h2 className="text-2xl font-semibold mt-8 mb-4">7. Contato</h2>
-          <p>Se tiver alguma dúvida sobre estes Termos, entre em contato connosco em: [INSERIR SEU E-MAIL DE CONTATO].</p>
+          <p>Se tiver alguma dúvida sobre estes Termos, entre em contato connosco em: desenvolvimento@cjssolucoes.com.</p>
         </div>
       </div>
     </div>
