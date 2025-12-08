@@ -12,12 +12,19 @@
 # 5. Copie o hash gerado e cole na coluna 'senha' da sua planilha.
 
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Carrega as variáveis de ambiente do arquivo .env na pasta 'backend'
-env_path = Path(__file__).parent / '.env'
+# --- Adiciona o diretório raiz do projeto ao sys.path ---
+# Isso garante que o script possa encontrar o pacote 'app'
+project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root))
+
+# Carrega as variáveis de ambiente do arquivo .env na pasta raiz ('backend')
+env_path = project_root / '.env'
 load_dotenv(dotenv_path=env_path)
+# --- Fim da correção de path ---
 
 from app.services.security import get_password_hash
 

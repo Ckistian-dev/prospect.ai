@@ -1,4 +1,4 @@
-from sqlalchemy import ( Column, Integer, String, ForeignKey, Text, DateTime, func, ARRAY )
+from sqlalchemy import ( Column, Integer, String, ForeignKey, Text, DateTime, func, ARRAY, Time )
 from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
 from typing import List, Optional
@@ -50,7 +50,10 @@ class Config(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     nome_config: Mapped[str] = mapped_column(String(100), nullable=False)
-    prompt_config: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    spreadsheet_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    drive_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="ID da pasta do Google Drive")
+    contexto_sheets: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    arquivos_drive: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
     # Relacionamentos
@@ -62,12 +65,13 @@ class Prospect(Base):
     id = Column(Integer, primary_key=True, index=True)
     nome_prospeccao = Column(String, index=True, nullable=False)
     status = Column(String, default="Pendente")
-    log = Column(Text, default="")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     user_id = Column(Integer, ForeignKey('users.id'))
     config_id = Column(Integer, ForeignKey('configs.id'))
     followup_interval_minutes = Column(Integer, default=0)
     initial_message_interval_seconds = Column(Integer, default=90, nullable=False)
+    horario_inicio = Column(Time, nullable=True)
+    horario_fim = Column(Time, nullable=True)
     
     owner = relationship("User", back_populates="prospects")
     config = relationship("Config")

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axiosConfig';
-import { Play, Pause, Trash2, Edit, Loader2, Search, MessageSquare, ChevronDown, Table as TableIcon, AlertTriangle } from 'lucide-react';
+import { Play, Pause, Trash2, Edit, Loader2, Search, MessageSquare, ChevronDown, Table as TableIcon, AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from 'lucide-react';
 
 // --- COMPONENTES INTERNOS DE MODAL ---
 
@@ -22,7 +22,7 @@ const Modal = ({ onClose, children }) => {
     );
 };
 
-const ConversationModal = ({ onClose, conversation, contactIdentifier }) => {
+export const ConversationModal = ({ onClose, conversation, contactIdentifier }) => {
     const chatContainerRef = useRef(null);
 
     useEffect(() => {
@@ -71,7 +71,7 @@ const ConversationModal = ({ onClose, conversation, contactIdentifier }) => {
     );
 };
 
-const EditContactModal = ({ contact, statusOptions, onSave, onClose }) => {
+export const EditContactModal = ({ contact, statusOptions, onSave, onClose }) => {
     const [situacao, setSituacao] = useState(contact.situacao);
     const [observacoes, setObservacoes] = useState(contact.observacoes || '');
 
@@ -134,6 +134,10 @@ function Prospects() {
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
 
+    // --- Estado da Paginação ---
+    const [currentPage, setCurrentPage] = useState(1);
+    const contactsPerPage = 10;
+
     const [modal, setModal] = useState({ type: null, data: null });
     
     const statusOptions = ["Aguardando Início", "Aguardando Resposta", "Resposta Recebida", "Lead Qualificado", "Não Interessado", "Concluído", "Sem Whatsapp", "Falha no Envio", "Erro IA"];
@@ -150,6 +154,7 @@ function Prospects() {
             } else if (activeCampaigns.length === 0) {
                 setSelectedProspect(null);
                 setContacts([]);
+                setCurrentPage(1);
             }
         } catch (err) {
             setError('Não foi possível carregar a lista de campanhas.');
@@ -166,6 +171,7 @@ function Prospects() {
         if (!selectedProspect) {
             setContacts([]);
             setFilteredContacts([]);
+            setCurrentPage(1);
             return;
         };
         setIsLoading(prev => ({ ...prev, data: true }));
@@ -177,6 +183,7 @@ function Prospects() {
                 contactName: row.nome 
             }));
             setContacts(enrichedData || []);
+            setCurrentPage(1);
         } catch (err) {
             setError(`Não foi possível carregar os dados de "${selectedProspect.nome_prospeccao}".`);
             setContacts([]);
@@ -200,6 +207,7 @@ function Prospects() {
             )
         );
         setFilteredContacts(filtered);
+        setCurrentPage(1);
     }, [searchTerm, contacts]);
     
     const handleSaveContactEdit = async (contactId, updates) => {
@@ -236,6 +244,17 @@ function Prospects() {
             'Aguardando Início': "bg-purple-100 text-purple-800",
         };
         return `${baseClasses} ${statusMap[status] || 'bg-gray-100 text-gray-600'}`;
+    };
+
+    // --- Lógica de Paginação ---
+    const indexOfLastContact = currentPage * contactsPerPage;
+    const indexOfFirstContact = indexOfLastContact - contactsPerPage;
+    const currentContacts = filteredContacts.slice(indexOfFirstContact, indexOfLastContact);
+    const totalPages = Math.ceil(filteredContacts.length / contactsPerPage);
+
+    const paginate = (pageNumber) => {
+        if (pageNumber < 1 || pageNumber > totalPages) return;
+        setCurrentPage(pageNumber);
     };
 
     return (
@@ -307,8 +326,8 @@ function Prospects() {
                                 <tr><td colSpan="5" className="text-center p-8"><Loader2 size={32} className="animate-spin text-green-600 mx-auto" /></td></tr>
                             ) : error ? (
                                 <tr><td colSpan="5" className="text-center p-8 text-red-500">{error}</td></tr>
-                            ) : filteredContacts.length > 0 ? (
-                                filteredContacts.map((row) => (
+                            ) : currentContacts.length > 0 ? (
+                                currentContacts.map((row) => (
                                     <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
                                         <td className="p-4 font-medium text-gray-800">{row.nome}</td>
                                         <td className="p-4 text-gray-700">{row.whatsapp}</td>
@@ -335,6 +354,20 @@ function Prospects() {
                         </tbody>
                     </table>
                 </div>
+
+                {totalPages > 1 && (
+                    <div className="flex justify-between items-center mt-6">
+                        <span className="text-sm text-gray-500">Página {currentPage} de {totalPages} ({filteredContacts.length} contatos)</span>
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => paginate(1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsLeft size={16} /></button>
+                            <button onClick={() => paginate(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronLeft size={16} /></button>
+                            <span className="px-2 text-sm text-gray-600 font-medium">{currentPage}</span>
+                            <button onClick={() => paginate(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronRight size={16} /></button>
+                            <button onClick={() => paginate(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsRight size={16} /></button>
+                        </div>
+                    </div>
+                )}
+
             </div>
 
             {modal.type === 'conversation' && (
@@ -367,4 +400,3 @@ function Prospects() {
 }
 
 export default Prospects;
-

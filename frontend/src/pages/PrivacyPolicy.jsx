@@ -47,7 +47,7 @@ const PrivacyPolicy = () => {
 
           <h2 className="text-2xl font-semibold mt-8 mb-4">6. Contato</h2>
           <p>
-            Se tiver dúvidas ou comentários sobre esta Política de Privacidade, entre em contato connosco em:
+            Se tiver dúvidas ou comentários sobre esta Política de Privacidade, entre em contato conosco em:
             <br />
             desenvolvimento@cjssolucoes.com
           </p>

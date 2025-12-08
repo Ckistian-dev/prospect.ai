@@ -4,6 +4,7 @@ from datetime import timezone
 import logging
 import json
 from datetime import datetime
+import base64
 from typing import Optional, List, Dict, Any
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,47 +104,113 @@ class GeminiService:
     async def transcribe_and_analyze_media(
         self, 
         media_data: dict, 
-        db_history: List[dict], 
         config: models.Config,
         db: AsyncSession,
-        user: models.User
+        user: models.User,
+        db_history: Optional[List[dict]] = None
     ) -> str:
         logger.info(f"Iniciando transcrição/análise para mídia do tipo {media_data.get('mime_type')}")
         prompt_parts = []
-        
-        if 'audio' in media_data['mime_type']:
-            task = "Sua única tarefa é transcrever o áudio a seguir. Retorne apenas o texto transcrito, sem adicionar nenhuma outra palavra ou formatação."
-            prompt_parts.append(task)
-            prompt_parts.append(media_data)
+
+        # --- CORREÇÃO INÍCIO: Conversão de mídia para binário ---
+        raw_data = media_data.get("data")
+        mime_type = media_data.get("mime_type")
+
+        # Garante que os dados de mídia sejam binários (bytes) para a API do Gemini.
+        # Se recebermos uma string, assumimos que é base64 e a decodificamos.
+        if isinstance(raw_data, str):
             try:
-                response = await self._generate_with_retry_async(prompt_parts, db, user, force_json=False)
-                transcription = response.text.strip()
-                logger.info(f"Transcrição de áudio gerada: '{transcription[:100]}...'")
-                return transcription
-            except Exception as e:
-                logger.error(f"Erro ao transcrever áudio: {e}")
-                return f"[Erro ao processar áudio: {media_data.get('mime_type')}]"
+                # Remove o cabeçalho de Data URL se presente
+                if "base64," in raw_data:
+                    raw_data = raw_data.split("base64,")[1]
+                
+                # Decodifica a string base64 para bytes
+                raw_data = base64.b64decode(raw_data)
+            except (IndexError, base64.binascii.Error) as e:
+                logger.error(f"Falha ao decodificar mídia em base64: {e}")
+                return f"[Erro: Formato de mídia inválido ({e})]"
+
+        # A API do Gemini espera que o campo 'data' seja bytes.
+        if not isinstance(raw_data, bytes):
+            logger.error(f"Os dados da mídia não são binários e não puderam ser convertidos. Tipo: {type(raw_data)}")
+            return "[Erro: Dados de mídia em formato inesperado]"
+
+        file_part = {"mime_type": mime_type, "data": raw_data}
+
+        if 'audio' in media_data['mime_type']:
+            # --- CORREÇÃO: Simplificação do prompt de transcrição ---
+            # O modelo é mais eficaz para transcrição quando o prompt é direto.
+            # Pedir JSON para uma tarefa simples como essa pode confundir o modelo.
+            transcription_prompt = "Transcreva este áudio de forma literal. Retorne apenas o texto transcrito, sem nenhuma palavra ou formatação adicional."
+            prompt_parts.append(transcription_prompt)
+            prompt_parts.append(file_part)
+            
+            max_retries = 3
+            last_error = "Nenhum erro registrado."
+
+            for attempt in range(max_retries):
+                try:
+                    # force_json=False, pois não esperamos mais um JSON como resposta.
+                    response = await self._generate_with_retry_async(prompt_parts, db, user, force_json=False)
+                    
+                    transcription = response.text.strip()
+                    if not transcription:
+                        reason = response.candidates[0].finish_reason.name if response.candidates else "UNKNOWN"
+                        logger.warning(f"Tentativa {attempt + 1}/{max_retries}: Transcrição vazia. Razão: {reason}. Tentando novamente...")
+                        last_error = f"Resposta vazia da IA (Razão: {reason})"
+                        await asyncio.sleep(1)
+                        continue
+
+                    logger.info(f"Transcrição de áudio gerada: '{transcription[:100]}...'")
+                    return transcription
+
+                except Exception as e:
+                    logger.error(f"Tentativa {attempt + 1}/{max_retries}: Erro ao transcrever áudio: {e}", exc_info=True)
+                    last_error = str(e)
+                    await asyncio.sleep(1)
+
+            logger.error(f"Falha ao transcrever áudio após {max_retries} tentativas. Último erro: {last_error}")
+            return f"[Erro ao processar áudio após {max_retries} tentativas]"
 
         else:
-            formatted_history = self._format_history_for_prompt(db_history)
-            analysis_prompt = {
-                "instrucao_geral": "Você é um assistente de vendas analisando um arquivo enviado por um contato...",
-                "formato_resposta_obrigatorio": {
-                    "descricao": "Sua resposta DEVE ser um único objeto JSON válido contendo a chave 'resumo'.",
-                    "chaves": {"resumo": "Um texto curto e objetivo que descreve o conteúdo do arquivo..."}
-                },
-                "configuracao_persona": config.prompt_config,
-                "dados_atuais_conversa": {"historico_conversa": formatted_history},
-                "tarefa_imediata": "Analise o arquivo a seguir e retorne o resumo em formato JSON..."
-            }
+            # --- ANÁLISE DE IMAGEM/PDF ---
+            if db_history is None:
+                db_history = []
 
-            prompt_parts.append(json.dumps(analysis_prompt, ensure_ascii=False, indent=2))
-            prompt_parts.append(media_data)
+            formatted_history = self._format_history_for_prompt(db_history or [])
+            
+            contexto_planilha_str = json.dumps(config.contexto_sheets or {"aviso": "Nenhum contexto de planilha foi fornecido."}, ensure_ascii=False, indent=2)
+            historico_conversa_str = json.dumps(formatted_history, ensure_ascii=False, indent=2)
+
+            analysis_prompt_text = f"""
+                **Instrução Geral:**
+                Você é um especialista em extração de dados de documentos e imagens. Sua tarefa é analisar o arquivo enviado (imagem ou documento) e extrair as informações relevantes. O resultado será usado como contexto para outra IA e não deve ter o tom da persona.
+
+                **Regras:**
+                1.  **Foco na Extração de Dados:** Sua prioridade é EXTRAIR os dados importantes do arquivo. Use o histórico da conversa e o contexto da planilha para entender o que é relevante.
+                2.  **Seja um Extrator, Não um Assistente:** Sua resposta deve ser puramente a informação extraída. Não converse, não cumprimente, não use a persona do assistente.
+                3.  **Resposta Limpa:** Sua resposta final deve ser APENAS o objeto JSON, sem nenhuma outra palavra, título ou formatação como ```json.
+
+                **Formato de Resposta Obrigatório (JSON):**
+                Sua resposta DEVE ser um único objeto JSON válido com a seguinte chave:
+                {{
+                "analise": "O texto puro da análise/extração do arquivo, seguindo as regras acima."
+                }}
+
+                **Contexto para Análise:**
+                - **Contexto da Planilha:** {contexto_planilha_str}
+                - **Histórico da Conversa:** {historico_conversa_str}
+
+                **Tarefa Imediata:**
+                Analise o arquivo a seguir e retorne a extração de dados no formato JSON especificado.
+                """
+            prompt_parts.append(analysis_prompt_text)
+            prompt_parts.append(file_part)
 
             try:
                 response = await self._generate_with_retry_async(prompt_parts, db, user, force_json=True)
                 response_json = json.loads(response.text)
-                analysis = response_json.get("resumo", "[Não foi possível extrair o resumo da análise]").strip()
+                analysis = response_json.get("analise", "[Não foi possível extrair a análise]").strip()
                 logger.info(f"Análise de mídia gerada: '{analysis[:100]}...'")
                 return analysis
             except Exception as e:
@@ -160,49 +227,83 @@ class GeminiService:
         db: AsyncSession,
         user: models.User
     ) -> dict:
-        try:
-            # ... (lógica interna do prompt permanece a mesma)
-            campaign_config = self._replace_variables_in_dict(config.prompt_config, contact)
-            task_map = {
-                'initial': "Gerar a primeira mensagem de prospecção para iniciar a conversa, caso ela já não tenha iniciado.",
-                'reply': "Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa.",
-                'followup': "Analisar as mensagens e decidir entre continuar o fluxo, fazer um follow-up ou se não é necessário mais nada apenas retorne 'null' no campo 'mensagem_para_enviar"
-            }
-            formatted_history = self._format_history_for_prompt(conversation_history_db)
-            master_prompt = {
-                "instrucao_geral": "Você é um assistente de prospecção e vendas...",
-                "formato_resposta_obrigatorio": {
-                    "descricao": "Sua resposta DEVE ser um único objeto JSON válido...",
-                    "chaves": {
-                        "mensagem_para_enviar": "...",
-                        "nova_situacao": "...",
-                        "observacoes": "..."
-                    },
-                    "regra_importante_variaveis": "CRÍTICO: NUNCA inclua placeholders..."
+        # Substitui a lógica de prompt_config pela nova lógica de contexto
+        # A função _replace_variables_in_dict ainda pode ser útil no contexto_sheets se você usar variáveis lá
+        contexto_sheets_processado = self._replace_variables_in_dict(config.contexto_sheets or {}, contact)
+        arquivos_drive_processado = config.arquivos_drive or {}
+
+        task_map = {
+            'initial': "Gerar a primeira mensagem de prospecção para iniciar a conversa. Seja breve e direto.",
+            'reply': "Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa, usando o contexto disponível.",
+            'followup': "Analisar as mensagens e decidir entre continuar o fluxo, fazer um follow-up ou se não é necessário mais nada apenas retorne 'null' no campo 'mensagem_para_enviar"
+        }
+        formatted_history = self._format_history_for_prompt(conversation_history_db)
+        master_prompt = {
+            "instrucao_geral": "Você é um assistente de prospecção e vendas...",
+            "formato_resposta_obrigatorio": {
+                "descricao": "Sua resposta DEVE ser um único objeto JSON válido...",
+                "chaves": {
+                    "mensagem_para_enviar": "...",
+                    "nova_situacao": "Um dos seguintes: 'Aguardando Resposta', 'Lead Qualificado', 'Não Interessado', 'Concluído'.",
+                    "observacoes": "Um resumo objetivo da interação para registro interno."
                 },
-                "configuracao_campanha": campaign_config,
-                "dados_atuais_conversa": {
-                    "contato_nome": contact.nome,
-                    "tarefa_imediata": task_map.get(mode, "Continuar a conversa de forma coerente."),
-                    "historico_conversa": formatted_history
-                }
+                "regra_importante_variaveis": "CRÍTICO: NUNCA inclua placeholders como {{nome_contato}} na resposta final."
+            },
+            "contexto_conhecimento": {
+                "descricao": "Fonte de verdade primária para responder perguntas. Use estes dados antes do seu conhecimento geral.",
+                "planilhas": contexto_sheets_processado or {"aviso": "Nenhum dado de planilha disponível."},
+            },
+            "arquivos_disponiveis": {
+                "descricao": "Estrutura de arquivos que você pode sugerir ao cliente. Se for enviar um, retorne o 'id' do arquivo no campo 'arquivos_anexos' da resposta.",
+                "estrutura": arquivos_drive_processado or {"aviso": "Nenhum arquivo do Drive disponível."}
+            },
+            "dados_atuais_conversa": {
+                "contato_nome": contact.nome,
+                "contato_numero": contact.whatsapp,
+                "contato_observacoes": contact.observacoes,
+                "tarefa_imediata": task_map.get(mode, "Continuar a conversa de forma coerente."),
+                "historico_conversa": formatted_history
             }
+        }
 
-            final_prompt_str = json.dumps(master_prompt, ensure_ascii=False, indent=2)
-            
-            # Passa 'db' e 'user' para a função de geração
-            response = await self._generate_with_retry_async(final_prompt_str, db, user, force_json=True)
-            
-            clean_response = response.text.strip().replace("```json", "").replace("```", "")
-            return json.loads(clean_response)
+        final_prompt_str = json.dumps(master_prompt, ensure_ascii=False, indent=2)
+        max_retries = 3
+        last_error = None
 
-        except Exception as e:
-            logger.error(f"Erro ao gerar ação de conversação (Modo: {mode}) com Gemini: {e}")
-            return {
-                "mensagem_para_enviar": None,
-                "nova_situacao": "Erro IA",
-                "observacoes": f"Falha da IA: {str(e)}"
-            }
+        for attempt in range(max_retries):
+            try:
+                response = await self._generate_with_retry_async(final_prompt_str, db, user, force_json=True)
+                clean_response_text = response.text.strip().replace("```json", "").replace("```", "")
+                response_data = json.loads(clean_response_text)
+
+                # Validação da resposta: verifica se a mensagem não é nula ou vazia (após remover espaços)
+                # A exceção é o modo 'followup', onde uma mensagem vazia pode ser intencional.
+                message_to_send = response_data.get("mensagem_para_enviar")
+                if mode != 'followup' and (message_to_send is None or not str(message_to_send).strip()):
+                    logger.warning(f"Tentativa {attempt + 1}/{max_retries}: IA gerou mensagem vazia. Tentando novamente...")
+                    last_error = "IA gerou mensagem vazia."
+                    await asyncio.sleep(1)  # Pequena pausa antes de tentar novamente
+                    continue
+
+                return response_data  # Retorna a resposta válida
+
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Tentativa {attempt + 1}/{max_retries}: Erro de formato na resposta da IA ({e}). Tentando novamente...")
+                last_error = f"Erro de formato JSON: {e}"
+                await asyncio.sleep(1)
+                continue
+            except Exception as e:
+                logger.error(f"Erro na tentativa {attempt + 1}/{max_retries} ao gerar ação (Modo: {mode}): {e}", exc_info=True)
+                last_error = str(e)
+                break # Sai do loop em caso de erro crítico (ex: quota)
+
+        # Se todas as tentativas falharem
+        logger.error(f"Falha ao gerar ação de conversação para o modo '{mode}' após {max_retries} tentativas.")
+        return {
+            "mensagem_para_enviar": None,
+            "nova_situacao": "Erro IA",
+            "observacoes": f"Falha da IA após {max_retries} tentativas: {last_error}"
+        }
 
     async def analyze_prospecting_data(
         self,

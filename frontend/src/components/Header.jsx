@@ -1,104 +1,161 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useLocation } from 'react-router-dom'; // Importa o hook para saber a URL atual
-import { Mail, Ticket, User as UserIcon, AlertCircle, LogOut } from 'lucide-react';
+import { CSSTransition, SwitchTransition } from 'react-transition-group';
+import { Ticket, User as UserIcon, AlertCircle, Zap, Activity } from 'lucide-react';
 import api from '../api/axiosConfig';
+
+// --- Sub-componente para o Ticker de Atividade ---
+const ActivityTicker = ({ activity }) => {
+    if (!activity) {
+        return (
+            <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                <Activity size={16} />
+                <span className="font-medium hidden sm:inline">Nenhuma atividade recente</span>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex items-center gap-2 text-sm text-gray-600 px-2 py-1" title={`Observação: ${activity.observacao || 'N/A'}`}>
+            <Activity size={16} className="text-brand-green" />
+            <div className="font-normal hidden sm:flex items-center gap-1.5">
+                <span className="text-gray-500">{activity.campaignName} -</span>
+                <span className="font-medium text-gray-700">{activity.contactName}:</span>
+                <span className="font-semibold text-gray-800">{activity.situacao}</span>
+            </div>
+        </div>
+    );
+};
 
 const Header = () => {
   const [user, setUser] = useState(null);
+  const [latestActivity, setLatestActivity] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const location = useLocation(); // Hook para obter a localização atual (URL)
 
-  // Função para buscar os dados do usuário. Envolvida em useCallback para estabilidade.
-  const fetchUserData = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const response = await api.get('/auth/me');
-      setUser(response.data);
+      // Usamos Promise.all para buscar os dados em paralelo
+      const [userRes, dashboardRes] = await Promise.all([
+        api.get('/auth/me'),
+        api.get('/dashboard/')
+      ]);
+
+      setUser(userRes.data);
+
+      const newActivity = dashboardRes.data.recentActivity?.[0];
+      
+      // Usando a forma funcional do setState para evitar dependência desnecessária no useCallback
+      setLatestActivity(currentActivity => {
+        if (newActivity && JSON.stringify(newActivity) !== JSON.stringify(currentActivity)) {
+          return newActivity;
+        }
+        return currentActivity;
+      });
+
     } catch (err) {
-      console.error("Erro ao buscar/atualizar dados do usuário:", err);
+      console.error("Erro ao buscar dados do header:", err);
       setError(true);
-      // Se der erro na atualização, mantém os dados antigos para não quebrar a UI
     }
   }, []);
 
-  // Efeito para buscar os dados iniciais do usuário (roda apenas uma vez)
   useEffect(() => {
     const loadInitialData = async () => {
         setLoading(true);
-        await fetchUserData();
+        await fetchData();
         setLoading(false);
     };
     loadInitialData();
-  }, [fetchUserData]);
+  }, [fetchData]);
 
-  // --- LÓGICA DE ATUALIZAÇÃO AUTOMÁTICA ---
-  // Este efeito é responsável por iniciar e parar a atualização dos tokens
+  // Atualiza os dados periodicamente e ao focar na aba
   useEffect(() => {
+    let isMounted = true;
     let intervalId = null;
 
-    // Verifique se a URL atual é a da página de prospecção.
-    // AJUSTE '/prospects' se o caminho da sua página for diferente.
-    const isProspectingPage = location.pathname.includes('/prospecting');
-
-    if (isProspectingPage) {
-      // Se estiver na página correta, cria um intervalo que chama a função de busca
-      // a cada 5 segundos (5000 milissegundos).
-      intervalId = setInterval(fetchUserData, 5000);
-      console.log("Iniciando atualização de tokens...");
-    }
-
-    // A função de limpeza do useEffect. Ela é executada quando o usuário
-    // sai da página de prospecção, parando as chamadas desnecessárias à API.
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-        console.log("...Parando atualização de tokens.");
+    const poll = async () => {
+      if (document.visibilityState === 'visible' && isMounted) { // Só busca se a aba estiver visível
+        await fetchData();
       }
     };
-  }, [location.pathname, fetchUserData]); // Roda sempre que a URL ou a função de busca mudar
 
-  // Função de logout simples (pode ser movida para um serviço se preferir)
-  const handleLogout = () => {
-    localStorage.removeItem('access_token');
-    // Redireciona para a página de login
-    window.location.href = '/login';
-  };
+    const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible' && isMounted) {
+            poll(); // Chama o poll imediatamente ao voltar para a aba
+        }
+    };
+
+    // Inicia o polling
+    intervalId = setInterval(poll, 5000);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [fetchData]);
 
   const renderContent = () => {
     if (loading) {
-      return <div className="h-6 bg-gray-200 rounded-md w-48 animate-pulse"></div>;
+      return <div className="h-8 bg-gray-200 rounded-full w-full animate-pulse"></div>;
     }
-    if (error || !user) {
+    if (error) {
       return (
         <div className="flex items-center gap-2 text-sm text-red-600">
           <AlertCircle size={18} />
-          <span>Não foi possível carregar os dados do usuário.</span>
+          <span>Erro ao carregar.</span>
         </div>
       );
     }
     return (
-      <>
-        <div className="flex items-center gap-2 text-gray-600" title="Seus tokens restantes">
-          <Ticket size={20} className="text-brand-green" />
-          <span className="font-semibold text-gray-800">{user.tokens}</span>
-          <span className="text-sm hidden sm:inline">Tokens</span>
+        <div className="w-full flex justify-between items-center">
+            {/* Lado Esquerdo */}
+            <div className="flex items-center gap-4 sm:gap-5">
+                <style jsx global>{`
+                    .activity-ticker-wrapper {
+                        position: relative;
+                        height: 34px;
+                        overflow: hidden;
+                    }
+                    .fade-enter { opacity: 0; transform: translateY(-20px); }
+                    .fade-enter-active { opacity: 1; transform: translateY(0); transition: all 400ms ease-out; }
+                    .fade-exit { opacity: 1; transform: translateY(0); }
+                    .fade-exit-active { opacity: 0; transform: translateY(20px); transition: all 400ms ease-in; }
+                `}</style>
+                <SwitchTransition mode="out-in">
+                    <CSSTransition
+                        key={latestActivity?.id || 'no-activity'}
+                        timeout={500}
+                        classNames="fade"
+                    >
+                        <div className="activity-ticker-wrapper">
+                            <ActivityTicker activity={latestActivity} />
+                        </div>
+                    </CSSTransition>
+                </SwitchTransition>
+            </div>
+
+            {/* Lado Direito */}
+            <div className="flex items-center gap-4 sm:gap-5">
+                <div className="flex items-center gap-2 text-gray-600" title="Seus tokens restantes">
+                    <Ticket size={20} className="text-brand-green" />
+                    <span className="font-semibold text-gray-800">{user?.tokens ?? '...'}</span>
+                    <span className="text-sm hidden sm:inline">Tokens</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
+                    <UserIcon size={18} />
+                    <span className="font-medium">{user?.email ?? '...'}</span>
+                </div>
+            </div>
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
-          <UserIcon size={18} />
-          <span className="font-medium">{user.email}</span>
-        </div>
-      </>
     );
   };
 
   return (
-    <header className="bg-white p-4 border-b border-gray-200 flex justify-end items-center shadow-sm">
-      <div className="flex items-center gap-4 sm:gap-6">
-        {renderContent()}
-      </div>
+    <header className="bg-white p-4 border-b border-gray-200 flex items-center shadow-sm">
+      {renderContent()}
     </header>
   );
 };
 
 export default Header;
-

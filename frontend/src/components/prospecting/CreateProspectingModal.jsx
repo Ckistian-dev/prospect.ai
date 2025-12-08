@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../../api/axiosConfig';
 import Modal from '../Modal';
-import { Loader2, Check, ChevronDown } from 'lucide-react';
+import { Loader2, Check, ChevronDown, Clock } from 'lucide-react';
 
 function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
   const isEditMode = Boolean(prospectToEdit);
@@ -9,13 +9,15 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
   const [formData, setFormData] = useState({
     nome_prospeccao: '',
     categorias_selecionadas: [],
-    config_id: ''
+    config_id: '',
+    horario_inicio: '',
+    horario_fim: '',
   });
 
   const [initialIntervalValue, setInitialIntervalValue] = useState(90);
   const [initialIntervalUnit, setInitialIntervalUnit] = useState('seconds');
 
-  const [followupEnabled, setFollowupEnabled] = useState(true);
+  const [followupEnabled, setFollowupEnabled] = useState(false);
   const [followupValue, setFollowupValue] = useState(1);
   const [followupUnit, setFollowupUnit] = useState('days');
 
@@ -46,6 +48,8 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
         nome_prospeccao: prospectToEdit.nome_prospeccao,
         config_id: prospectToEdit.config_id,
         categorias_selecionadas: [],
+        horario_inicio: prospectToEdit.horario_inicio || '',
+        horario_fim: prospectToEdit.horario_fim || '',
       });
 
       if (prospectToEdit.followup_interval_minutes > 0) {
@@ -174,6 +178,8 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
           followup_interval_minutes,
           initial_message_interval_seconds,
           contact_ids_to_add: contact_ids_to_process,
+          horario_inicio: formData.horario_inicio || null,
+          horario_fim: formData.horario_fim || null,
         };
         const response = await api.put(`/prospecting/${prospectToEdit.id}`, updatePayload);
         onSuccess(response.data);
@@ -184,6 +190,8 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
           contact_ids: contact_ids_to_process,
           followup_interval_minutes,
           initial_message_interval_seconds,
+          horario_inicio: formData.horario_inicio || null,
+          horario_fim: formData.horario_fim || null,
         };
         const response = await api.post('/prospecting/', createPayload);
         onSuccess(response.data);
@@ -221,7 +229,7 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
           <div className="space-y-6">
             <div>
               <label htmlFor="nome_prospeccao" className="block text-sm font-medium text-gray-600 mb-1">Nome da Campanha</label>
-              <input type="text" name="nome_prospeccao" value={formData.nome_prospeccao} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green" />
+              <input type="text" name="nome_prospeccao" value={formData.nome_prospeccao} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green" placeholder='Prospecção de Clientes'/>
             </div>
             
             <div>
@@ -269,6 +277,24 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
               </select>
             </div>
             
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label htmlFor="horario_inicio" className="flex items-center gap-2 text-sm font-medium text-gray-600 mb-1">
+                        <Clock size={14}/> Início do Expediente
+                    </label>
+                    <input type="time" name="horario_inicio" value={formData.horario_inicio} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green" />
+                </div>
+                <div>
+                    <label htmlFor="horario_fim" className="flex items-center gap-2 text-sm font-medium text-gray-600 mb-1">
+                        <Clock size={14}/> Fim do Expediente
+                    </label>
+                    <input type="time" name="horario_fim" value={formData.horario_fim} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green" />
+                </div>
+            </div>
+            <p className="text-xs text-gray-500 -mt-4">
+                O agente só enviará mensagens iniciais e follow-ups dentro do expediente. Deixe em branco para operar 24h.
+            </p>
+
             <div>
               <label className="block text-sm font-medium text-gray-600 mb-2">Intervalo entre Novas Conversas</label>
               <div className="grid grid-cols-2 gap-4">

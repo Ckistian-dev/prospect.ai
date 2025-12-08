@@ -36,10 +36,11 @@ class Settings(BaseSettings):
     def RABBITMQ_URL(self) -> str:
         return f"amqp://{self.RABBITMQ_USER}:{self.RABBITMQ_PASS}@{self.RABBITMQ_HOST}:5672/"
 
-    # Google Gemini API
+    # Google
     GOOGLE_API_KEYS: str
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
+    GOOGLE_SERVICE_ACCOUNT_JSON: str
 
     # URL Base para Webhooks
     WEBHOOK_URL: str

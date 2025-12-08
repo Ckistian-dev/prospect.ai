@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import JSONResponse
 
@@ -13,27 +13,34 @@ router = APIRouter()
 
 @router.get("/auth/url", summary="Obter URL de autorização do Google")
 def get_google_auth_url(
+    redirect_uri: str = Query(..., description="A URL de callback do frontend para onde o Google deve redirecionar."),
     current_user: models.User = Depends(dependencies.get_current_active_user)
 ):
     """Gera e retorna a URL para o usuário autorizar o acesso aos seus contatos."""
     service = GoogleContactsService()
-    auth_url = service.get_authorization_url()
+    # Passa a redirect_uri recebida do frontend para o serviço
+    auth_url = service.get_authorization_url(redirect_uri=redirect_uri)
     return {"authorization_url": auth_url}
 
 @router.post("/auth/callback", summary="Callback de autorização do Google")
 async def google_auth_callback(
     code: str = Query(...),
+    redirect_uri: str = Query(...),
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(dependencies.get_current_active_user),
 ):
     """
     Recebe o código do Google, troca por credenciais e as salva no usuário.
+    É crucial que a redirect_uri aqui seja a mesma usada para gerar a URL de autorização.
     """
     service = GoogleContactsService()
     try:
-        credentials_dict = service.fetch_token(code)
+        # Passa o código e a redirect_uri para obter o token
+        credentials_dict = service.fetch_token(code=code, redirect_uri=redirect_uri)
         user_update = UserUpdate(google_credentials=credentials_dict)
-        await crud_user.update_user(db, db_obj=current_user, obj_in=user_update)
+        await crud_user.update_user(db, db_user=current_user, user_in=user_update)
+        # Garante que a transação seja confirmada antes de retornar a resposta.
+        await db.commit()
         return {"status": "success", "message": "Conta Google conectada com sucesso."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Falha ao obter token do Google: {e}")
@@ -70,7 +77,7 @@ async def sync_all_contacts(
         return {"message": "Nenhum contato para sincronizar."}
 
     service = GoogleContactsService(user=current_user)
-    result = service.sync_multiple_contacts(contacts)
+    result = await service.sync_multiple_contacts(contacts)
 
     return JSONResponse(content={
         "message": "Sincronização manual concluída.",

@@ -121,53 +121,69 @@ async def export_contacts_to_csv_string(db: AsyncSession, user_id: int) -> str:
         
     return stream.getvalue()
 
+async def _create_contacts_in_db(db: AsyncSession, contacts_to_create: List[models.Contact]) -> List[models.Contact]:
+    """Adiciona contatos em lote e os retorna com IDs preenchidos."""
+    db.add_all(contacts_to_create)
+    await db.commit()
+    # Após o commit, os objetos em contacts_to_create são atualizados com os IDs do banco de dados.
+    # Para garantir que todos os campos (como defaults do servidor) estejam carregados, podemos fazer um refresh.
+    # No entanto, para a sincronização do Google, o ID é o mais importante e já está disponível.
+    # O refresh em lote pode ser pesado, então vamos omiti-lo por performance, já que temos os dados necessários.
+    # for contact in contacts_to_create:
+    #     await db.refresh(contact)
+    return contacts_to_create
+
 async def import_contacts_from_csv_file(file: UploadFile, db: AsyncSession, user_id: int) -> int:
     """
     Processa um UploadFile CSV, valida as linhas e cria os contatos em lote.
+    A sincronização com o Google Contacts é feita em paralelo para otimização.
     """
     try:
         contents = await file.read()
         try:
             decoded_content = contents.decode('utf-8')
         except UnicodeDecodeError:
-            decoded_content = contents.decode('latin-1')
-            
+            try:
+                decoded_content = contents.decode('latin-1')
+            except UnicodeDecodeError:
+                raise HTTPException(status_code=400, detail="Não foi possível decodificar o arquivo. Tente salvá-lo como UTF-8.")
+
         stream = io.StringIO(decoded_content)
         reader = csv.DictReader(stream)
-        
+
         contacts_to_create = []
         for row in reader:
             if not row.get('nome') or not row.get('whatsapp'):
                 continue
-
+            
             clean_whatsapp = "".join(filter(str.isdigit, row['whatsapp']))
             categories = [cat.strip() for cat in row.get('categoria', '').split(',') if cat.strip()]
             observacoes = row.get('observacoes', None)
-
+            
             contact_obj = models.Contact(
                 nome=row['nome'],
                 whatsapp=clean_whatsapp,
                 categoria=categories,
                 observacoes=observacoes,
-                user_id=user_id
+                user_id=user_id,
             )
             contacts_to_create.append(contact_obj)
 
         if not contacts_to_create:
             return 0
 
-        db.add_all(contacts_to_create)
-        await db.commit()
-        
-        # Sincronização em massa com Google Contacts
+        # Insere os contatos no banco de dados em uma única transação
+        created_contacts = await _create_contacts_in_db(db, contacts_to_create)
+
+        # Sincronização em massa (e em paralelo) com Google Contacts
         user = await crud_user.get_user(db, user_id=user_id)
         if user and user.google_credentials:
-            logger.info(f"Iniciando sincronização em massa de {len(contacts_to_create)} contatos com o Google.")
-            # `contacts_to_create` contém objetos `models.Contact` que acabaram de ser criados
+            logger.info(f"Iniciando sincronização em massa de {len(created_contacts)} contatos com o Google.")
             google_service = GoogleContactsService(user=user)
-            google_service.sync_multiple_contacts(contacts_to_create)
+            # Usa o novo método de criação em lote para uma única requisição à API do Google
+            await google_service.batch_create_contacts(created_contacts)
 
-        return len(contacts_to_create)
+        return len(created_contacts)
 
     except Exception as e:
         logger.error(f"Erro detalhado ao processar CSV: {e}")

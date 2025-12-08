@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, computed_field
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, time
 
 # --- Schemas de Contato ---
 class ContactBase(BaseModel):
@@ -28,14 +28,20 @@ class Contact(ContactBase):
 # --- Schemas de Configuração ---
 class ConfigBase(BaseModel):
     nome_config: str
-    prompt_config: Dict[str, Any]
+    spreadsheet_id: Optional[str] = None
+    drive_id: Optional[str] = None
+    contexto_sheets: Optional[Dict[str, Any]] = None
+    arquivos_drive: Optional[Dict[str, Any]] = None
 
 class ConfigCreate(ConfigBase):
     pass
 
 class ConfigUpdate(BaseModel):
     nome_config: Optional[str] = None
-    prompt_config: Optional[Dict[str, Any]] = None
+    spreadsheet_id: Optional[str] = None
+    drive_id: Optional[str] = None
+    contexto_sheets: Optional[Dict[str, Any]] = None
+    arquivos_drive: Optional[Dict[str, Any]] = None
 
 class Config(ConfigBase):
     id: int
@@ -69,6 +75,8 @@ class ProspectBase(BaseModel):
     config_id: int
     followup_interval_minutes: int = 0
     initial_message_interval_seconds: int = 90
+    horario_inicio: Optional[time] = None
+    horario_fim: Optional[time] = None
 
 class ProspectCreate(ProspectBase):
     contact_ids: List[int]
@@ -80,12 +88,13 @@ class ProspectUpdate(BaseModel):
     followup_interval_minutes: Optional[int] = None
     initial_message_interval_seconds: Optional[int] = None
     contact_ids_to_add: Optional[List[int]] = None
+    horario_inicio: Optional[time] = None
+    horario_fim: Optional[time] = None
 
 class Prospect(ProspectBase):
     id: int
     user_id: int
     status: str
-    log: str
     created_at: datetime
     contacts: List[ProspectContact]
 
@@ -97,10 +106,16 @@ class Prospect(ProspectBase):
     class Config:
         from_attributes = True
 
-class ProspectLog(BaseModel):
-    log: str
-    status: str
-
+# --- Schemas de Log (NOVO) ---
+class ProspectActivityLog(BaseModel):
+    prospect_contact_id: int # Adicionado para a edição correta
+    contact_id: int # Adicionado para permitir a edição a partir do log
+    contact_name: str
+    contact_whatsapp: str
+    situacao: str
+    observacoes: Optional[str]
+    updated_at: datetime
+    conversa: str # Mantemos para o modal de conversa
 
 # --- Schemas de Usuário (ATUALIZADO) ---
 class UserBase(BaseModel):

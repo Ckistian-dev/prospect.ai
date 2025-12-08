@@ -1,23 +1,20 @@
 import asyncio
 import json
 import logging
-import random
 from typing import Dict, List, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, timezone, timedelta
 
 from app.api import dependencies
-from app.db.database import get_db, SessionLocal
-from app.db import models
-from app.db.schemas import Prospect, ProspectCreate, ProspectUpdate, ProspectLog, ProspectContactUpdate
+from app.db.database import get_db
+from app.db import models, schemas
+from app.db.schemas import Prospect, ProspectCreate, ProspectUpdate, ProspectContactUpdate
 from app.crud import crud_prospect, crud_config, crud_user
 from app.services.whatsapp_service import WhatsAppService, get_whatsapp_service, MessageSendError
 from app.services.gemini_service import GeminiService, get_gemini_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-prospecting_status: Dict[int, bool] = {}
 
 async def _process_raw_message(
     raw_msg: dict, 
@@ -44,12 +41,10 @@ async def _process_raw_message(
         elif msg_content.get("audioMessage") or msg_content.get("imageMessage") or msg_content.get("documentMessage"):
             media_data = await whatsapp_service.get_media_and_convert(instance_name, raw_msg)
             if media_data:
+                # Passa o histórico apenas para análise de mídia, não para transcrição de áudio.
+                history_for_analysis = history_list_for_context if 'audio' not in media_data['mime_type'] else None
                 analysis = await gemini_service.transcribe_and_analyze_media(
-                    media_data, 
-                    history_list_for_context,
-                    persona_config,
-                    db,
-                    user
+                    media_data, persona_config, db, user, db_history=history_for_analysis
                 )
                 
                 if 'audio' in media_data['mime_type']:
@@ -96,9 +91,9 @@ async def _synchronize_and_process_history(
     
     processed_message_ids = {msg['id'] for msg in clean_db_history}
     contact_details = await crud_prospect.get_contact_details_from_prospect_contact(db, prospect_contact.id)
-    
-    # Usa user.instance_id (UUID) em vez de user.instance_name
-    raw_history_api = await whatsapp_service.fetch_chat_history(user.instance_id, contact_details.whatsapp, count=999)
+
+    # CORREÇÃO: A rota findMessages da Evolution usa o NOME da instância, não o ID.
+    raw_history_api = await whatsapp_service.fetch_chat_history(user.instance_name, contact_details.whatsapp, count=999)
 
     if not raw_history_api:
         logger.warning("Não foi possível buscar o histórico da API. Verifique a instância da Evolution API.")
@@ -109,15 +104,29 @@ async def _synchronize_and_process_history(
 
     newly_processed_messages = []
     for raw_msg in reversed(raw_history_api):
+        # Adiciona uma verificação para garantir que a mensagem é um dicionário.
+        # A API da Evolution pode retornar um JSON string em vez de um objeto.
+        if isinstance(raw_msg, str):
+            try:
+                raw_msg = json.loads(raw_msg)
+            except json.JSONDecodeError:
+                logger.warning(f"Não foi possível decodificar a mensagem da API: {raw_msg}")
+                continue
         msg_id = raw_msg.get("key", {}).get("id")
         if msg_id and msg_id not in processed_message_ids:
-            current_context_history = clean_db_history + newly_processed_messages
+            # --- CORREÇÃO: Atualizar o contexto a cada iteração ---
+            # O histórico de contexto (`current_context_history`) deve ser a soma do que já estava no banco
+            # com as mensagens que acabaram de ser processadas NESTA sincronização.
+            # Isso garante que, se houver dois áudios seguidos, a análise do segundo
+            # já terá o texto transcrito do primeiro como contexto.
+            current_context_history = clean_db_history + newly_processed_messages # A lista `newly_processed_messages` cresce a cada iteração.
+            
             processed_msg = await _process_raw_message(
                 raw_msg, current_context_history, user.instance_name, persona_config, whatsapp_service, gemini_service, db, user
             )
             if processed_msg: newly_processed_messages.append(processed_msg)
     
-    if newly_processed_messages or len(db_history) > len(clean_db_history):
+    if newly_processed_messages: # A condição `len(db_history) > len(clean_db_history)` é redundante se `newly_processed_messages` for a fonte da verdade.
         updated_history = clean_db_history + newly_processed_messages
         logger.info(f"Sincronização: {len(newly_processed_messages)} mensagens novas/corrigidas processadas.")
         await crud_prospect.update_prospect_contact_conversation(db, prospect_contact.id, json.dumps(updated_history))
@@ -127,179 +136,6 @@ async def _synchronize_and_process_history(
         logger.info(f"Sincronização concluída. Nenhuma alteração no histórico.")
         return clean_db_history
 
-async def prospecting_agent_task(prospect_id: int, user_id: int):
-    logger.info(f"-> Agente de prospecção INICIADO para a campanha {prospect_id} do usuário {user_id}.")
-    prospecting_status[prospect_id] = True
-    whatsapp_service = get_whatsapp_service()
-    gemini_service = get_gemini_service()
-    
-    last_message_sent_at = datetime.now(timezone.utc) - timedelta(days=1)
-    
-    async def log(db: AsyncSession, message: str, status_update: str = None):
-        await crud_prospect.append_to_log(db, prospect_id=prospect_id, message=message, new_status=status_update)
-    
-    await log(SessionLocal(), "-> Agente iniciado.", status_update="Em Andamento")
-
-    while prospecting_status.get(prospect_id, False):
-        action_taken = False
-        try:
-            async with SessionLocal() as db:
-                user = await crud_user.get_user(db, user_id)
-                if not user:
-                    logger.warning(f"Agente (Prospect): Usuário {user_id} não encontrado. Parando o agente.")
-                    await log(db, "ERRO: Usuário não encontrado. Finalizando agente.", status_update="Falha")
-                    break
-
-                prospect_campaign = await crud_prospect.get_prospect(db, prospect_id, user_id)
-                if not prospect_campaign or prospect_campaign.status != "Em Andamento":
-                     logger.info(f"Campanha {prospect_id} não está 'Em Andamento'. Parando o agente.")
-                     await log(db, "-> Campanha parada ou não encontrada. Finalizando agente.")
-                     break
-                
-                await log(db, "-> Buscando contatos para processar (Prioridade: Respostas > Follow-ups > Iniciais)...")
-                
-                contact_to_process = await crud_prospect.get_prospects_para_processar(db, prospect_campaign)
-                if contact_to_process:
-                    action_taken = True
-                    pc, contact = contact_to_process
-                    mode = "reply" if pc.situacao == "Resposta Recebida" else ("initial" if pc.situacao == "Aguardando Início" else "followup")
-                    
-                    try:
-                        if mode in ['initial', 'followup']:
-                            interval_seconds = prospect_campaign.initial_message_interval_seconds
-                            time_since_last = (datetime.now(timezone.utc) - last_message_sent_at).total_seconds()
-                            
-                            if time_since_last < interval_seconds:
-                                wait_time = interval_seconds - time_since_last
-                                await log(db, f"-> Intervalo para novas conversas ativo. Aguardando aprox. {int(wait_time)}s.")
-                                action_taken = False 
-                                await asyncio.sleep(min(wait_time, 30))
-                                continue
-                            
-                            if mode == 'initial':
-                                await log(db, f"-> Verificando se '{contact.whatsapp}' é um número de WhatsApp válido...")
-                                check_result = await whatsapp_service.check_whatsapp_numbers(user.instance_name, [contact.whatsapp])
-
-                                if not check_result or not check_result[0].get("exists"):
-                                    await log(db, f"   - NÚMERO INVÁLIDO. '{contact.whatsapp}' não é uma conta de WhatsApp.")
-                                    await crud_prospect.update_prospect_contact(
-                                        db, pc_id=pc.id, situacao="Sem Whatsapp", 
-                                        observacoes="Número não registrado no WhatsApp."
-                                    )
-                                    await db.commit()
-                                    continue
-                                else:
-                                    await log(db, f"   - Número válido. Prosseguindo.")
-
-                        motivo_map = {'reply': 'Nova Resposta Recebida', 'followup': 'Tempo de Follow-up Atingido', 'initial': 'Início de Nova Conversa'}
-                        await log(db, f"-> Contato selecionado: '{contact.nome}'. Motivo: {motivo_map.get(mode)}.")
-                        
-                        persona_config = await crud_config.get_config(db, config_id=prospect_campaign.config_id, user_id=user_id)
-                        if not persona_config:
-                            await log(db, f"ERRO: Persona não encontrada para o contato '{contact.nome}'. Pulando.", status_update="Em Andamento")
-                            await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao="Erro: Persona não encontrada"); continue
-
-                        await log(db, f"   - Sincronizando histórico de '{contact.nome}' com a API do WhatsApp...")
-                        full_history = await _synchronize_and_process_history(db, pc, user, persona_config, whatsapp_service, gemini_service)
-                        await log(db, f"   - Histórico sincronizado. Total de {len(full_history)} mensagens.")
-                        
-                        if mode == 'reply' and (not full_history or full_history[-1]['role'] != 'user'):
-                            await log(db, f"   - Sincronização detectou que já respondemos '{contact.nome}'. Atualizando status.")
-                            await crud_prospect.update_prospect_contact(db, pc.id, situacao="Aguardando Resposta"); await db.commit(); continue
-                        
-                        await log(db, f"   - Solicitando ação da IA (Modo: {mode})...")
-                        
-                        ia_response = await gemini_service.generate_conversation_action(
-                            config=persona_config, contact=contact, conversation_history_db=full_history,
-                            mode=mode, db=db, user=user
-                        )
-
-                        message_to_send = ia_response.get("mensagem_para_enviar")
-                        new_status = ia_response.get("nova_situacao", "Aguardando Resposta")
-                        new_observation = ia_response.get("observacoes", "")
-                        
-                        await log(db, f"   - Decisão da IA: Mudar status para '{new_status}'.")
-                        if new_observation:
-                            await log(db, f"   - Decisão da IA: Adicionar observação: '{new_observation}'.")
-
-                        history_after_response = full_history.copy()
-                        
-                        if message_to_send:
-                            message_parts = [part.strip() for part in message_to_send.split('\n\n') if part.strip()]
-                            await log(db, f"   - Decisão da IA: Enviar {len(message_parts)} parte(s) de mensagem.")
-                            
-                            all_sent_successfully = True
-                            for i, part in enumerate(message_parts):
-                                try:
-                                    await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, part)
-                                    await log(db, f"   - Mensagem {i+1}/{len(message_parts)} enviada para '{contact.nome}'.")
-                                    pending_id = f"sent_{datetime.now(timezone.utc).isoformat()}"
-                                    history_after_response.append({"id": pending_id, "role": "assistant", "content": part})
-                                    if i < len(message_parts) - 1:
-                                        await asyncio.sleep(random.uniform(5, 30))
-                                except MessageSendError as e:
-                                    all_sent_successfully = False
-                                    new_status = "Falha no Envio"
-                                    await log(db, f"   - FALHA CRÍTICA ao enviar mensagem {i+1}/{len(message_parts)} para '{contact.nome}'. Erro: {e}")
-                                    break
-                            
-                            if mode in ['initial', 'followup'] and all_sent_successfully:
-                                last_message_sent_at = datetime.now(timezone.utc)
-                        else:
-                            await log(db, "   - Decisão da IA: Nenhuma mensagem a ser enviada neste momento.")
-                            pending_id = f"internal_{datetime.now(timezone.utc).isoformat()}"
-                            history_after_response.append({"id": pending_id, "role": "assistant", "content": f"[Ação Interna: Não responder - Modo: {mode}]"})
-
-                        await crud_prospect.update_prospect_contact(
-                            db, pc_id=pc.id, situacao=new_status,
-                            conversa=json.dumps(history_after_response), observacoes=new_observation
-                        )
-                        await db.commit()
-                        await log(db, f"-> Ação para '{contact.nome}' concluída.")
-                    
-                    except Exception as inner_e:
-                        logger.error(f"ERRO INTERNO no processamento do contato {contact.nome}: {inner_e}", exc_info=True)
-                        await log(db, f"ERRO ao processar contato '{contact.nome}': {inner_e}")
-                        try:
-                            await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao="Erro IA", observacoes=str(inner_e))
-                            await db.commit()
-                        except Exception as update_err:
-                            logger.error(f"Falha ao atualizar status de erro para contato {pc.id}: {update_err}")
-
-                else:
-                    await log(db, "-> Nenhuma ação pendente no momento. Monitorando...")
-                    action_taken = False
-                    
-        except Exception as outer_e:
-            logger.error(f"ERRO CRÍTICO no ciclo do agente (Prospect ID: {prospect_id}): {outer_e}", exc_info=True)
-            await log(SessionLocal(), f"ERRO CRÍTICO no ciclo do agente: {outer_e}", status_update="Falha")
-        
-        if not action_taken:
-            await asyncio.sleep(30)
-        else:
-            await asyncio.sleep(random.uniform(5, 30))
-
-    if prospect_id in prospecting_status:
-        del prospecting_status[prospect_id]
-    logger.info(f"-> Agente de prospecção FINALIZADO para a campanha {prospect_id}.")
-    async with SessionLocal() as db:
-        prospect = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=user_id)
-        if prospect and prospect.status == "Em Andamento":
-            await log(db, "-> Agente finalizado inesperadamente.", status_update="Pausado")
-
-def start_agent_for_prospect(prospect_id: int, user_id: int, background_tasks: BackgroundTasks):
-    if not prospecting_status.get(prospect_id, False):
-        background_tasks.add_task(prospecting_agent_task, prospect_id, user_id)
-    else:
-        logger.warning(f"Tentativa de iniciar agente que já está rodando para a prospecção {prospect_id}.")
-
-def stop_agent_for_prospect(prospect_id: int):
-    if prospecting_status.get(prospect_id, False):
-        prospecting_status[prospect_id] = False
-        logger.info(f"Sinal de parada enviado para o agente da prospecção {prospect_id}.")
-    else:
-        logger.warning(f"Tentativa de parar agente que não está rodando para a prospecção {prospect_id}.")
-
 @router.get("/", response_model=List[Prospect], summary="Listar prospecções do usuário")
 async def get_prospects(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(dependencies.get_current_active_user)):
     return await crud_prospect.get_prospects_by_user(db, user_id=current_user.id)
@@ -308,40 +144,55 @@ async def get_prospects(db: AsyncSession = Depends(get_db), current_user: models
 async def create_prospect(prospect_data: ProspectCreate, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(dependencies.get_current_active_user)):
     return await crud_prospect.create_prospect(db, prospect_in=prospect_data, user_id=current_user.id)
 
-@router.get("/{prospect_id}/log", response_model=ProspectLog, summary="Obter log de uma prospecção")
-async def get_prospect_log(prospect_id: int, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(dependencies.get_current_active_user)):
+@router.get("/{prospect_id}/activity-log", response_model=List[schemas.ProspectActivityLog], summary="Obter o log de atividades de uma prospecção")
+async def get_prospect_activity_log(prospect_id: int, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(dependencies.get_current_active_user)):
     prospect = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=current_user.id)
     if not prospect:
         raise HTTPException(status_code=404, detail="Prospecção não encontrada.")
-    return prospect
+
+    contacts_with_details = await crud_prospect.get_prospect_contacts_with_details(db, prospect_id=prospect_id)
+    
+    # Ordena pela data de atualização mais recente
+    sorted_contacts = sorted(contacts_with_details, key=lambda item: item.ProspectContact.updated_at, reverse=True)
+
+    activity_log = [
+        schemas.ProspectActivityLog(
+            prospect_contact_id=item.ProspectContact.id, # <-- CORREÇÃO: Adicionado o ID da relação
+            contact_id=item.ProspectContact.contact_id, # <-- CORREÇÃO: Adicionado o ID do contato
+            contact_name=item.Contact.nome,
+            contact_whatsapp=item.Contact.whatsapp,
+            situacao=item.ProspectContact.situacao,
+            observacoes=item.ProspectContact.observacoes,
+            updated_at=item.ProspectContact.updated_at,
+            conversa=item.ProspectContact.conversa
+        ) for item in sorted_contacts
+    ]
+    return activity_log
 
 @router.post("/{prospect_id}/start", summary="Iniciar uma prospecção")
 async def start_prospecting(prospect_id: int, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(dependencies.get_current_active_user)):
-    if prospecting_status.get(prospect_id, False):
-        raise HTTPException(status_code=409, detail="Esta prospecção já está em andamento.")
     prospect = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=current_user.id)
     if not prospect:
         raise HTTPException(status_code=404, detail="Prospecção não encontrada.")
+    if prospect.status == "Em Andamento":
+        raise HTTPException(status_code=409, detail="Esta prospecção já está em andamento.")
     
     await crud_prospect.update_prospect(db, db_prospect=prospect, prospect_in=ProspectUpdate(status="Em Andamento"))
-    
-    start_agent_for_prospect(prospect_id, current_user.id, background_tasks)
-    return {"message": "Agente de prospecção iniciado em segundo plano."}
+    return {"message": "Campanha iniciada. O worker irá processá-la em breve."}
 
 @router.post("/{prospect_id}/stop", summary="Parar uma prospecção")
 async def stop_prospecting(prospect_id: int, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(dependencies.get_current_active_user)):
     prospect = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=current_user.id)
     if not prospect:
         raise HTTPException(status_code=404, detail="Prospecção não encontrada.")
-    if prospect.status != "Em Andamento":
-        raise HTTPException(status_code=400, detail=f"A campanha não está 'Em Andamento', seu status atual é '{prospect.status}'.")
     
-    stop_agent_for_prospect(prospect_id)
+    # Altera para "Pausado" em vez de "Parado" para indicar que pode ser retomada.
+    if prospect.status not in ["Em Andamento", "Falha"]:
+        raise HTTPException(status_code=400, detail=f"A campanha não está ativa. Status atual: '{prospect.status}'.")
     
-    prospect_update = ProspectUpdate(status="Parado")
+    prospect_update = ProspectUpdate(status="Pausado")
     await crud_prospect.update_prospect(db, db_prospect=prospect, prospect_in=prospect_update)
-    
-    return {"message": "Sinal de parada enviado. A prospecção foi interrompida e seu status atualizado."}
+    return {"message": "Campanha pausada. O worker irá parar de processá-la."}
 
 @router.put("/{prospect_id}", response_model=Prospect, summary="Atualizar uma prospecção")
 async def edit_prospect(prospect_id: int, prospect_in: ProspectUpdate, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(dependencies.get_current_active_user)):
@@ -433,4 +284,3 @@ async def delete_prospect_contact_from_campaign(
 
     await crud_prospect.delete_prospect_contact(db, prospect_contact_to_delete=db_prospect_contact)
     return {"detail": "Contato removido da campanha com sucesso."}
-

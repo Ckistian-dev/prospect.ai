@@ -35,8 +35,7 @@ async def create_prospect(db: AsyncSession, prospect_in: ProspectCreate, user_id
     db_prospect = models.Prospect(
         **prospect_in.model_dump(exclude={"contact_ids"}),
         user_id=user_id,
-        status="Pendente",
-        log=f"[{datetime.now(timezone(timedelta(hours=-3))).strftime('%Y-%m-%d %H:%M:%S')}] Campanha criada.\n"
+        status="Pendente"
     )
     db.add(db_prospect)
     await db.commit()
@@ -100,16 +99,6 @@ async def delete_prospect(db: AsyncSession, prospect_to_delete: models.Prospect)
     await db.commit()
     return prospect_to_delete
 
-async def append_to_log(db: AsyncSession, prospect_id: int, message: str, new_status: Optional[str] = None):
-    """Adiciona uma nova linha ao log de uma prospecção."""
-    prospect = await db.get(models.Prospect, prospect_id)
-    if prospect:
-        timestamp = datetime.now(timezone(timedelta(hours=-3))).strftime('%H:%M:%S')
-        prospect.log += f"[{timestamp}] {message}\n"
-        if new_status:
-            prospect.status = new_status
-        await db.commit()
-
 async def get_prospects_para_processar(db: AsyncSession, prospect: models.Prospect) -> Optional[Tuple[models.ProspectContact, models.Contact]]:
     """Busca o próximo contato a ser processado com base na prioridade."""
 
@@ -169,22 +158,16 @@ async def get_prospects_para_processar(db: AsyncSession, prospect: models.Prospe
 
     return None
 
-async def get_all_pending_reply_contacts(db: AsyncSession) -> List[Tuple[models.ProspectContact, models.Prospect, models.Contact]]:
+async def get_active_campaigns(db: AsyncSession) -> List[models.Prospect]:
     """
-    Busca todos os contatos de prospecções ativas que estão com status 'Resposta Recebida'
-    e que não estão sendo processados por outro agente.
+    Busca todas as campanhas de prospecção que estão com status 'Em Andamento'.
     """
     result = await db.execute(
-        select(models.ProspectContact, models.Prospect, models.Contact)
-        .join(models.Prospect, models.ProspectContact.prospect_id == models.Prospect.id)
-        .join(models.Contact, models.ProspectContact.contact_id == models.Contact.id)
-        .where(
-            models.Prospect.status == "Em Andamento",
-            models.ProspectContact.situacao == "Resposta Recebida"
-        )
-        .order_by(models.ProspectContact.updated_at.asc())
+        select(models.Prospect)
+        .where(models.Prospect.status == "Em Andamento")
+        .order_by(models.Prospect.created_at.asc())
     )
-    return result.all()
+    return result.scalars().all()
 
 
 async def get_prospect_contact_by_id(db: AsyncSession, prospect_contact_id: int) -> Optional[models.ProspectContact]:
@@ -368,6 +351,27 @@ async def get_dashboard_data(db: AsyncSession, user_id: int, start_date: Optiona
 
     activity_data = list(all_days_in_period.values())
 
+    # --- RECENT ACTIVITY (para o ticker do header) ---
+    recent_activity_query = (
+        select(models.ProspectContact, models.Contact, models.Prospect)
+        .join(models.Prospect, models.Prospect.id == models.ProspectContact.prospect_id)
+        .join(models.Contact, models.Contact.id == models.ProspectContact.contact_id)
+        .where(models.Prospect.user_id == user_id)
+        .order_by(models.ProspectContact.updated_at.desc())
+        .limit(1)
+    )
+    recent_activity_result = (await db.execute(recent_activity_query)).first()
+    recent_activity = None
+    if recent_activity_result:
+        pc, contact, prospect = recent_activity_result
+        recent_activity = {
+            "id": pc.id, 
+            "campaignName": prospect.nome_prospeccao,
+            "contactName": contact.nome,
+            "situacao": pc.situacao, 
+            "observacao": pc.observacoes
+        }
+
     return {
         "stats": {
             "totalContacts": total_contacts,
@@ -379,5 +383,6 @@ async def get_dashboard_data(db: AsyncSession, user_id: int, start_date: Optiona
             {"id": c.id, "name": c.nome_prospeccao, "status": c.status, "timeAgo": (now_utc - c.created_at).days if c.created_at else -1} 
             for c in recent_campaigns
         ],
-        "activityChart": activity_data
+        "activityChart": activity_data,
+        "recentActivity": [recent_activity] if recent_activity else []
     }

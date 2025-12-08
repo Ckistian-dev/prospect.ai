@@ -146,10 +146,8 @@ class WhatsAppService:
         # Rota correta da Evolution API para enviar texto
         url = f"{self.api_url}/message/sendText/{instance_name}"
         payload = {
-            "number": normalized_number,
-            "options": {
-                "textMessage": {"text": text}
-            }
+            "number": normalized_number, # Número para receber a mensagem
+            "text": text                 # O texto da mensagem
         }
         try:
             async with httpx.AsyncClient() as client:
@@ -160,22 +158,74 @@ class WhatsAppService:
             logger.error(f"Falha CRÍTICA ao enviar mensagem para {normalized_number}. Erro: {e}")
             raise MessageSendError(f"Falha no envio: {e}") from e
 
-    async def get_media_and_convert(self, instance_name: str, message: dict) -> Optional[dict]:
-        # A API @wppconnect/server envia a mídia como base64 diretamente no webhook.
-        # Se a mídia não estiver no webhook, a lógica para baixar precisaria ser adaptada.
-        # Esta implementação assume que o base64 já está disponível no payload do webhook.
-        base64_data = message.get("body") # O corpo da mensagem de mídia é o base64
-        mime_type = message.get("mimetype")
-
-        if not base64_data or not mime_type:
-            logger.warning("Não foi possível encontrar 'body' ou 'mimetype' na mensagem de mídia.")
+    async def get_media_and_convert(self, instance_name: str, message: dict) -> Optional[Dict[str, Any]]:
+        """
+        Obtém a mídia de uma mensagem da Evolution API em formato base64.
+        Este método usa o endpoint getBase64FromMediaMessage para maior confiabilidade.
+        """
+        # 1. Extrair o ID da mensagem e o tipo de mídia
+        message_key = message.get("key")
+        msg_content = message.get("message", {})
+        
+        if not message_key or not message_key.get("id"):
+            logger.error("Não foi possível encontrar o 'key.id' da mensagem para buscar a mídia.")
             return None
 
+        message_id = message_key["id"]
+
+        media_types = ["audioMessage", "imageMessage", "videoMessage", "documentMessage"]
+        media_info = None
+        media_type_key = None
+        for media_type in media_types:
+            if media_type in msg_content:
+                media_info = msg_content[media_type]
+                media_type_key = media_type
+                break
+        
+        if not media_info:
+            logger.warning("Nenhuma informação de mídia encontrada no objeto da mensagem.")
+            return None
+
+        mime_type = media_info.get("mimetype")
+        if not mime_type:
+            logger.warning(f"Não foi possível encontrar 'mimetype' no objeto de mídia: {media_info}")
+            return None
+
+        # 2. Montar o payload para a API
+        url = f"{self.api_url}/chat/getBase64FromMediaMessage/{instance_name}"
+        payload = {
+            "message": {
+                "key": {
+                    "id": message_id
+                }
+            }
+        }
+        # Adiciona a conversão para MP4 se for um vídeo
+        if media_type_key == "videoMessage":
+            payload["convertToMp4"] = True
+
+        # 3. Fazer a requisição para obter o base64
         try:
-            media_bytes = base64.b64decode(base64_data)
-            return {"mime_type": mime_type, "data": media_bytes}
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=self.headers, json=payload, timeout=60.0)
+                response.raise_for_status()
+                
+                response_data = response.json()
+                media_base64 = response_data.get("base64")
+
+                if not media_base64:
+                    logger.error(f"A API retornou sucesso mas não incluiu o 'base64' da mídia para a mensagem {message_id}.")
+                    return None
+                
+                # 4. Retornar os dados no formato esperado pelo GeminiService
+                # O GeminiService já sabe como lidar com base64 string.
+                return {"mime_type": mime_type, "data": media_base64}
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Falha de status HTTP ao buscar mídia em base64 para msg {message_id}: {e.response.status_code} - {e.response.text}", exc_info=True)
+            return None
         except Exception as e:
-            logger.error(f"Falha ao processar mídia da mensagem: {e}")
+            logger.error(f"Falha ao buscar mídia em base64 para msg {message_id}: {e}", exc_info=True)
             return None
 
     async def fetch_chat_history(self, instance_id: str, number: str, count: int = 999) -> List[Dict[str, Any]]:
@@ -183,18 +233,34 @@ class WhatsAppService:
         normalized_number = self._normalize_number(number) + "@s.whatsapp.net"
         # Rota correta da Evolution API para buscar mensagens
         url = f"{self.api_url}/chat/findMessages/{instance_id}"
+        # CORREÇÃO: O payload deve seguir a estrutura da documentação da Evolution API,
+        # usando 'where' para filtrar pelo 'remoteJid'.
         payload = {
-            "jid": normalized_number,
-            "count": count
+            "where": {
+                "key": {"remoteJid": normalized_number}
+            }
         }
         try:
             async with httpx.AsyncClient() as client:
                 # A rota da Evolution usa POST para essa consulta
                 response = await client.post(url, headers=self.headers, json=payload, timeout=60)
                 response.raise_for_status()
-                # A resposta da Evolution está diretamente no corpo da resposta
-                messages = response.json()
-                logger.info(f"Histórico para {number} carregado. Total de {len(messages)} mensagens.")
+                
+                response_data = response.json()
+                messages = []
+
+                # CORREÇÃO 3: Lida com a nova estrutura aninhada {"messages": {"records": [...]}}
+                # e mantém a retrocompatibilidade com os formatos anteriores.
+                if isinstance(response_data, dict):
+                    messages_obj = response_data.get("messages")
+                    if isinstance(messages_obj, dict):
+                        messages = messages_obj.get("records", []) # Formato mais novo
+                    elif isinstance(messages_obj, list):
+                        messages = messages_obj # Formato {"messages": [...]}
+                    else:
+                        messages = response_data.get("records", response_data) # Formato {"records": [...]} ou lista direta
+
+                logger.info(f"Histórico para {number} carregado. Total de {len(messages if isinstance(messages, list) else [])} mensagens.")
                 return messages
         except Exception as e:
             logger.error(f"Não foi possível buscar o histórico via API para {number}. Erro: {e}", exc_info=True)

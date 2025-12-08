@@ -15,8 +15,8 @@ const Sidebar = () => {
         { icon: LayoutDashboard, name: 'Dashboard', path: '/dashboard' },
         { icon: Users, name: 'Contatos', path: '/contacts' },
         { icon: GitBranch, name: 'Prospecções', path: '/prospects' },
-        { icon: Bot, name: 'Persona & Prompt', path: '/configs' },
-        { icon: Link, name: 'Conexão API', path: '/whatsapp' },
+        { icon: Bot, name: 'Contexto', path: '/configs' },
+        { icon: Link, name: 'Conexão', path: '/whatsapp' },
         { icon: Rocket, name: 'Principal', path: '/prospecting' },
     ];
 

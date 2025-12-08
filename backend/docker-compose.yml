@@ -108,6 +108,8 @@ services:
       - EVOLUTION_INSTANCE_NAME=prospectai_instance # Nome da instância que sua API vai usar
       - WEBHOOK_URL=${WEBHOOK_URL}
       - FRONTEND_URL=${FRONTEND_URL}
+      # Define o fuso horário do contêiner para o Horário de Brasília
+      - TZ=America/Sao_Paulo
     networks:
       - app-network
 
@@ -126,8 +128,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      evolution_api:
+        condition: service_started
       api:
         condition: service_started # Depende da API para garantir que os serviços estejam disponíveis
+    environment:
+      - TZ=America/Sao_Paulo
+      # --- Adicionado para o worker se comunicar com outros serviços ---
+      - DATABASE_URL=postgresql+asyncpg://${DATABASE_USER}:${DATABASE_PASSWORD}@db:5432/${DATABASE_NAME}
+      - EVOLUTION_API_URL=http://evolution_api:8080
+      - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
     networks:
       - app-network
 

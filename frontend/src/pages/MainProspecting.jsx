@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axiosConfig';
-import { Plus, Play, Pause, Trash2, MoreVertical, Edit, Loader2 } from 'lucide-react';
+import { Plus, Play, Pause, Trash2, MoreVertical, Edit, Loader2, MessageSquare, Clock, AlertTriangle } from 'lucide-react';
 import CreateProspectingModal from '../components/prospecting/CreateProspectingModal';
-import LogDisplay from '../components/prospecting/LogDisplay';
+import { ConversationModal, EditContactModal } from './Prospects'; // Reutilizando os modais
 
-// --- Componentes de Skeleton Internos ---
+// --- Componentes Internos ---
 const CampaignSkeleton = () => (
   <li className="p-3 rounded-lg flex justify-between items-center bg-white animate-pulse border border-gray-100">
     <div className="h-5 bg-gray-200 rounded w-3/5"></div>
@@ -12,28 +12,90 @@ const CampaignSkeleton = () => (
   </li>
 );
 
-const LogSkeleton = () => (
-  <div className="space-y-3 p-2 animate-pulse">
-    <div className="h-4 bg-gray-200 rounded w-11/12"></div>
-    <div className="h-4 bg-gray-200 rounded w-full"></div>
-    <div className="h-4 bg-gray-200 rounded w-5/6"></div>
-    <div className="h-4 bg-gray-200 rounded w-full"></div>
-    <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-  </div>
-);
+const ActivityLogTable = ({ logData, onOpenConversation, onOpenEditContact, isLoading }) => {
+  const getStatusClass = (status) => {
+    const baseClasses = "px-2 py-1 text-xs font-medium rounded-full inline-block text-center";
+    const statusMap = {
+        'Resposta Recebida': "bg-blue-100 text-blue-800",
+        'Lead Qualificado': "bg-green-100 text-green-800",
+        'Concluído': "bg-green-100 text-green-800",
+        'Aguardando Resposta': "bg-yellow-100 text-yellow-800",
+        'Falha no Envio': "bg-red-200 text-red-800",
+        'Erro IA': "bg-red-200 text-red-800",
+        'Sem Whatsapp': "bg-gray-200 text-gray-700",
+        'Não Interessado': "bg-red-100 text-red-700",
+        'Aguardando Início': "bg-purple-100 text-purple-800",
+    };
+    return `${baseClasses} ${statusMap[status] || 'bg-gray-100 text-gray-600'}`;
+  };
 
+  const formatTime = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2 p-2 animate-pulse">
+        {[...Array(5)].map((_, i) => (
+          <div key={i} className="h-8 bg-gray-200 rounded w-full"></div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm">
+        <thead className="border-b-2 border-gray-200">
+          <tr>
+            <th className="p-3 font-semibold text-gray-600">Contato</th>
+            <th className="p-3 font-semibold text-gray-600">Situação</th>
+            <th className="p-3 font-semibold text-gray-600">Observações</th>
+            <th className="p-3 font-semibold text-gray-600 text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {logData.map((item, index) => (
+            <tr key={index} className="border-b border-gray-100 hover:bg-gray-50">
+              <td className="p-3">
+                <div className="font-medium text-gray-800">{item.contact_name}</div>
+                <div className="text-gray-500 flex items-center gap-1"><Clock size={12} /> {formatTime(item.updated_at)}</div>
+              </td>
+              <td className="p-3"><span className={getStatusClass(item.situacao)}>{item.situacao}</span></td>
+              <td className="p-3 text-gray-600 max-w-xs truncate" title={item.observacoes}>{item.observacoes || '-'}</td>
+              <td className="p-3 text-center">
+                <div className="flex justify-center items-center gap-1">
+                  <button onClick={() => onOpenConversation(item)} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors" title="Ver conversa">
+                    <MessageSquare size={16} />
+                  </button>
+                  <button onClick={() => onOpenEditContact(item)} className="p-2 text-gray-500 hover:text-green-600 hover:bg-gray-100 rounded-full transition-colors" title="Editar Contato"><Edit size={16} /></button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 // --- Componente Principal ---
 function MainProspecting() {
   const [prospects, setProspects] = useState([]);
   const [selectedProspect, setSelectedProspect] = useState(null);
-  const [log, setLog] = useState({ log: '', status: 'Pendente' });
+  const [activityLog, setActivityLog] = useState([]);
+  const [currentStatus, setCurrentStatus] = useState('Pendente');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProspect, setEditingProspect] = useState(null);
   const logIntervalRef = useRef(null);
 
   const [openMenuId, setOpenMenuId] = useState(null);
   const menuRef = useRef(null);
+
+  // Estado unificado para modais
+  const [modal, setModal] = useState({ type: null, data: null });
+  const statusOptions = ["Aguardando Início", "Aguardando Resposta", "Resposta Recebida", "Lead Qualificado", "Não Interessado", "Concluído", "Sem Whatsapp", "Falha no Envio", "Erro IA"];
 
   const [loadingStates, setLoadingStates] = useState({
     campaigns: true,
@@ -53,22 +115,20 @@ function MainProspecting() {
     }
   }, []);
 
-  const fetchLog = useCallback(async (prospectId, isSilent = false) => {
+  const fetchActivityLog = useCallback(async (prospectId, isSilent = false) => {
     if (!prospectId) return;
 
     if (!isSilent) {
       setLoadingStates(prev => ({ ...prev, log: true }));
     }
-
     try {
-      const response = await api.get(`/prospecting/${prospectId}/log`);
-      setLog(response.data);
+      const response = await api.get(`/prospecting/${prospectId}/activity-log`);
+      setActivityLog(response.data);
+      // O status da campanha será atualizado ao buscar a lista de prospecções
+      // ou ao selecionar uma nova campanha.
     } catch (error) {
       console.error("Erro ao buscar log:", error);
-      if (error.response?.status === 404) {
-        stopLogPolling();
-        setLog({ log: 'Log não encontrado para esta campanha.', status: 'Erro' });
-      }
+      stopLogPolling();
     } finally {
       if (!isSilent) {
         setLoadingStates(prev => ({ ...prev, log: false }));
@@ -76,7 +136,7 @@ function MainProspecting() {
     }
   }, [stopLogPolling]);
   
-  const fetchProspects = useCallback(async () => {
+  const fetchProspects = useCallback(async (keepSelection = false) => {
     setLoadingStates(prev => ({ ...prev, campaigns: true }));
     try {
       const response = await api.get('/prospecting/');
@@ -84,24 +144,25 @@ function MainProspecting() {
       setProspects(prospectsData);
       
       if (!selectedProspect && prospectsData.length > 0) {
-        setSelectedProspect(prospectsData[0]);
+        setSelectedProspect(prospectsData[0]); // Seleciona o primeiro por padrão
       } else if (prospectsData.length === 0) {
         setSelectedProspect(null);
-        setLog({ log: '', status: 'Pendente' });
+        setActivityLog([]);
+        setCurrentStatus('Pendente');
       }
     } catch (error) {
       console.error("Erro ao buscar prospecções:", error);
     } finally {
       setLoadingStates(prev => ({ ...prev, campaigns: false }));
     }
-  }, [selectedProspect]);
+  }, [selectedProspect]); // A dependência do selectedProspect é intencional para o caso de recarregar a lista
 
   const startPolling = useCallback(() => {
     stopLogPolling();
     if (selectedProspect) {
-      logIntervalRef.current = setInterval(() => fetchLog(selectedProspect.id, true), 5000);
+      logIntervalRef.current = setInterval(() => fetchActivityLog(selectedProspect.id, true), 5000);
     }
-  }, [selectedProspect, fetchLog, stopLogPolling]);
+  }, [selectedProspect, fetchActivityLog, stopLogPolling]);
 
   useEffect(() => {
     fetchProspects();
@@ -109,19 +170,20 @@ function MainProspecting() {
   
   useEffect(() => {
     if (selectedProspect) {
-      fetchLog(selectedProspect.id, false);
+      fetchActivityLog(selectedProspect.id, false);
+      setCurrentStatus(selectedProspect.status); // Garante que o status atual seja o da campanha selecionada
     }
-  }, [selectedProspect, fetchLog]);
+  }, [selectedProspect, fetchActivityLog]);
 
   useEffect(() => {
     stopLogPolling();
-    if (selectedProspect && log.status === 'Em Andamento') {
+    if (selectedProspect && currentStatus === 'Em Andamento') {
       startPolling();
     }
     return () => stopLogPolling();
-  }, [selectedProspect, log.status, startPolling, stopLogPolling]);
+  }, [selectedProspect, currentStatus, startPolling, stopLogPolling]);
   
-  useEffect(() => {
+  /*useEffect(() => {
     if (selectedProspect && log.status) {
       setProspects(prevProspects => 
         prevProspects.map(p => 
@@ -129,7 +191,7 @@ function MainProspecting() {
         )
       );
     }
-  }, [log.status, selectedProspect]);
+  }, [log.status, selectedProspect]);*/
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -148,7 +210,8 @@ function MainProspecting() {
     setActionLoading(prev => ({ ...prev, start: true }));
     try {
       await api.post(`/prospecting/${selectedProspect.id}/start`);
-      fetchLog(selectedProspect.id);
+      setCurrentStatus('Em Andamento');
+      fetchProspects(true); // Atualiza a lista de campanhas para refletir o novo status
     } catch (error) {
       alert(`Erro ao iniciar: ${error.response?.data?.detail || 'Erro desconhecido'}`);
     } finally {
@@ -161,7 +224,8 @@ function MainProspecting() {
     setActionLoading(prev => ({ ...prev, stop: true }));
     try {
       await api.post(`/prospecting/${selectedProspect.id}/stop`);
-      fetchLog(selectedProspect.id);
+      setCurrentStatus('Parado');
+      fetchProspects(true); // Atualiza a lista de campanhas para refletir o novo status
     } catch (error) {
       alert(`Erro ao parar: ${error.response?.data?.detail || 'Erro desconhecido'}`);
     } finally {
@@ -183,7 +247,8 @@ function MainProspecting() {
         setSelectedProspect(newSelected);
         
         if(!newSelected) {
-          setLog({ log: '', status: 'Pendente' });
+          setActivityLog([]);
+          setCurrentStatus('Pendente');
         }
       } catch (error) {
         alert(`Erro ao excluir: ${error.response?.data?.detail || 'Erro desconhecido'}`);
@@ -196,6 +261,7 @@ function MainProspecting() {
   const handleSelectProspect = (prospect) => {
     if (selectedProspect?.id === prospect.id) return;
     setSelectedProspect(prospect);
+    setCurrentStatus(prospect.status);
   }
 
   const handleOpenCreateModal = () => {
@@ -214,7 +280,7 @@ function MainProspecting() {
 
   const handleSuccess = (updatedOrNewProspect) => {
     if (editingProspect) {
-      setProspects(prev => prev.map(p => p.id === updatedOrNewProspect.id ? updatedOrNewProspect : p));
+      setProspects(prev => prev.map(p => p.id === updatedOrNewProspect.id ? { ...p, ...updatedOrNewProspect } : p));
       setSelectedProspect(updatedOrNewProspect);
     } else {
       setProspects(prev => [updatedOrNewProspect, ...prev]);
@@ -224,7 +290,24 @@ function MainProspecting() {
     setIsModalOpen(false);
   };
 
-  const isRunning = log.status === 'Em Andamento';
+  const handleOpenEditContact = (logItem) => {
+    // CORREÇÃO: O modal de edição precisa do ID da relação (prospect_contact_id) para a API.
+    // O modal usa a propriedade 'id' para fazer a chamada.
+    const contactDataForModal = { ...logItem, id: logItem.prospect_contact_id };
+    setModal({ type: 'edit_contact', data: contactDataForModal });
+  };
+
+  const handleSaveContactEdit = async (contactId, updates) => {
+    try {
+      await api.put(`/prospecting/contacts/${contactId}`, updates);
+      setModal({ type: null, data: null });
+      fetchActivityLog(selectedProspect.id, true); // Atualiza o log silenciosamente
+    } catch (err) {
+      alert('Erro ao salvar as alterações do contato.');
+    }
+  };
+
+  const isRunning = currentStatus === 'Em Andamento';
   const isAnyActionLoading = actionLoading.start || actionLoading.stop || actionLoading.delete;
 
   return (
@@ -305,7 +388,7 @@ function MainProspecting() {
             {selectedProspect ? (
               <div className="space-y-3">
                 <div className="flex gap-4">
-                  <button onClick={handleStart} disabled={isAnyActionLoading || isRunning || log.status === 'Concluído' || loadingStates.log} className="flex-1 flex items-center justify-center gap-2 bg-green-500 text-white font-bold py-3 rounded-lg shadow-md hover:bg-green-600 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
+                  <button onClick={handleStart} disabled={isAnyActionLoading || isRunning || currentStatus === 'Concluído' || loadingStates.log} className="flex-1 flex items-center justify-center gap-2 bg-green-500 text-white font-bold py-3 rounded-lg shadow-md hover:bg-green-600 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
                     {actionLoading.start ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
                     {actionLoading.start ? 'Iniciando...' : 'Iniciar'}
                   </button>
@@ -324,11 +407,15 @@ function MainProspecting() {
         </div>
 
         <div className="lg:col-span-3 bg-white rounded-xl shadow-lg p-6 flex flex-col border min-h-0">
-          {loadingStates.log && !logIntervalRef.current ? (
-            <LogSkeleton />
-          ) : selectedProspect ? (
-            <LogDisplay logText={log.log} />
-          ) : (
+          <h2 className="text-xl font-bold text-gray-800 mb-4">Log de Atividades Recentes</h2>
+          {selectedProspect ? (
+            <ActivityLogTable 
+              logData={activityLog} 
+              isLoading={loadingStates.log && !logIntervalRef.current}
+              onOpenConversation={(item) => setModal({ type: 'conversation', data: { conversa: item.conversa, contactName: item.contact_name }})}
+              onOpenEditContact={handleOpenEditContact}
+            />
+          ) : ( 
             <div className="flex items-center justify-center h-full">
               <p className="text-gray-500">Selecione uma campanha para ver o log.</p>
             </div>
@@ -344,6 +431,23 @@ function MainProspecting() {
             setEditingProspect(null);
           }}
           onSuccess={handleSuccess}
+        />
+      )}
+
+      {modal.type === 'conversation' && (
+        <ConversationModal
+          onClose={() => setModal({ type: null, data: null })}
+          conversation={modal.data.conversa}
+          contactIdentifier={modal.data.contactName}
+        />
+      )}
+
+      {modal.type === 'edit_contact' && (
+        <EditContactModal
+          contact={modal.data}
+          statusOptions={statusOptions}
+          onSave={handleSaveContactEdit}
+          onClose={() => setModal({ type: null, data: null })}
         />
       )}
     </div>
