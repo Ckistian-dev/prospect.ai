@@ -103,11 +103,17 @@ async def get_prospects_para_processar(db: AsyncSession, prospect: models.Prospe
     """Busca o próximo contato a ser processado com base na prioridade."""
 
     # 1. Prioridade Máxima: Respostas recebidas que precisam de atenção.
-    # (Esta parte permanece inalterada)
+    # Adicionado um delay de 10 segundos para evitar respostas automáticas muito rápidas
+    # enquanto o cliente ainda pode estar digitando.
+    reply_time_limit = datetime.now(timezone.utc) - timedelta(seconds=10)
     replies_query = (
         select(models.ProspectContact, models.Contact)
         .join(models.Contact, models.ProspectContact.contact_id == models.Contact.id)
-        .where(models.ProspectContact.prospect_id == prospect.id, models.ProspectContact.situacao == "Resposta Recebida")
+        .where(
+            models.ProspectContact.prospect_id == prospect.id,
+            models.ProspectContact.situacao == "Resposta Recebida",
+            models.ProspectContact.updated_at < reply_time_limit
+        )
         .order_by(models.ProspectContact.updated_at.asc()).limit(1)
     )
     next_contact = (await db.execute(replies_query)).first()

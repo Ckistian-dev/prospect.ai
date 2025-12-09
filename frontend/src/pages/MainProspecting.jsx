@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axiosConfig';
-import { Plus, Play, Pause, Trash2, MoreVertical, Edit, Loader2, MessageSquare, Clock, AlertTriangle } from 'lucide-react';
+import { Plus, Play, Pause, Trash2, MoreVertical, Edit, Loader2, MessageSquare, Clock, AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from 'lucide-react';
 import CreateProspectingModal from '../components/prospecting/CreateProspectingModal';
 import { ConversationModal, EditContactModal } from './Prospects'; // Reutilizando os modais
 
@@ -97,6 +97,10 @@ function MainProspecting() {
   const [modal, setModal] = useState({ type: null, data: null });
   const statusOptions = ["Aguardando Início", "Aguardando Resposta", "Resposta Recebida", "Lead Qualificado", "Não Interessado", "Concluído", "Sem Whatsapp", "Falha no Envio", "Erro IA"];
 
+  // --- Estado da Paginação ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const logsPerPage = 10;
+
   const [loadingStates, setLoadingStates] = useState({
     campaigns: true,
     log: false,
@@ -172,6 +176,7 @@ function MainProspecting() {
     if (selectedProspect) {
       fetchActivityLog(selectedProspect.id, false);
       setCurrentStatus(selectedProspect.status); // Garante que o status atual seja o da campanha selecionada
+      setCurrentPage(1); // Reseta a página ao selecionar nova campanha
     }
   }, [selectedProspect, fetchActivityLog]);
 
@@ -310,6 +315,17 @@ function MainProspecting() {
   const isRunning = currentStatus === 'Em Andamento';
   const isAnyActionLoading = actionLoading.start || actionLoading.stop || actionLoading.delete;
 
+  // --- Lógica de Paginação ---
+  const indexOfLastLog = currentPage * logsPerPage;
+  const indexOfFirstLog = indexOfLastLog - logsPerPage;
+  const currentLogs = activityLog.slice(indexOfFirstLog, indexOfLastLog);
+  const totalPages = Math.ceil(activityLog.length / logsPerPage);
+
+  const paginate = (pageNumber) => {
+      if (pageNumber < 1 || pageNumber > totalPages) return;
+      setCurrentPage(pageNumber);
+  };
+
   return (
     <div className="p-4 md:p-8 bg-gray-50 h-full flex flex-col">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
@@ -409,12 +425,28 @@ function MainProspecting() {
         <div className="lg:col-span-3 bg-white rounded-xl shadow-lg p-6 flex flex-col border min-h-0">
           <h2 className="text-xl font-bold text-gray-800 mb-4">Log de Atividades Recentes</h2>
           {selectedProspect ? (
-            <ActivityLogTable 
-              logData={activityLog} 
-              isLoading={loadingStates.log && !logIntervalRef.current}
-              onOpenConversation={(item) => setModal({ type: 'conversation', data: { conversa: item.conversa, contactName: item.contact_name }})}
-              onOpenEditContact={handleOpenEditContact}
-            />
+            <>
+              <div className="flex-grow overflow-y-auto">
+                <ActivityLogTable 
+                  logData={currentLogs} 
+                  isLoading={loadingStates.log && !logIntervalRef.current}
+                  onOpenConversation={(item) => setModal({ type: 'conversation', data: { conversa: item.conversa, contactName: item.contact_name }})}
+                  onOpenEditContact={handleOpenEditContact}
+                />
+              </div>
+              {totalPages > 1 && (
+                <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-200">
+                    <span className="text-sm text-gray-500">Página {currentPage} de {totalPages} ({activityLog.length} registros)</span>
+                    <div className="flex items-center gap-1">
+                        <button onClick={() => paginate(1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsLeft size={16} /></button>
+                        <button onClick={() => paginate(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronLeft size={16} /></button>
+                        <span className="px-2 text-sm text-gray-600 font-medium">{currentPage}</span>
+                        <button onClick={() => paginate(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronRight size={16} /></button>
+                        <button onClick={() => paginate(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsRight size={16} /></button>
+                    </div>
+                </div>
+              )}
+            </>
           ) : ( 
             <div className="flex items-center justify-center h-full">
               <p className="text-gray-500">Selecione uma campanha para ver o log.</p>
