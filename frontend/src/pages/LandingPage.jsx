@@ -1,50 +1,97 @@
 import React from 'react';
 import { Link } from 'react-router-dom'; // Importante para navegação interna
+import { Zap, Target, MessageSquare, Phone } from 'lucide-react';
 
 function LandingPage() {
   // O HTML foi convertido para JSX (class -> className, etc.)
   // e os links <a> foram trocados por <Link> do React Router.
   return (
-    <div className="bg-gray-50 text-gray-800 antialiased">
-        {/* Botão Flutuante do WhatsApp */}
-        <a href="https://wa.me/5545999861237?text=Ol%C3%A1%21%20Gostaria%20de%20saber%20mais%20sobre%20o%20Prospect%20Client%20System." target="_blank" rel="noopener noreferrer" className="fixed bottom-6 right-6 bg-green-500 text-white p-4 rounded-full shadow-lg hover:bg-green-600 transition-transform hover:scale-110 z-50 flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
-            <span className="hidden md:inline">Fale Conosco</span>
-        </a>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      {/* Botão Flutuante do WhatsApp */}
+      <a 
+        href="https://wa.me/5545999861237?text=Ol%C3%A1%21%20Gostaria%20de%20saber%20mais%20sobre%20o%20ProspectAI." 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        className="fixed bottom-6 right-6 bg-green-500 text-white p-4 rounded-full shadow-lg hover:bg-green-600 transition-transform hover:scale-110 z-50 flex items-center gap-2"
+      >
+        <Phone size={24} />
+        <span className="hidden md:inline">Fale Conosco</span>
+      </a>
 
-        {/* Cabeçalho */}
-        <header className="bg-white/80 backdrop-blur-lg sticky top-0 z-40 border-b border-gray-200">
-            <div className="container mx-auto px-6 py-4 flex justify-between items-center">
-            <a href="#" className="flex items-center gap-2">
-                <svg className="h-8 w-8 text-green-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d='M20 10 L80 50 L20 90 Z' fill='currentColor'/></svg>
-                <span className="text-xl font-bold text-gray-800">Prospect System</span>
-            </a>
-            <nav className="hidden md:flex items-center gap-8">
-                <a href="#features" className="text-gray-600 hover:text-green-600 transition-colors">Recursos</a>
-                <a href="#how-it-works" className="text-gray-600 hover:text-green-600 transition-colors">Como Funciona</a>
-                <a href="#cta" className="text-gray-600 hover:text-green-600 transition-colors">Começar</a>
-            </nav>
-            <Link to="/login" className="bg-green-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-green-700 transition-all duration-300">
-                Acessar Plataforma
-            </Link>
-            </div>
-        </header>
+      <div className="grid grid-cols-1 lg:grid-cols-2 max-w-5xl w-full bg-white shadow-2xl rounded-2xl overflow-hidden">
+        
+        {/* Painel Esquerdo (Visual) - Reutilizado do Login */}
+        <div className="hidden lg:flex flex-col items-center justify-center p-12 bg-brand-green text-white relative overflow-hidden">
+          <div className="absolute -top-16 -left-16 w-48 h-48 bg-white/10 rounded-full mix-blend-overlay animate-pulse"></div>
+          <div className="absolute -bottom-24 -right-10 w-64 h-64 bg-white/10 rounded-full mix-blend-overlay animate-pulse delay-500"></div>
+          
+          <div className="w-24 h-24 bg-brand-green-light/20 rounded-2xl flex items-center justify-center mb-6">
+              <span className="text-5xl font-bold text-white">P</span>
+          </div>
+          <h1 className="text-3xl font-bold mb-2">ProspectAI</h1>
+          <p className="text-center text-white/80">Sua plataforma de prospecção inteligente de clientes.</p>
+        </div>
 
-        <main>
-            {/* Seções da Landing Page (Herói, Recursos, etc.) */}
-            {/* ... (todo o conteúdo da main que eu te enviei antes) ... */}
-        </main>
-
-        <footer className="bg-gray-800 text-white py-12">
-            <div className="container mx-auto px-6 text-center">
-                <div className="flex justify-center gap-x-6 mb-6">
-                    <Link to="/politicies" className="text-gray-400 hover:text-white transition-colors">Política de Privacidade</Link>
-                    <Link to="/services-terms" className="text-gray-400 hover:text-white transition-colors">Termos de Serviço</Link>
+        {/* Painel Direito (Conteúdo da Landing Page) */}
+        <div className="p-8 md:p-12 flex flex-col justify-center">
+            <div className="w-full">
+                <div className="mb-8">
+                    <h2 className="text-3xl font-bold text-brand-green">Automatize sua Prospecção com Inteligência Artificial</h2>
+                    <p className="text-gray-500 mt-3">
+                        Transforme a maneira como você encontra e se conecta com novos clientes. O ProspectAI usa IA para otimizar suas campanhas de prospecção no WhatsApp.
+                    </p>
                 </div>
-                <p>&copy; 2025 Prospect Client System. Todos os direitos reservados.</p>
-                <p className="text-sm text-gray-400 mt-2">Uma solução de prospecção inteligente para o seu negócio.</p>
+
+                <div className="space-y-5 my-10">
+                    <div className="flex items-start gap-4">
+                        <div className="flex-shrink-0 w-10 h-10 bg-brand-green-light/20 rounded-lg flex items-center justify-center">
+                            <Zap className="text-brand-green" size={20} />
+                        </div>
+                        <div>
+                            <h4 className="font-semibold text-gray-800">Prospecção Inteligente</h4>
+                            <p className="text-sm text-gray-500">Use IA para analisar dados e encontrar os melhores leads para o seu negócio.</p>
+                        </div>
+                    </div>
+                    <div className="flex items-start gap-4">
+                        <div className="flex-shrink-0 w-10 h-10 bg-brand-green-light/20 rounded-lg flex items-center justify-center">
+                            <MessageSquare className="text-brand-green" size={20} />
+                        </div>
+                        <div>
+                            <h4 className="font-semibold text-gray-800">Comunicação Personalizada</h4>
+                            <p className="text-sm text-gray-500">Envie mensagens automáticas e personalizadas que geram respostas.</p>
+                        </div>
+                    </div>
+                    <div className="flex items-start gap-4">
+                        <div className="flex-shrink-0 w-10 h-10 bg-brand-green-light/20 rounded-lg flex items-center justify-center">
+                            <Target className="text-brand-green" size={20} />
+                        </div>
+                        <div>
+                            <h4 className="font-semibold text-gray-800">Gestão Simplificada</h4>
+                            <p className="text-sm text-gray-500">Acompanhe o status de cada contato em um dashboard intuitivo.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <Link 
+                    to="/login" 
+                    className="w-full bg-brand-green text-white font-bold py-3 px-4 rounded-lg hover:bg-brand-green-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-green transition-all duration-300 shadow-lg hover:shadow-xl text-center"
+                >
+                    Acessar Plataforma
+                </Link>
+                
+                <div className="text-center mt-12 space-y-4">
+                    <p className="text-sm text-gray-500">
+                        Desenvolvido por <a href="https://ckistian-programando-solucoes.vercel.app" target="_blank" rel="noopener noreferrer" className="font-semibold text-gray-800 hover:underline">Ckistian Programando Soluções</a>
+                    </p>
+                    <div className="text-xs text-gray-400">
+                        <Link to="/politicies" className="hover:underline hover:text-gray-600 transition-colors">Política de Privacidade</Link>
+                        <span className="mx-2">·</span>
+                        <Link to="/services-terms" className="hover:underline hover:text-gray-600 transition-colors">Termos de Serviço</Link>
+                    </div>
+                </div>
             </div>
-        </footer>
+        </div>
+      </div>
     </div>
   );
 }
