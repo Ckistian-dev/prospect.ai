@@ -39,7 +39,7 @@ function LandingPage() {
             <div className="container mx-auto px-6 text-center">
                 <div className="flex justify-center gap-x-6 mb-6">
                     <Link to="/politicies" className="text-gray-400 hover:text-white transition-colors">Política de Privacidade</Link>
-                    <Link to="/terms-of-service" className="text-gray-400 hover:text-white transition-colors">Termos de Serviço</Link>
+                    <Link to="/services-terms" className="text-gray-400 hover:text-white transition-colors">Termos de Serviço</Link>
                 </div>
                 <p>&copy; 2025 Prospect Client System. Todos os direitos reservados.</p>
                 <p className="text-sm text-gray-400 mt-2">Uma solução de prospecção inteligente para o seu negócio.</p>
