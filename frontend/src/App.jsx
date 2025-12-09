@@ -31,7 +31,7 @@ function App() {
 
       {/* --- ROTAS PROTEGIDAS (SISTEMA INTERNO) --- */}
       {/* Mudei o path pai para "/app" ou mantive protegido, mas a raiz "/" agora é livre */}
-      <Route path="/app" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
+      <Route path="/" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="contacts" element={<Contacts />} />
         <Route path="prospects" element={<Prospects />} />
@@ -40,12 +40,12 @@ function App() {
         <Route path="prospecting" element={<MainProspecting />} />
         
         {/* Se alguém entrar em /app sem nada, vai pro dashboard */}
-        <Route index element={<Navigate to="/app/dashboard" />} />
+        <Route index element={<Navigate to="/dashboard" />} />
       </Route>
 
       {/* Redirecionamentos Inteligentes */}
       {/* Se tentar acessar /dashboard direto (link antigo), redireciona para a nova estrutura /app/dashboard se estiver logado */}
-      <Route path="/dashboard" element={<Navigate to={isAuthenticated ? "/app/dashboard" : "/login"} />} />
+      <Route path="/dashboard" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
 
       {/* Catch-all: Qualquer rota desconhecida vai para a Home ou Login */}
       <Route path="*" element={<Navigate to="/" />} />
