@@ -25,7 +25,7 @@ bcrypt==4.3.0
 # --- APIs Externas & Clientes HTTP ---
 # Para fazer requisições a outras APIs e serviços
 httpx
-google-generativeai
+google-genai
 google-auth[httpx]
 google-api-python-client
 google-auth-oauthlib

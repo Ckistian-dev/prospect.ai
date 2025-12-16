@@ -1,7 +1,10 @@
 import logging
 import json
+import io
+import base64
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -120,6 +123,40 @@ class GoogleDriveService:
             if "404" in str(e):
                 raise Exception("Pasta não encontrada (404). Verifique o ID.")
             raise e
+
+    async def download_file(self, file_id: str) -> dict:
+        """Baixa um arquivo do Drive e retorna em base64."""
+        if not self.service:
+            logger.error("Drive: Serviço não inicializado para download.")
+            return None
+            
+        try:
+            # 1. Obter metadados (nome e mimeType)
+            file_meta = self.service.files().get(fileId=file_id, fields='name, mimeType').execute()
+            file_name = file_meta.get('name', 'arquivo')
+            mime_type = file_meta.get('mimeType')
+            
+            # 2. Baixar conteúdo
+            request = self.service.files().get_media(fileId=file_id)
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            
+            done = False
+            while done is False:
+                status, done = downloader.next_chunk()
+                
+            fh.seek(0)
+            file_bytes = fh.read()
+            base64_data = base64.b64encode(file_bytes).decode('utf-8')
+            
+            return {
+                "base64": base64_data,
+                "mime_type": mime_type,
+                "file_name": file_name
+            }
+        except Exception as e:
+            logger.error(f"Drive: Erro ao baixar arquivo {file_id}: {e}")
+            return None
 
 _drive_service = None
 def get_drive_service():

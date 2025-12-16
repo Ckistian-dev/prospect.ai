@@ -1,9 +1,9 @@
-import google.generativeai as genai
-from google.api_core import exceptions
-from datetime import timezone
+from google import genai
+from google.genai import types
+from collections.abc import Set
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import base64
 from typing import Optional, List, Dict, Any
 import asyncio
@@ -15,6 +15,13 @@ from app.crud import crud_user # Import necessário para a função de débito
 
 logger = logging.getLogger(__name__)
 
+class SetEncoder(json.JSONEncoder):
+    """Codificador JSON para lidar com objetos 'set'."""
+    def default(self, obj):
+        if isinstance(obj, Set):
+            return list(obj)
+        return super().default(obj)
+
 class GeminiService:
     def __init__(self):
         try:
@@ -24,11 +31,28 @@ class GeminiService:
             
             self.current_key_index = 0
             self.generation_config = {"temperature": 0.5, "top_p": 1, "top_k": 1}
+            self._initialize_model()
             
-            logger.info(f"✅ Cliente Gemini inicializado com {len(self.api_keys)} chaves de API.")
         except Exception as e:
             logger.error(f"🚨 ERRO CRÍTICO ao configurar o Gemini: {e}")
             raise
+
+    def _initialize_model(self):
+        """Inicializa o cliente Gemini com a chave atual usando o novo SDK."""
+        try:
+            current_key = self.api_keys[self.current_key_index]
+            self.client = genai.Client(api_key=current_key)
+            logger.info(f"✅ Cliente Gemini (New SDK) inicializado (chave índice {self.current_key_index}).")
+        except Exception as e:
+            logger.error(f"🚨 ERRO CRÍTICO ao configurar o Gemini com a chave índice {self.current_key_index}: {e}", exc_info=True)
+            raise
+
+    def _rotate_key(self):
+        """Muda para a próxima chave na lista."""
+        self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+        logger.warning(f"Alternando para a chave de API do Google com índice {self.current_key_index}.")
+        self._initialize_model()
+        return self.current_key_index
 
     # --- MÉTODO ATUALIZADO PARA RECEBER DB E USER E DEBITAR O TOKEN ---
     async def _generate_with_retry_async(
@@ -36,40 +60,59 @@ class GeminiService:
         prompt: Any, 
         db: AsyncSession, 
         user: models.User, 
-        force_json: bool = True
-    ) -> genai.types.GenerateContentResponse:
+        force_json: bool = True,
+        model_name: str = 'gemini-2.5-flash'
+    ):
         """
         Executa a chamada assíncrona para a API Gemini, com rotação de chaves e débito de token no sucesso.
         """
-        for i in range(len(self.api_keys)):
-            try:
-                key_to_use = self.api_keys[self.current_key_index]
-                genai.configure(api_key=key_to_use)
-                model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        # Configuração do novo SDK
+        config_args = {
+            "temperature": self.generation_config.get("temperature", 0.5),
+            "top_p": self.generation_config.get("top_p", 1),
+            "top_k": self.generation_config.get("top_k", 1),
+        }
+        if force_json:
+            config_args["response_mime_type"] = "application/json"
 
-                gen_config = self.generation_config
-                if force_json:
-                    gen_config = {**self.generation_config, "response_mime_type": "application/json"}
+        gen_config = types.GenerateContentConfig(**config_args)
+        
+        initial_key_index = self.current_key_index
+        max_attempts_per_key = 2
 
-                response = await model.generate_content_async(prompt, generation_config=gen_config)
-                
-                # --- LÓGICA DE DÉBITO CENTRALIZADA ---
-                # Se a chamada foi bem-sucedida, debita 1 token do usuário.
-                await crud_user.decrement_user_tokens(db, db_user=user, amount=1)
-                
-                return response
+        while True:
+            for attempt in range(max_attempts_per_key):
+                try:
+                    response = await self.client.aio.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=gen_config
+                    )
+                    
+                    # --- LÓGICA DE DÉBITO CENTRALIZADA ---
+                    await crud_user.decrement_user_tokens(db, db_user=user, amount=1)
+                    return response
 
-            except exceptions.ResourceExhausted as e:
-                logger.warning(f"Chave de API índice {self.current_key_index} ({key_to_use[:4]}...) atingiu a quota. Rotacionando...")
-                self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
-                if i < len(self.api_keys) - 1:
-                    await asyncio.sleep(1)
+                except Exception as e:
+                    error_str = str(e).lower()
+                    # Detecção de Erro de Cota (429), Recurso Esgotado ou Chave Suspensa/Permissão (403)
+                    if "429" in error_str or "resource exhausted" in error_str or "quota" in error_str or "403" in error_str or "permission denied" in error_str or "suspended" in error_str:
+                        logger.warning(f"Erro de API (Quota/Permissão) com a chave {self.current_key_index}. Rotacionando... Erro: {e}")
+                        break # Sai do loop 'for' para rotacionar a chave
+                    
+                    elif "blocked" in error_str or "invalid argument" in error_str:
+                        logger.error(f"Erro não recuperável (Bloqueio/Inválido): {e}")
+                        raise e
+                    else:
+                        logger.error(f"Erro inesperado na API Gemini: {e}. Tentativa {attempt + 1}.")
+                        await asyncio.sleep(1)
 
-            except Exception as e:
-                logger.error(f"Erro inesperado ao gerar conteúdo com Gemini na chave índice {self.current_key_index}: {e}")
-                raise e
-
-        raise exceptions.ResourceExhausted(f"Todas as {len(self.api_keys)} chaves de API atingiram a quota.")
+            # Se saiu do loop 'for', significa que precisa trocar de chave
+            new_key_index = self._rotate_key()
+            if new_key_index == initial_key_index:
+                logger.critical(f"Todas as {len(self.api_keys)} chaves de API falharam.")
+                raise Exception("Todas as chaves de API excederam a quota.")
 
 
     def _replace_variables_in_dict(self, config_dict: Dict[str, Any], contact_data: models.Contact) -> Dict[str, Any]:
@@ -110,7 +153,7 @@ class GeminiService:
         db_history: Optional[List[dict]] = None
     ) -> str:
         logger.info(f"Iniciando transcrição/análise para mídia do tipo {media_data.get('mime_type')}")
-        prompt_parts = []
+        prompt_contents = []
 
         # --- CORREÇÃO INÍCIO: Conversão de mídia para binário ---
         raw_data = media_data.get("data")
@@ -135,15 +178,19 @@ class GeminiService:
             logger.error(f"Os dados da mídia não são binários e não puderam ser convertidos. Tipo: {type(raw_data)}")
             return "[Erro: Dados de mídia em formato inesperado]"
 
-        file_part = {"mime_type": mime_type, "data": raw_data}
+        # --- NOVO SDK: Criação do objeto Part ---
+        try:
+            media_part = types.Part.from_bytes(data=raw_data, mime_type=mime_type)
+        except Exception as e:
+            logger.error(f"Erro ao criar Part de mídia: {e}")
+            return "[Erro interno ao processar arquivo]"
 
         if 'audio' in media_data['mime_type']:
             # --- CORREÇÃO: Simplificação do prompt de transcrição ---
             # O modelo é mais eficaz para transcrição quando o prompt é direto.
             # Pedir JSON para uma tarefa simples como essa pode confundir o modelo.
             transcription_prompt = "Transcreva este áudio de forma literal. Retorne apenas o texto transcrito, sem nenhuma palavra ou formatação adicional."
-            prompt_parts.append(transcription_prompt)
-            prompt_parts.append(file_part)
+            prompt_contents = [transcription_prompt, media_part]
             
             max_retries = 3
             last_error = "Nenhum erro registrado."
@@ -151,7 +198,7 @@ class GeminiService:
             for attempt in range(max_retries):
                 try:
                     # force_json=False, pois não esperamos mais um JSON como resposta.
-                    response = await self._generate_with_retry_async(prompt_parts, db, user, force_json=False)
+                    response = await self._generate_with_retry_async(prompt_contents, db, user, force_json=False)
                     
                     transcription = response.text.strip()
                     if not transcription:
@@ -179,8 +226,8 @@ class GeminiService:
 
             formatted_history = self._format_history_for_prompt(db_history or [])
             
-            contexto_planilha_str = json.dumps(config.contexto_sheets or {"aviso": "Nenhum contexto de planilha foi fornecido."}, ensure_ascii=False, indent=2)
-            historico_conversa_str = json.dumps(formatted_history, ensure_ascii=False, indent=2)
+            contexto_planilha_str = json.dumps(config.contexto_sheets or {"aviso": "Nenhum contexto de planilha foi fornecido."}, ensure_ascii=False, indent=2, cls=SetEncoder)
+            historico_conversa_str = json.dumps(formatted_history, ensure_ascii=False, indent=2, cls=SetEncoder)
 
             analysis_prompt_text = f"""
                 **Instrução Geral:**
@@ -204,11 +251,11 @@ class GeminiService:
                 **Tarefa Imediata:**
                 Analise o arquivo a seguir e retorne a extração de dados no formato JSON especificado.
                 """
-            prompt_parts.append(analysis_prompt_text)
-            prompt_parts.append(file_part)
+            
+            prompt_contents = [analysis_prompt_text, media_part]
 
             try:
-                response = await self._generate_with_retry_async(prompt_parts, db, user, force_json=True)
+                response = await self._generate_with_retry_async(prompt_contents, db, user, force_json=True)
                 response_json = json.loads(response.text)
                 analysis = response_json.get("analise", "[Não foi possível extrair a análise]").strip()
                 logger.info(f"Análise de mídia gerada: '{analysis[:100]}...'")
@@ -243,9 +290,10 @@ class GeminiService:
             "formato_resposta_obrigatorio": {
                 "descricao": "Sua resposta DEVE ser um único objeto JSON válido...",
                 "chaves": {
-                    "mensagem_para_enviar": "...",
+                    "mensagem_para_enviar": "O texto da mensagem a ser enviada. Para criar parágrafos, use o caractere de quebra de linha (\\n). Se não for enviar mensagem, retorne null.",
                     "nova_situacao": "Um dos seguintes: 'Aguardando Resposta', 'Lead Qualificado', 'Não Interessado', 'Concluído'.",
-                    "observacoes": "Um resumo objetivo da interação para registro interno."
+                    "observacoes": "Um resumo geral da conversa até o momento.",
+                    "arquivos_anexos": "Lista de IDs dos arquivos a serem enviados (opcional). Ex: ['12345']"
                 },
                 "regra_importante_variaveis": "CRÍTICO: NUNCA inclua placeholders como {{nome_contato}} na resposta final."
             },
@@ -266,7 +314,7 @@ class GeminiService:
             }
         }
 
-        final_prompt_str = json.dumps(master_prompt, ensure_ascii=False, indent=2)
+        final_prompt_str = json.dumps(master_prompt, ensure_ascii=False, indent=2, cls=SetEncoder)
         max_retries = 3
         last_error = None
 
@@ -275,6 +323,8 @@ class GeminiService:
                 response = await self._generate_with_retry_async(final_prompt_str, db, user, force_json=True)
                 clean_response_text = response.text.strip().replace("```json", "").replace("```", "")
                 response_data = json.loads(clean_response_text)
+                
+                print(response_data)
 
                 # Validação da resposta: verifica se a mensagem não é nula ou vazia (após remover espaços)
                 # A exceção é o modo 'followup', onde uma mensagem vazia pode ser intencional.
@@ -356,7 +406,7 @@ class GeminiService:
             }
         }
         
-        response = await self._generate_with_retry_async(json.dumps(analysis_prompt, ensure_ascii=False), db, user, force_json=True)
+        response = await self._generate_with_retry_async(json.dumps(analysis_prompt, ensure_ascii=False, cls=SetEncoder), db, user, force_json=True)
         return json.loads(response.text)
 
 _gemini_service_instance = None

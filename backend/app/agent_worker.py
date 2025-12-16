@@ -6,9 +6,11 @@ import random
 from datetime import datetime, timezone, timedelta
 
 from app.db.database import SessionLocal
+from app.db import models
 from app.crud import crud_prospect, crud_user, crud_config
 from app.services.whatsapp_service import get_whatsapp_service, MessageSendError
 from app.services.gemini_service import get_gemini_service
+from app.services.google_drive_service import get_drive_service
 from app.api.prospecting import _synchronize_and_process_history
 
 # Configuração do logging
@@ -38,6 +40,7 @@ async def process_active_prospects():
 
             whatsapp_service = get_whatsapp_service()
             gemini_service = get_gemini_service()
+            drive_service = get_drive_service()
 
             # 2. Itera sobre cada campanha ativa
             for campaign in active_campaigns:
@@ -101,27 +104,73 @@ async def process_active_prospects():
                     message_to_send = ia_response.get("mensagem_para_enviar")
                     new_status = ia_response.get("nova_situacao", "Aguardando Resposta")
                     new_observation = ia_response.get("observacoes", "")
+                    files_to_send = ia_response.get("arquivos_anexos", [])
                     
                     history_after_response = full_history.copy()
+                    sent_any_message = False
                     
                     if message_to_send and str(message_to_send).strip():
                         try:
-                            await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, message_to_send)
-                            logger.info(f"AGENTE WORKER: Mensagem enviada para {contact.whatsapp}.")
-                            pending_id = f"sent_{datetime.now(timezone.utc).isoformat()}"
-                            history_after_response.append({"id": pending_id, "role": "assistant", "content": message_to_send})
+                            # Divide a mensagem por quebras de linha para enviar separadamente
+                            # CORREÇÃO: Garante que quebras de linha que a IA possa ter escapado (ex: "\\n")
+                            # sejam convertidas para quebras de linha reais (\n) antes de dividir.
+                            processed_message = str(message_to_send).replace('\\n', '\n')
+                            messages_parts = [p.strip() for p in processed_message.split('\n') if p.strip()]
                             
-                            if mode in ['initial', 'followup']:
-                                last_message_sent_times[campaign.id] = datetime.now(timezone.utc)
+                            for part in messages_parts:
+                                # Simula tempo de digitação: 1.5s base + 0.05s por caractere (Max 7s)
+                                typing_delay = min(2 + (len(part) * 0.1), 10.0)
+                                
+                                # Envia status "Digitando..." (composing)
+                                await whatsapp_service.send_presence(user.instance_name, contact.whatsapp, "composing")
+                                await asyncio.sleep(typing_delay)
+
+                                await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, part)
+                                logger.info(f"AGENTE WORKER: Parte da mensagem enviada para {contact.whatsapp}.")
+                                pending_id = f"sent_{datetime.now(timezone.utc).isoformat()}_{random.randint(1000, 9999)}"
+                                history_after_response.append({"id": pending_id, "role": "assistant", "content": part})
+
+                            sent_any_message = True
 
                         except MessageSendError as e:
                             logger.error(f"AGENTE WORKER: Falha ao enviar mensagem para {contact.whatsapp}. Erro: {e}")
                             new_status = "Falha no Envio"
                             new_observation = f"Falha no envio via WhatsApp: {e}"
-                    else:
+                    
+                    # Processamento de Arquivos
+                    if files_to_send and isinstance(files_to_send, list):
+                        for file_id in files_to_send:
+                            try:
+                                logger.info(f"AGENTE WORKER: Baixando arquivo {file_id} para envio...")
+                                file_data = await drive_service.download_file(file_id)
+                                if file_data:
+                                    mime = file_data['mime_type']
+                                    if 'image' in mime: media_type = 'image'
+                                    elif 'video' in mime: media_type = 'video'
+                                    else: media_type = 'document'
+
+                                    await whatsapp_service.send_media_message(
+                                        instance_name=user.instance_name,
+                                        number=contact.whatsapp,
+                                        media=file_data['base64'],
+                                        media_type=media_type,
+                                        mime_type=mime,
+                                        file_name=file_data['file_name']
+                                    )
+                                    logger.info(f"AGENTE WORKER: Arquivo {file_data['file_name']} enviado com sucesso.")
+                                    
+                                    pending_id = f"sent_file_{datetime.now(timezone.utc).isoformat()}"
+                                    history_after_response.append({"id": pending_id, "role": "assistant", "content": f"[Arquivo enviado: {file_data['file_name']}]"})
+                                    sent_any_message = True
+                            except Exception as e:
+                                logger.error(f"AGENTE WORKER: Falha ao enviar arquivo {file_id}: {e}")
+
+                    if not sent_any_message:
                         logger.info(f"AGENTE WORKER: IA decidiu não enviar mensagem para {contact.whatsapp} (Modo: {mode}).")
                         pending_id = f"internal_{datetime.now(timezone.utc).isoformat()}"
                         history_after_response.append({"id": pending_id, "role": "assistant", "content": f"[Ação Interna: Não responder - Modo: {mode}]"})
+                    elif mode in ['initial', 'followup']:
+                        last_message_sent_times[campaign.id] = datetime.now(timezone.utc)
 
                     await crud_prospect.update_prospect_contact(
                         db, pc_id=pc.id, situacao=new_status,
@@ -132,6 +181,18 @@ async def process_active_prospects():
                 except Exception as e:
                     logger.error(f"AGENTE WORKER: Erro ao processar campanha ID {campaign.id}: {e}", exc_info=True)
                     await db.rollback()
+
+                    # --- PAUSA A CAMPANHA EM CASO DE ERRO ---
+                    try:
+                        logger.warning(f"Pausando campanha {campaign.id} devido a erro crítico no processamento.")
+                        campaign_to_pause = await db.get(models.Prospect, campaign.id)
+                        if campaign_to_pause:
+                            campaign_to_pause.status = "Pausado"
+                            db.add(campaign_to_pause)
+                            await db.commit()
+                    except Exception as pause_error:
+                        logger.error(f"Erro ao tentar pausar campanha {campaign.id}: {pause_error}")
+
                     # Tenta marcar o contato específico com erro, se possível
                     if 'pc' in locals():
                         await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao="Erro IA", observacoes=f"Erro no worker: {e}")

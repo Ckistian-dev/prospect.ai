@@ -158,6 +158,28 @@ class WhatsAppService:
             logger.error(f"Falha CRÍTICA ao enviar mensagem para {normalized_number}. Erro: {e}")
             raise MessageSendError(f"Falha no envio: {e}") from e
 
+    async def send_media_message(self, instance_name: str, number: str, media: str, media_type: str, mime_type: str, caption: str = "", file_name: str = "arquivo"):
+        normalized_number = self._normalize_number(number)
+        # Rota da Evolution API para enviar mídia
+        url = f"{self.api_url}/message/sendMedia/{instance_name}"
+        
+        payload = {
+            "number": normalized_number,
+            "media": media, # Base64
+            "mediatype": media_type, # image, video, document
+            "mimetype": mime_type,
+            "fileName": file_name,
+            "caption": caption
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=self.headers, json=payload, timeout=120.0)
+                response.raise_for_status()
+                logger.info(f"Mídia enviada com sucesso para {normalized_number}.")
+        except Exception as e:
+            logger.error(f"Falha ao enviar mídia para {normalized_number}. Erro: {e}")
+            raise MessageSendError(f"Falha no envio de mídia: {e}") from e
+
     async def get_media_and_convert(self, instance_name: str, message: dict) -> Optional[Dict[str, Any]]:
         """
         Obtém a mídia de uma mensagem da Evolution API em formato base64.
@@ -282,6 +304,22 @@ class WhatsAppService:
         except Exception as e:
             logger.error(f"Falha ao verificar números no WhatsApp: {e}")
             return None
+
+    async def send_presence(self, instance_name: str, number: str, presence: str = "composing"):
+        """
+        Envia o status de presença (ex: 'composing' para 'Digitando...') para um número.
+        """
+        normalized_number = self._normalize_number(number)
+        url = f"{self.api_url}/chat/sendPresence/{instance_name}"
+        payload = {
+            "number": normalized_number,
+            "presence": presence
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.post(url, headers=self.headers, json=payload, timeout=5.0)
+        except Exception as e:
+            logger.warning(f"Falha ao enviar status '{presence}' para {normalized_number}: {e}")
 
 _whatsapp_service_instance = None
 def get_whatsapp_service():

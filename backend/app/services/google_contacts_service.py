@@ -121,31 +121,66 @@ class GoogleContactsService:
 
     async def sync_multiple_contacts(self, contacts: List[models.Contact]) -> Dict[str, int]:
         """
-        Sincroniza uma lista de contatos com o Google Contacts de forma paralela.
+        Sincroniza uma lista de contatos com o Google Contacts usando batch requests (lotes).
         """
         if not self.user or not self.user.google_credentials:
             logger.warning(f"Tentativa de sincronização em massa para o usuário {self.user.id} sem credenciais do Google.")
             return {"success": 0, "failed": len(contacts)}
 
-        tasks = []
-        for contact in contacts:
-            contact_data = ContactCreate(
-                nome=contact.nome,
-                whatsapp=contact.whatsapp,
-                observacoes=contact.observacoes,
-                categoria=contact.categoria or []
-            )
-            tasks.append(self.create_or_update_contact(contact_data))
+        if not contacts:
+            return {"success": 0, "failed": 0}
 
-        # Executa todas as tarefas de criação de contato em paralelo
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            service = self._get_service()
+            total_success = 0
+            total_failed = 0
+            
+            # O limite da API People para batchCreateContacts é 200 contatos por requisição
+            BATCH_SIZE = 200
+            
+            # Loop para processar em chunks
+            for i in range(0, len(contacts), BATCH_SIZE):
+                chunk = contacts[i:i + BATCH_SIZE]
+                batch_contacts_data = []
+                
+                for contact in chunk:
+                    contact_data = ContactCreate(
+                        nome=contact.nome,
+                        whatsapp=contact.whatsapp,
+                        observacoes=contact.observacoes,
+                        categoria=contact.categoria or []
+                    )
+                    formatted_contact = self._format_contact_for_google(contact_data)
+                    batch_contacts_data.append({"contactPerson": formatted_contact})
 
-        # Conta os sucessos e falhas
-        success_count = sum(1 for r in results if r is not None and not isinstance(r, Exception))
-        failed_count = len(results) - success_count
-        
-        logger.info(f"Sincronização em massa para o usuário {self.user.id} concluída. Sucesso: {success_count}, Falhas: {failed_count}.")
-        return {"success": success_count, "failed": failed_count}
+                body = {
+                    "contacts": batch_contacts_data,
+                    "readMask": "names,phoneNumbers"
+                }
+
+                loop = asyncio.get_running_loop()
+                try:
+                    # Executa a chamada de bloqueio em uma thread
+                    result = await loop.run_in_executor(
+                        None,
+                        lambda: service.people().batchCreateContacts(body=body).execute()
+                    )
+                    
+                    created_people = result.get('createdPeople', [])
+                    success_count = len(created_people)
+                    total_success += success_count
+                    total_failed += (len(chunk) - success_count)
+                    
+                except Exception as e:
+                    logger.error(f"Erro no lote {i//BATCH_SIZE + 1} da sincronização para user {self.user.id}: {e}")
+                    total_failed += len(chunk)
+
+            logger.info(f"Sincronização em massa (Batch) para o usuário {self.user.id} concluída. Sucesso: {total_success}, Falhas: {total_failed}.")
+            return {"success": total_success, "failed": total_failed}
+
+        except Exception as e:
+            logger.error(f"Erro crítico na sincronização em massa para user {self.user.id}: {e}")
+            return {"success": 0, "failed": len(contacts)}
 
     async def batch_create_contacts(self, contacts: List[models.Contact]) -> Dict[str, int]:
         """
