@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api/axiosConfig';
 import {
     Plus, Save, Trash2, FileText, ChevronRight, Loader2,
-    Link as LinkIcon, Star, CheckCircle, Folder, Copy, Share2
+    Link as LinkIcon, Folder, Copy, Share2, Database, ExternalLink
 } from 'lucide-react';
 
 // --- CONFIGURAÇÃO ---
@@ -11,9 +11,8 @@ const BOT_EMAIL = "integracaoapi@integracaoapi-436218.iam.gserviceaccount.com";
 
 const initialFormData = {
   nome_config: '',
-  contexto_sheets: null,
-  arquivos_drive: null,
   spreadsheet_id: '',
+  spreadsheet_rag_id: '',
   drive_id: ''
 };
 
@@ -27,7 +26,7 @@ function Configs() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState('');
 
-  const [activeTab, setActiveTab] = useState('contexto'); // 'contexto' ou 'drive'
+  const [activeTab, setActiveTab] = useState('system'); // 'system', 'rag', 'drive'
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -51,25 +50,39 @@ function Configs() {
     setSelectedConfig(config);
     setFormData({
       nome_config: config.nome_config,
-      contexto_sheets: config.contexto_sheets || null,
-      arquivos_drive: config.arquivos_drive || null,
       spreadsheet_id: config.spreadsheet_id || '',
+      spreadsheet_rag_id: config.spreadsheet_rag_id || '',
       drive_id: config.drive_id || ''
     });
-    setActiveTab('contexto');
+    setActiveTab('system');
     setError('');
   };
 
   const handleNewConfig = () => {
     setSelectedConfig(null);
     setFormData(initialFormData);
-    setActiveTab('contexto');
+    setActiveTab('system');
     setError('');
+  };
+
+  const extractId = (value) => {
+    if (!value) return "";
+    const sheetMatch = value.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (sheetMatch) return sheetMatch[1];
+    const folderMatch = value.match(/\/folders\/([a-zA-Z0-9-_]+)/);
+    if (folderMatch) return folderMatch[1];
+    return value;
   };
 
   const handleFormChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    let finalValue = value;
+    
+    if (['spreadsheet_id', 'spreadsheet_rag_id', 'drive_id'].includes(name)) {
+        finalValue = extractId(value);
+    }
+
+    setFormData(prev => ({ ...prev, [name]: finalValue }));
   };
 
   const handleSave = async (e) => {
@@ -112,17 +125,18 @@ function Configs() {
     alert("Email copiado para a área de transferência!");
   };
 
-  const handleSyncSheet = async () => {
+  const handleSyncSheet = async (type) => {
     if (!selectedConfig) return alert("Salve a configuração antes de sincronizar.");
-    if (!formData.spreadsheet_id) return alert("Insira o ID ou Link da planilha.");
+    const targetId = type === 'rag' ? formData.spreadsheet_rag_id : formData.spreadsheet_id;
+    if (!targetId) return alert("Insira o ID ou Link da planilha.");
 
     setIsSyncing(true);
     setError('');
     try {
-      const payload = { config_id: selectedConfig.id, spreadsheet_id: formData.spreadsheet_id };
+      const payload = { config_id: selectedConfig.id, spreadsheet_id: targetId, type };
       const response = await api.post('/configs/sync_sheet', payload);
-      setFormData(prev => ({ ...prev, contexto_sheets: response.data.contexto_sheets }));
-      alert(`Sucesso! ${response.data.sheets_found.length} abas encontradas.`);
+      
+      alert(`Sucesso! ${response.data.sheets_found.length} abas processadas (${type.toUpperCase()}).\nVetores criados: ${response.data.vectors_created}`);
     } catch (err) {
       setError(err.response?.data?.detail || 'Falha ao sincronizar. Verifique se compartilhou a planilha com o e-mail do robô.');
     } finally {
@@ -139,13 +153,20 @@ function Configs() {
     try {
       const payload = { config_id: selectedConfig.id, drive_id: formData.drive_id };
       const response = await api.post('/configs/sync_drive', payload);
-      setFormData(prev => ({ ...prev, arquivos_drive: response.data.arquivos_drive }));
-      alert(`Sucesso! ${response.data.files_count} arquivos encontrados.`);
+      alert(`Sucesso! ${response.data.files_count} arquivos encontrados.\nVetores criados: ${response.data.vectors_created}`);
     } catch (err) {
       setError(err.response?.data?.detail || 'Falha ao sincronizar Drive. Verifique o ID e o compartilhamento.');
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  const openResource = (id, type) => {
+    if (!id) return;
+    const baseUrl = type === 'drive' 
+        ? 'https://drive.google.com/drive/folders/' 
+        : 'https://docs.google.com/spreadsheets/d/';
+    window.open(`${baseUrl}${id}`, '_blank');
   };
 
   const labelClass = "block text-sm font-semibold text-gray-700 mb-1";
@@ -188,8 +209,11 @@ function Configs() {
               </div>
 
               <div className="flex border-b border-gray-200 mb-6">
-                <button type="button" onClick={() => setActiveTab('contexto')} className={`flex items-center gap-2 px-4 py-3 font-semibold transition-all ${activeTab === 'contexto' ? 'border-b-2 border-brand-green text-brand-green' : 'text-gray-500 hover:text-gray-800'}`}>
-                    <LinkIcon size={18} /> Contexto (Sheets)
+                <button type="button" onClick={() => setActiveTab('system')} className={`flex items-center gap-2 px-4 py-3 font-semibold transition-all ${activeTab === 'system' ? 'border-b-2 border-brand-green text-brand-green' : 'text-gray-500 hover:text-gray-800'}`}>
+                    <LinkIcon size={18} /> Instruções (System)
+                </button>
+                <button type="button" onClick={() => setActiveTab('rag')} className={`flex items-center gap-2 px-4 py-3 font-semibold transition-all ${activeTab === 'rag' ? 'border-b-2 border-brand-green text-brand-green' : 'text-gray-500 hover:text-gray-800'}`}>
+                    <Database size={18} /> Conhecimento (RAG)
                 </button>
                 <button type="button" onClick={() => setActiveTab('drive')} className={`flex items-center gap-2 px-4 py-3 font-semibold transition-all ${activeTab === 'drive' ? 'border-b-2 border-brand-green text-brand-green' : 'text-gray-500 hover:text-gray-800'}`}>
                     <Folder size={18} /> Arquivos (Drive)
@@ -198,14 +222,17 @@ function Configs() {
 
               {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded border border-red-200 text-sm">{error}</div>}
               
-              {activeTab === 'contexto' && (
+              {activeTab === 'system' && (
                 <div className="animate-fade-in space-y-6">
                   <div>
-                    <label htmlFor="spreadsheet_id" className={labelClass}>Link ou ID da Planilha</label>
+                    <label htmlFor="spreadsheet_id" className={labelClass}>Link da Planilha de Instruções</label>
                     <div className="flex items-center gap-4">
                       <input id="spreadsheet_id" name="spreadsheet_id" value={formData.spreadsheet_id} onChange={handleFormChange} className={inputClass} placeholder="Ex: 1a2b3c-4d5e6f... (ID ou link completo)" />
-                      <button type="button" onClick={handleSyncSheet} disabled={isSyncing || !selectedConfig} className="flex items-center gap-2 bg-brand-green text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-brand-green-dark transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
+                      <button type="button" onClick={() => handleSyncSheet('system')} disabled={isSyncing || !selectedConfig} className="flex items-center gap-2 bg-brand-green text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-brand-green-dark transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
                         {isSyncing ? <Loader2 className="animate-spin" size={20} /> : "Sincronizar"}
+                      </button>
+                      <button type="button" onClick={() => openResource(formData.spreadsheet_id, 'sheet')} disabled={!formData.spreadsheet_id} className="p-2 text-gray-500 hover:text-brand-green transition-colors disabled:opacity-50" title="Abrir no Navegador">
+                        <ExternalLink size={24} />
                       </button>
                     </div>
                   </div>
@@ -218,21 +245,40 @@ function Configs() {
                       <li>Defina o acesso como <strong>Leitor</strong> e salve.</li>
                       <li>
                         Copie o ID da planilha (o trecho longo no meio da URL).<br/>
-                        <span className="text-xs text-gray-500">Ex: .../spreadsheets/d/<strong>1a2b3c-4d5e6f...</strong>/edit</span>
+                        <span className="text-xs text-gray-500">Use esta planilha para definir Persona, Regras de Negócio e Etapas de Venda.</span>
                       </li>
                     </ol>
                   </div>
+                </div>
+              )}
 
-                  {formData.contexto_sheets && Object.keys(formData.contexto_sheets).length > 0 && (
-                    <div className="p-4 bg-green-50 rounded-lg border border-green-200 animate-fade-in">
-                      <div className="flex items-center gap-2"><CheckCircle className="text-green-600" size={20} /><p className="font-semibold text-green-800">Contexto Sincronizado!</p></div>
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        {Object.keys(formData.contexto_sheets).map(sheetName => (
-                          <span key={sheetName} className="px-3 py-1 bg-green-200 text-green-900 text-xs font-medium rounded-full">{sheetName}</span>
-                        ))}
-                      </div>
+              {activeTab === 'rag' && (
+                <div className="animate-fade-in space-y-6">
+                  <div>
+                    <label htmlFor="spreadsheet_rag_id" className={labelClass}>Link da Planilha de Conhecimento</label>
+                    <div className="flex items-center gap-4">
+                      <input id="spreadsheet_rag_id" name="spreadsheet_rag_id" value={formData.spreadsheet_rag_id} onChange={handleFormChange} className={inputClass} placeholder="Ex: 1a2b3c-4d5e6f... (ID ou link completo)" />
+                      <button type="button" onClick={() => handleSyncSheet('rag')} disabled={isSyncing || !selectedConfig} className="flex items-center gap-2 bg-brand-green text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-brand-green-dark transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
+                        {isSyncing ? <Loader2 className="animate-spin" size={20} /> : "Sincronizar"}
+                      </button>
+                      <button type="button" onClick={() => openResource(formData.spreadsheet_rag_id, 'sheet')} disabled={!formData.spreadsheet_rag_id} className="p-2 text-gray-500 hover:text-brand-green transition-colors disabled:opacity-50" title="Abrir no Navegador">
+                        <ExternalLink size={24} />
+                      </button>
                     </div>
-                  )}
+                  </div>
+
+                  <div className="p-4 bg-blue-50 rounded-lg border border-blue-100 text-sm text-gray-700 space-y-4">
+                    <div className="flex items-center gap-2 font-semibold text-brand-green">
+                        <Database size={18} />
+                        <h4>Base de Conhecimento (RAG)</h4>
+                    </div>
+                    <ol className="list-decimal list-inside space-y-2 text-gray-600">
+                        <li>Siga o mesmo processo de compartilhamento com o email do bot.</li>
+                        <li>Use esta planilha para dados volumosos: <strong>Catálogo de Produtos, Tabela de Preços, FAQ, Lista de Serviços.</strong></li>
+                        <li>O sistema irá ler todas as abas e transformar em vetores de busca.</li>
+                        <li>Isso permite que a IA encontre informações específicas sem sobrecarregar o prompt principal.</li>
+                    </ol>
+                  </div>
                 </div>
               )}
 
@@ -244,6 +290,9 @@ function Configs() {
                       <input id="drive_id" name="drive_id" value={formData.drive_id} onChange={handleFormChange} className={inputClass} placeholder="Ex: 1BxiMVs0XRA5nFMdKVBdBNj..." />
                       <button type="button" onClick={handleSyncDrive} disabled={isSyncing || !selectedConfig} className="flex items-center gap-2 bg-brand-green text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-brand-green-dark transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
                         {isSyncing ? <Loader2 className="animate-spin" size={20} /> : "Sincronizar"}
+                      </button>
+                      <button type="button" onClick={() => openResource(formData.drive_id, 'drive')} disabled={!formData.drive_id} className="p-2 text-gray-500 hover:text-brand-green transition-colors disabled:opacity-50" title="Abrir no Navegador">
+                        <ExternalLink size={24} />
                       </button>
                     </div>
                   </div>
@@ -260,19 +309,6 @@ function Configs() {
                       </li>
                     </ol>
                   </div>
-
-                  {formData.arquivos_drive && (formData.arquivos_drive.arquivos?.length > 0 || formData.arquivos_drive.subpastas?.length > 0) ? (
-                    <div className="p-4 bg-green-50 rounded-lg border border-gray-200 animate-fade-in">
-                      <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-100"><CheckCircle className="text-green-600" size={20} /><p className="font-semibold text-gray-700">Arquivos Sincronizados</p></div>
-                      <div className="space-y-2 max-h-60 overflow-y-auto pr-2 text-sm"><RenderDriveTree node={formData.arquivos_drive} /></div>
-                    </div>
-                  ) : (
-                    formData.drive_id && !isSyncing && (
-                      <div className="text-center py-6 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
-                        <Folder size={32} className="mx-auto mb-2 opacity-20" /><p className="text-sm">Nenhum arquivo sincronizado ainda.</p>
-                      </div>
-                    )
-                  )}
                 </div>
               )}
             </div>
@@ -289,31 +325,5 @@ function Configs() {
     </div>
   );
 }
-
-const RenderDriveTree = ({ node }) => {
-  if (!node || (!node.arquivos?.length && !node.subpastas?.length)) {
-    return null;
-  }
-
-  return (
-    <div className="pl-4 border-l border-gray-200">
-      {node.arquivos?.map(file => (
-        <div key={file.id} className="flex items-center gap-2 py-1">
-          <FileText size={14} className="text-gray-400 flex-shrink-0" />
-          <span className="text-gray-700">{file.nome}</span>
-        </div>
-      ))}
-      {node.subpastas?.map(subfolder => (
-        <div key={subfolder.nome} className="mt-2">
-          <div className="flex items-center gap-2 font-semibold text-gray-800">
-            <Folder size={16} className="text-gray-800" />
-            {subfolder.nome}
-          </div>
-          <RenderDriveTree node={subfolder} />
-        </div>
-      ))}
-    </div>
-  );
-};
 
 export default Configs;

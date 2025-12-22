@@ -12,10 +12,13 @@ router = APIRouter()
 def _normalize_number(number: str) -> str:
     """Garante que o número de celular brasileiro seja processado sem o nono dígito."""
     clean_number = "".join(filter(str.isdigit, str(number)))
+    # Se não começa com 55 e tem 10 ou 11 dígitos, assume Brasil e adiciona 55
+    if not clean_number.startswith("55") and len(clean_number) in [10, 11]:
+        clean_number = "55" + clean_number
+
     if len(clean_number) == 13 and clean_number.startswith("55"):
-        subscriber_part = clean_number[4:]
-        if subscriber_part.startswith('9'):
-            normalized = clean_number[:4] + subscriber_part[1:]
+        if clean_number[4] == '9':
+            normalized = clean_number[:4] + clean_number[5:]
             logger.info(f"Normalizando número do webhook de {clean_number} para {normalized}")
             return normalized
     return clean_number
@@ -25,7 +28,13 @@ async def _process_new_message(db: AsyncSession, data: dict):
     instance_name = data.get('instance')
     message_data = data.get('data', {})
     key = message_data.get('key', {})
-    contact_number_full = key.get('remoteJid', '')
+
+    # A Evolution API pode enviar o ID interno (LID) no remoteJid.
+    # O número de telefone real costuma vir no remoteJidAlt quando addressingMode é 'lid'.
+    remote_jid = key.get('remoteJid', '')
+    remote_jid_alt = key.get('remoteJidAlt', '')
+    
+    contact_number_full = remote_jid_alt if "@lid" in remote_jid and remote_jid_alt else remote_jid
 
     if not contact_number_full or "@g.us" in contact_number_full:
         return

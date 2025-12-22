@@ -1,7 +1,7 @@
 import logging
-from fastapi import APIRouter, Depends, Body, HTTPException
+from fastapi import APIRouter, Depends, Body, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from app.api import dependencies
 from app.db.database import get_db
@@ -19,7 +19,8 @@ async def get_dashboard_data(
     db: AsyncSession = Depends(get_db), 
     current_user: models.User = Depends(dependencies.get_current_active_user),
     start_date: str = None,
-    end_date: str = None
+    end_date: str = None,
+    prospect_ids: Optional[List[int]] = Query(None)
 ):
     """
     Endpoint que coleta, formata e retorna todas as métricas
@@ -34,7 +35,8 @@ async def get_dashboard_data(
         db, 
         user_id=current_user.id,
         start_date=start_date_obj,
-        end_date=end_date_obj
+        end_date=end_date_obj,
+        prospect_ids=prospect_ids
     )
     return dashboard_data
 
@@ -48,6 +50,7 @@ async def analyze_data_with_ia(
     question = payload.get("question")
     start_date_str = payload.get("start_date")
     end_date_str = payload.get("end_date")
+    prospect_ids = payload.get("prospect_ids")
 
     if not question:
         raise HTTPException(status_code=400, detail="A pergunta é obrigatória.")
@@ -56,7 +59,7 @@ async def analyze_data_with_ia(
     end_date = datetime.fromisoformat(end_date_str) if end_date_str else None
 
     analysis = await gemini_service.analyze_prospecting_data(
-        db=db, user=current_user, question=question, start_date=start_date, end_date=end_date
+        db=db, user=current_user, question=question, start_date=start_date, end_date=end_date, prospect_ids=prospect_ids
     )
 
     return {"analysis": analysis}

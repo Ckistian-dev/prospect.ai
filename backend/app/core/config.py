@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     EVOLUTION_API_URL: str
     EVOLUTION_API_KEY: str
     EVOLUTION_INSTANCE_NAME: str
+    EVOLUTION_DATABASE_URL: str
     
     # RabbitMQ
     RABBITMQ_USER: str

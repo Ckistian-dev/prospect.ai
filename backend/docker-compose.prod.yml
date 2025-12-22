@@ -1,7 +1,7 @@
 services:
   # --- Banco de Dados PostgreSQL ---
   db:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: prospectai_db
     restart: always
     volumes:
@@ -42,7 +42,7 @@ services:
 
   # --- Evolution API ---
   evolution_api:
-    image: evoapicloud/evolution-api:latest
+    image: evoapicloud/evolution-api:v2.3.7
     container_name: prospectai_evolution
     command: /bin/sh -c "sleep 10 && /usr/bin/npm start"
     restart: always
@@ -97,6 +97,7 @@ services:
     environment:
       # Ajuste as URLs internas
       - DATABASE_URL=postgresql+asyncpg://${DATABASE_USER}:${DATABASE_PASSWORD}@db:5432/${DATABASE_NAME}
+      - EVOLUTION_DATABASE_URL=postgresql+asyncpg://${DATABASE_USER}:${DATABASE_PASSWORD}@db:5432/${EVOLUTION_DB_NAME}
       - EVOLUTION_API_URL=http://evolution_api:8080
       - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
       - EVOLUTION_INSTANCE_NAME=prospectai_instance
@@ -130,6 +131,7 @@ services:
       - TZ=America/Sao_Paulo
       # Adicionado para o worker se comunicar com outros serviços
       - DATABASE_URL=postgresql+asyncpg://${DATABASE_USER}:${DATABASE_PASSWORD}@db:5432/${DATABASE_NAME}
+      - EVOLUTION_DATABASE_URL=postgresql+asyncpg://${DATABASE_USER}:${DATABASE_PASSWORD}@db:5432/${EVOLUTION_DB_NAME}
       - EVOLUTION_API_URL=http://evolution_api:8080
       - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
     networks:

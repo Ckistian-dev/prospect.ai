@@ -84,6 +84,8 @@ async def process_active_prospects():
 
                     persona_config = await crud_config.get_config(db, config_id=campaign.config_id, user_id=user.id)
                     if not persona_config:
+                        logger.error(f"Persona não encontrada para a campanha {campaign.id}. Pausando prospecção.")
+                        campaign.status = "Pausado"
                         await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao="Erro: Persona não encontrada", observacoes="A configuração de IA associada não foi encontrada.")
                         await db.commit()
                         continue
@@ -105,6 +107,7 @@ async def process_active_prospects():
                     new_status = ia_response.get("nova_situacao", "Aguardando Resposta")
                     new_observation = ia_response.get("observacoes", "")
                     files_to_send = ia_response.get("arquivos_anexos", [])
+                    ia_tokens_used = ia_response.get("token_usage", 0)
                     
                     history_after_response = full_history.copy()
                     sent_any_message = False
@@ -122,7 +125,7 @@ async def process_active_prospects():
                                 typing_delay = min(2 + (len(part) * 0.1), 10.0)
                                 
                                 # Envia status "Digitando..." (composing)
-                                await whatsapp_service.send_presence(user.instance_name, contact.whatsapp, "composing")
+                                await whatsapp_service.send_presence(user.instance_name, contact.whatsapp, "composing", delay=int(typing_delay * 1000))
                                 await asyncio.sleep(typing_delay)
 
                                 await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, part)
@@ -172,11 +175,18 @@ async def process_active_prospects():
                     elif mode in ['initial', 'followup']:
                         last_message_sent_times[campaign.id] = datetime.now(timezone.utc)
 
+                    # --- PAUSA AUTOMÁTICA EM CASO DE ERRO ---
+                    if new_status and (str(new_status).startswith("Erro") or str(new_status).startswith("Falha")):
+                        logger.warning(f"AGENTE WORKER: Pausando campanha {campaign.id} devido a erro no contato: {new_status}")
+                        campaign.status = "Pausado"
+
                     await crud_prospect.update_prospect_contact(
                         db, pc_id=pc.id, situacao=new_status,
-                        conversa=json.dumps(history_after_response), observacoes=new_observation
+                        conversa=json.dumps(history_after_response), 
+                        observacoes=new_observation,
+                        tokens_to_add=ia_tokens_used
                     )
-                    await db.commit()
+                    # O commit já é feito dentro do crud_prospect.update_prospect_contact
 
                 except Exception as e:
                     logger.error(f"AGENTE WORKER: Erro ao processar campanha ID {campaign.id}: {e}", exc_info=True)

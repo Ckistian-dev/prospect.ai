@@ -29,9 +29,9 @@ class Contact(ContactBase):
 class ConfigBase(BaseModel):
     nome_config: str
     spreadsheet_id: Optional[str] = None
+    spreadsheet_rag_id: Optional[str] = None
     drive_id: Optional[str] = None
-    contexto_sheets: Optional[Dict[str, Any]] = None
-    arquivos_drive: Optional[Dict[str, Any]] = None
+    prompt: Optional[str] = None
 
 class ConfigCreate(ConfigBase):
     pass
@@ -39,9 +39,9 @@ class ConfigCreate(ConfigBase):
 class ConfigUpdate(BaseModel):
     nome_config: Optional[str] = None
     spreadsheet_id: Optional[str] = None
+    spreadsheet_rag_id: Optional[str] = None
     drive_id: Optional[str] = None
-    contexto_sheets: Optional[Dict[str, Any]] = None
-    arquivos_drive: Optional[Dict[str, Any]] = None
+    prompt: Optional[str] = None
 
 class Config(ConfigBase):
     id: int
@@ -59,6 +59,7 @@ class ProspectContact(BaseModel):
     situacao: str
     observacoes: Optional[str] = None
     conversa: str
+    token_usage: Optional[int] = 0
     updated_at: Optional[datetime] = None
 
     class Config:

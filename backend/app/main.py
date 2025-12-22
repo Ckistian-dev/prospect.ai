@@ -3,6 +3,7 @@ import logging
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.api import auth as auth_router
 from app.api import contacts as contacts_router
@@ -31,6 +32,8 @@ async def create_db_and_tables():
     Ele cria todas as tabelas no banco de dados se elas ainda não existirem.
     """
     async with engine.begin() as conn:
+        # Habilita a extensão pgvector no banco de dados caso não exista
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         # Em um ambiente de produção, você provavelmente usaria Alembic para migrações.
         # Mas para desenvolvimento, isso é suficiente.
         await conn.run_sync(models.Base.metadata.create_all)

@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
 from typing import List, Optional
 from datetime import datetime
+from pgvector.sqlalchemy import Vector
 
 # Base declarativa para os modelos do SQLAlchemy.
 class Base(DeclarativeBase):
@@ -50,15 +51,31 @@ class Config(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     nome_config: Mapped[str] = mapped_column(String(100), nullable=False)
-    spreadsheet_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    
+    # --- NOVOS CAMPOS (Baseado no AtendAI) ---
+    spreadsheet_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="ID da Planilha de Instruções (System)")
+    spreadsheet_rag_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="ID da Planilha de Conhecimento (RAG)")
     drive_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="ID da pasta do Google Drive")
-    contexto_sheets: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    arquivos_drive: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Contexto fixo gerado a partir das abas de sistema")
+    
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
     # Relacionamentos
     owner: Mapped["User"] = relationship(back_populates="configs")
     prospects: Mapped[List["Prospect"]] = relationship(back_populates="config")
+    vectors: Mapped[List["KnowledgeVector"]] = relationship(back_populates="config", cascade="all, delete-orphan")
+
+class KnowledgeVector(Base):
+    """Modelo para armazenar vetores de conhecimento (RAG)."""
+    __tablename__ = "contextos"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    config_id: Mapped[int] = mapped_column(ForeignKey("configs.id"), index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False, comment="Conteúdo textual formatado para RAG")
+    origin: Mapped[str] = mapped_column(String(50), nullable=False, comment="'sheet' ou 'drive'")
+    embedding: Mapped[Optional[List[float]]] = mapped_column(Vector(768), nullable=True, comment="Vetor de embedding (Google text-embedding-004)")
+
+    config: Mapped["Config"] = relationship(back_populates="vectors")
 
 class Prospect(Base):
     __tablename__ = 'prospects'
@@ -86,6 +103,7 @@ class ProspectContact(Base):
     observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="")
     conversa = Column(Text, default="[]")
     media_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    token_usage: Mapped[int] = mapped_column(Integer, default=0, comment="Total de tokens consumidos nesta conversa")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     prospect = relationship("Prospect", back_populates="contacts")

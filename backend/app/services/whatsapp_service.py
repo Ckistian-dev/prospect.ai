@@ -5,6 +5,7 @@ import json
 from typing import Dict, Any, List, Optional
 import base64
 import asyncio
+import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -16,13 +17,18 @@ class WhatsAppService:
         self.api_url = settings.EVOLUTION_API_URL
         self.api_key = settings.EVOLUTION_API_KEY
         self.headers = {"apikey": self.api_key, "Content-Type": "application/json"}
+        self.db_url = getattr(settings, "EVOLUTION_DATABASE_URL", None)
 
     def _normalize_number(self, number: str) -> str:
         clean_number = "".join(filter(str.isdigit, str(number)))
+        # Se não começa com 55 e tem 10 ou 11 dígitos, assume Brasil e adiciona 55
+        if not clean_number.startswith("55") and len(clean_number) in [10, 11]:
+            clean_number = "55" + clean_number
+            
+        # Trata o nono dígito para números brasileiros (55 + DDD + 9 + 8 dígitos)
         if len(clean_number) == 13 and clean_number.startswith("55"):
-            subscriber_part = clean_number[4:]
-            if subscriber_part.startswith('9'):
-                return clean_number[:4] + subscriber_part[1:]
+            if clean_number[4] == '9':
+                return clean_number[:4] + clean_number[5:]
         return clean_number
 
     async def get_connection_status(self, instance_name: str) -> dict:
@@ -250,42 +256,69 @@ class WhatsAppService:
             logger.error(f"Falha ao buscar mídia em base64 para msg {message_id}: {e}", exc_info=True)
             return None
 
-    async def fetch_chat_history(self, instance_id: str, number: str, count: int = 999) -> List[Dict[str, Any]]:
-        # A API EVOLUTION não expõe um banco de dados direto. O histórico é obtido via endpoint.
-        normalized_number = self._normalize_number(number) + "@s.whatsapp.net"
-        # Rota correta da Evolution API para buscar mensagens
-        url = f"{self.api_url}/chat/findMessages/{instance_id}"
-        # CORREÇÃO: O payload deve seguir a estrutura da documentação da Evolution API,
-        # usando 'where' para filtrar pelo 'remoteJid'.
-        payload = {
-            "where": {
-                "key": {"remoteJid": normalized_number}
-            }
-        }
+    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 999) -> List[Dict[str, Any]]:
+        """
+        Busca o histórico de mensagens diretamente no banco de dados da Evolution API.
+        """
+        if not self.db_url:
+            logger.error("EVOLUTION_DATABASE_URL não configurada. Não é possível buscar histórico via DB.")
+            return []
+
+        # Preparar JIDs para busca (com e sem o nono dígito se necessário)
+        clean_number = "".join(filter(str.isdigit, str(number)))
+        if not clean_number.startswith("55") and len(clean_number) in [10, 11]:
+            clean_number = "55" + clean_number
+            
+        possible_numbers = {clean_number}
+        if clean_number.startswith("55") and len(clean_number) in [12, 13]:
+            country_code = "55"
+            ddd = clean_number[2:4]
+            if len(clean_number) == 13 and clean_number[4] == '9':
+                # Se tem 13 dígitos e o nono dígito é 9, adiciona a versão sem o 9 (12 dígitos)
+                possible_numbers.add(f"{country_code}{ddd}{clean_number[5:]}")
+            elif len(clean_number) == 12:
+                # Se tem 12 dígitos, adiciona a versão com o 9 (13 dígitos)
+                possible_numbers.add(f"{country_code}{ddd}9{clean_number[4:]}")
+
+        jids = [f"{num}@s.whatsapp.net" for num in possible_numbers]
+
         try:
-            async with httpx.AsyncClient() as client:
-                # A rota da Evolution usa POST para essa consulta
-                response = await client.post(url, headers=self.headers, json=payload, timeout=60)
-                response.raise_for_status()
+            # Remove o prefixo '+asyncpg' se presente, pois o driver asyncpg puro não o reconhece
+            db_url = self.db_url.replace("postgresql+asyncpg://", "postgresql://")
+            
+            conn = await asyncpg.connect(db_url)
+            try:
+                # Query buscando por instanceName (via subquery na tabela Instance) e remoteJid
+                query = """
+                    SELECT "key", "message", "messageTimestamp", "pushName", "status"
+                    FROM "Message"
+                    WHERE "instanceId" = (SELECT id FROM "Instance" WHERE name = $1 LIMIT 1)
+                      AND (
+                        "key"->>'remoteJid' = ANY($2)
+                        OR "key"->>'remoteJidAlt' = ANY($2)
+                      )
+                    ORDER BY "messageTimestamp" DESC
+                    LIMIT $3
+                """
+                rows = await conn.fetch(query, instance_name, jids, count)
                 
-                response_data = response.json()
                 messages = []
-
-                # CORREÇÃO 3: Lida com a nova estrutura aninhada {"messages": {"records": [...]}}
-                # e mantém a retrocompatibilidade com os formatos anteriores.
-                if isinstance(response_data, dict):
-                    messages_obj = response_data.get("messages")
-                    if isinstance(messages_obj, dict):
-                        messages = messages_obj.get("records", []) # Formato mais novo
-                    elif isinstance(messages_obj, list):
-                        messages = messages_obj # Formato {"messages": [...]}
-                    else:
-                        messages = response_data.get("records", response_data) # Formato {"records": [...]} ou lista direta
-
-                logger.info(f"Histórico para {number} carregado. Total de {len(messages if isinstance(messages, list) else [])} mensagens.")
+                for row in rows:
+                    # Converte os dados para o formato esperado pelo restante da aplicação
+                    messages.append({
+                        "key": json.loads(row["key"]) if isinstance(row["key"], str) else row["key"],
+                        "message": json.loads(row["message"]) if isinstance(row["message"], str) else row["message"],
+                        "messageTimestamp": row["messageTimestamp"],
+                        "pushName": row["pushName"],
+                        "status": row["status"]
+                    })
+                
+                logger.info(f"Histórico para {number} carregado via DB. Total de {len(messages)} mensagens.")
                 return messages
+            finally:
+                await conn.close()
         except Exception as e:
-            logger.error(f"Não foi possível buscar o histórico via API para {number}. Erro: {e}", exc_info=True)
+            logger.error(f"Erro ao buscar histórico no banco de dados da Evolution: {e}", exc_info=True)
             return []
 
     async def check_whatsapp_numbers(self, instance_name: str, numbers: List[str]) -> Optional[List[Dict[str, Any]]]:
@@ -305,7 +338,7 @@ class WhatsAppService:
             logger.error(f"Falha ao verificar números no WhatsApp: {e}")
             return None
 
-    async def send_presence(self, instance_name: str, number: str, presence: str = "composing"):
+    async def send_presence(self, instance_name: str, number: str, presence: str = "composing", delay: int = 1200):
         """
         Envia o status de presença (ex: 'composing' para 'Digitando...') para um número.
         """
@@ -313,7 +346,8 @@ class WhatsAppService:
         url = f"{self.api_url}/chat/sendPresence/{instance_name}"
         payload = {
             "number": normalized_number,
-            "presence": presence
+            "presence": presence,
+            "delay": delay
         }
         try:
             async with httpx.AsyncClient() as client:

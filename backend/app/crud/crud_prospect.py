@@ -188,29 +188,33 @@ async def delete_prospect_contact(db: AsyncSession, prospect_contact_to_delete: 
     await db.delete(prospect_contact_to_delete)
     await db.commit()
 
-async def update_prospect_contact(db: AsyncSession, pc_id: int, situacao: str, conversa: Optional[str] = None, observacoes: Optional[str] = None):
+async def update_prospect_contact(db: AsyncSession, pc_id: int, situacao: str, conversa: Optional[str] = None, observacoes: Optional[str] = None, tokens_to_add: Optional[int] = None):
     """Atualiza os dados de um único contato dentro de uma prospecção."""
     prospect_contact = await db.get(models.ProspectContact, pc_id)
     if prospect_contact:
         if situacao is not None: prospect_contact.situacao = situacao
         if conversa is not None: prospect_contact.conversa = conversa
         if observacoes is not None: prospect_contact.observacoes = observacoes
+        if tokens_to_add and tokens_to_add > 0:
+            prospect_contact.token_usage = (prospect_contact.token_usage or 0) + tokens_to_add
         prospect_contact.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
 async def update_prospect_contact_status(db: AsyncSession, pc_id: int, situacao: str):
-    """Atualiza apenas o status de um contato (usado pelo webhook)."""
+    """Atualiza apenas o status e o timestamp de um contato (usado pelo webhook)."""
     prospect_contact = await db.get(models.ProspectContact, pc_id)
     if prospect_contact:
         prospect_contact.situacao = situacao
         prospect_contact.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
-async def update_prospect_contact_conversation(db: AsyncSession, pc_id: int, conversa: str):
-    """Atualiza apenas o histórico de conversa de um contato."""
+async def update_prospect_contact_conversation(db: AsyncSession, pc_id: int, conversa: str, tokens_to_add: Optional[int] = None):
+    """Atualiza o histórico de conversa e opcionalmente adiciona tokens ao uso total."""
     prospect_contact = await db.get(models.ProspectContact, pc_id)
     if prospect_contact:
         prospect_contact.conversa = conversa
+        if tokens_to_add and tokens_to_add > 0:
+            prospect_contact.token_usage = (prospect_contact.token_usage or 0) + tokens_to_add
         await db.commit()
 
 async def get_contact_details_from_prospect_contact(db: AsyncSession, pc_id: int) -> Optional[models.Contact]:
@@ -264,7 +268,7 @@ async def get_prospect_contacts_with_details(db: AsyncSession, prospect_id: int)
     )
     return result.all()
 
-async def get_dashboard_data(db: AsyncSession, user_id: int, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> Dict[str, Any]:
+async def get_dashboard_data(db: AsyncSession, user_id: int, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, prospect_ids: Optional[List[int]] = None) -> Dict[str, Any]:
     """Coleta e retorna dados agregados para o dashboard."""
     
     now_utc = datetime.now(timezone.utc)
@@ -274,16 +278,27 @@ async def get_dashboard_data(db: AsyncSession, user_id: int, start_date: Optiona
         start_date = end_date - timedelta(days=30)
 
     # --- STATS CARDS ---
-    total_contacts_result = await db.execute(select(func.count(models.Contact.id)).where(models.Contact.user_id == user_id))
-    total_contacts = total_contacts_result.scalar_one_or_none() or 0
+    if prospect_ids:
+        total_contacts_query = select(func.count(models.ProspectContact.id)).join(models.Prospect).where(
+            models.Prospect.user_id == user_id,
+            models.Prospect.id.in_(prospect_ids)
+        )
+    else:
+        total_contacts_query = select(func.count(models.Contact.id)).where(models.Contact.user_id == user_id)
+    
+    total_contacts = (await db.execute(total_contacts_query)).scalar() or 0
     
     active_prospects_query = select(func.count(models.Prospect.id)).where(models.Prospect.user_id == user_id, models.Prospect.status == "Em Andamento")
+    if prospect_ids:
+        active_prospects_query = active_prospects_query.where(models.Prospect.id.in_(prospect_ids))
     active_prospects = (await db.execute(active_prospects_query)).scalar_one_or_none() or 0
 
     base_pc_query = select(models.ProspectContact).join(models.Prospect).where(
         models.Prospect.user_id == user_id,
         models.ProspectContact.updated_at.between(start_date, end_date)
     )
+    if prospect_ids:
+        base_pc_query = base_pc_query.where(models.Prospect.id.in_(prospect_ids))
 
     qualified_leads_query = select(func.count()).select_from(
         base_pc_query.where(models.ProspectContact.situacao == "Lead Qualificado").subquery()
@@ -305,6 +320,15 @@ async def get_dashboard_data(db: AsyncSession, user_id: int, start_date: Optiona
     
     response_rate = (total_replied / total_sent * 100) if total_sent > 0 else 0
 
+    avg_tokens_query = select(func.avg(models.ProspectContact.token_usage)).join(models.Prospect).where(
+        models.Prospect.user_id == user_id,
+        models.ProspectContact.updated_at.between(start_date, end_date),
+        models.ProspectContact.token_usage > 0
+    )
+    if prospect_ids:
+        avg_tokens_query = avg_tokens_query.where(models.Prospect.id.in_(prospect_ids))
+    avg_tokens = (await db.execute(avg_tokens_query)).scalar() or 0
+
     # --- RECENT CAMPAIGNS (não muda) ---
     recent_campaigns_query = (
         select(models.Prospect)
@@ -325,6 +349,8 @@ async def get_dashboard_data(db: AsyncSession, user_id: int, start_date: Optiona
             models.ProspectContact.updated_at.between(start_date, end_date),
             models.ProspectContact.situacao.in_(sent_statuses)
         ).group_by('day').order_by('day')
+    if prospect_ids:
+        sent_query = sent_query.where(models.Prospect.id.in_(prospect_ids))
 
     replied_query = select(
             func.date_trunc('day', models.ProspectContact.updated_at).label('day'),
@@ -334,6 +360,8 @@ async def get_dashboard_data(db: AsyncSession, user_id: int, start_date: Optiona
             models.ProspectContact.updated_at.between(start_date, end_date),
             models.ProspectContact.situacao.in_(replied_statuses)
         ).group_by('day').order_by('day')
+    if prospect_ids:
+        replied_query = replied_query.where(models.Prospect.id.in_(prospect_ids))
 
     sent_results = await db.execute(sent_query)
     replied_results = await db.execute(replied_query)
@@ -366,6 +394,8 @@ async def get_dashboard_data(db: AsyncSession, user_id: int, start_date: Optiona
         .order_by(models.ProspectContact.updated_at.desc())
         .limit(1)
     )
+    if prospect_ids:
+        recent_activity_query = recent_activity_query.where(models.Prospect.id.in_(prospect_ids))
     recent_activity_result = (await db.execute(recent_activity_query)).first()
     recent_activity = None
     if recent_activity_result:
@@ -383,7 +413,8 @@ async def get_dashboard_data(db: AsyncSession, user_id: int, start_date: Optiona
             "totalContacts": total_contacts,
             "activeProspects": active_prospects,
             "qualifiedLeads": qualified_leads,
-            "responseRate": f"{response_rate:.1f}%"
+            "responseRate": f"{response_rate:.1f}%",
+            "avgTokensPerContact": round(float(avg_tokens))
         },
         "recentCampaigns": [
             {"id": c.id, "name": c.nome_prospeccao, "status": c.status, "timeAgo": (now_utc - c.created_at).days if c.created_at else -1} 

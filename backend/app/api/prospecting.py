@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,15 +25,16 @@ async def _process_raw_message(
     gemini_service: GeminiService,
     db: AsyncSession,
     user: models.User
-) -> Optional[Dict[str, Any]]:
+) -> Tuple[Optional[Dict[str, Any]], int]:
     try:
         key = raw_msg.get("key", {})
         msg_content = raw_msg.get("message", {})
         msg_id = key.get("id")
 
-        if not msg_content or not msg_id: return None
+        if not msg_content or not msg_id: return None, 0
         role = "assistant" if key.get("fromMe") else "user"
         content = ""
+        tokens_used = 0
         
         if msg_content.get("conversation") or msg_content.get("extendedTextMessage"):
             content = msg_content.get("conversation") or msg_content.get("extendedTextMessage", {}).get("text", "")
@@ -43,7 +44,7 @@ async def _process_raw_message(
             if media_data:
                 # Passa o histórico apenas para análise de mídia, não para transcrição de áudio.
                 history_for_analysis = history_list_for_context if 'audio' not in media_data['mime_type'] else None
-                analysis = await gemini_service.transcribe_and_analyze_media(
+                analysis, tokens_used = await gemini_service.transcribe_and_analyze_media(
                     media_data, persona_config, db, user, db_history=history_for_analysis
                 )
                 
@@ -58,12 +59,12 @@ async def _process_raw_message(
             else:
                 content = "[Falha ao processar mídia]"
 
-        if content and content.strip(): return {"id": msg_id, "role": role, "content": content}
-        return None
+        if content and content.strip(): return {"id": msg_id, "role": role, "content": content}, tokens_used
+        return None, 0
         
     except Exception as e:
         logger.error(f"Erro ao processar mensagem individual ID {msg_id}: {e}", exc_info=True)
-        return None
+        return None, 0
 
 async def _synchronize_and_process_history(
     db: AsyncSession, 
@@ -99,10 +100,10 @@ async def _synchronize_and_process_history(
         logger.warning("Não foi possível buscar o histórico da API. Verifique a instância da Evolution API.")
         if len(db_history) > len(clean_db_history):
             await crud_prospect.update_prospect_contact_conversation(db, prospect_contact.id, json.dumps(clean_db_history))
-            await db.commit()
         return clean_db_history
 
     newly_processed_messages = []
+    total_tokens_used = 0
     for raw_msg in reversed(raw_history_api):
         # Adiciona uma verificação para garantir que a mensagem é um dicionário.
         # A API da Evolution pode retornar um JSON string em vez de um objeto.
@@ -121,16 +122,22 @@ async def _synchronize_and_process_history(
             # já terá o texto transcrito do primeiro como contexto.
             current_context_history = clean_db_history + newly_processed_messages # A lista `newly_processed_messages` cresce a cada iteração.
             
-            processed_msg = await _process_raw_message(
+            processed_msg, tokens_used = await _process_raw_message(
                 raw_msg, current_context_history, user.instance_name, persona_config, whatsapp_service, gemini_service, db, user
             )
-            if processed_msg: newly_processed_messages.append(processed_msg)
+            if processed_msg: 
+                newly_processed_messages.append(processed_msg)
+                total_tokens_used += tokens_used
     
     if newly_processed_messages: # A condição `len(db_history) > len(clean_db_history)` é redundante se `newly_processed_messages` for a fonte da verdade.
         updated_history = clean_db_history + newly_processed_messages
-        logger.info(f"Sincronização: {len(newly_processed_messages)} mensagens novas/corrigidas processadas.")
-        await crud_prospect.update_prospect_contact_conversation(db, prospect_contact.id, json.dumps(updated_history))
-        await db.commit()
+        logger.info(f"Sincronização: {len(newly_processed_messages)} mensagens novas/corrigidas processadas. Tokens: {total_tokens_used}")
+        await crud_prospect.update_prospect_contact_conversation(
+            db, 
+            prospect_contact.id, 
+            json.dumps(updated_history),
+            tokens_to_add=total_tokens_used
+        )
         return updated_history
     else:
         logger.info(f"Sincronização concluída. Nenhuma alteração no histórico.")

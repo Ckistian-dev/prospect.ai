@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CSSTransition, SwitchTransition } from 'react-transition-group';
 import { Ticket, User as UserIcon, AlertCircle, Zap, Activity } from 'lucide-react';
 import api from '../api/axiosConfig';
@@ -24,6 +24,50 @@ const ActivityTicker = ({ activity }) => {
             </div>
         </div>
     );
+};
+
+// --- Sub-componente para Animação de Números (Efeito Cassino) ---
+const CountUp = ({ end, duration = 1500 }) => {
+    const [count, setCount] = useState(0);
+    const countRef = useRef(0);
+    const requestRef = useRef();
+    const startTimeRef = useRef();
+
+    useEffect(() => {
+        const startValue = countRef.current;
+        const endValue = end;
+
+        if (startValue === endValue) return;
+
+        startTimeRef.current = null;
+
+        const animate = (time) => {
+            if (!startTimeRef.current) startTimeRef.current = time;
+            const progress = time - startTimeRef.current;
+            const percentage = Math.min(progress / duration, 1);
+            
+            // Easing: easeOutQuart para um efeito suave de desaceleração
+            const ease = 1 - Math.pow(1 - percentage, 4);
+            
+            const currentCount = Math.floor(startValue + (endValue - startValue) * ease);
+
+            setCount(currentCount);
+            countRef.current = currentCount;
+
+            if (progress < duration) {
+                requestRef.current = requestAnimationFrame(animate);
+            } else {
+                setCount(endValue);
+                countRef.current = endValue;
+            }
+        };
+
+        requestRef.current = requestAnimationFrame(animate);
+
+        return () => cancelAnimationFrame(requestRef.current);
+    }, [end, duration]);
+
+    return new Intl.NumberFormat('pt-BR').format(count);
 };
 
 const Header = () => {
@@ -70,27 +114,31 @@ const Header = () => {
   // Atualiza os dados periodicamente e ao focar na aba
   useEffect(() => {
     let isMounted = true;
-    let intervalId = null;
+    let timeoutId;
 
     const poll = async () => {
-      if (document.visibilityState === 'visible' && isMounted) { // Só busca se a aba estiver visível
+      if (!document.hidden && isMounted) { // Só busca se a aba estiver visível
         await fetchData();
+      }
+      if (isMounted) {
+        timeoutId = setTimeout(poll, 5000);
       }
     };
 
+    poll();
+
     const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible' && isMounted) {
+        if (!document.hidden && isMounted) {
+            clearTimeout(timeoutId);
             poll(); // Chama o poll imediatamente ao voltar para a aba
         }
     };
 
-    // Inicia o polling
-    intervalId = setInterval(poll, 5000);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       isMounted = false;
-      clearInterval(intervalId);
+      clearTimeout(timeoutId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [fetchData]);
@@ -117,10 +165,10 @@ const Header = () => {
                         height: 34px;
                         overflow: hidden;
                     }
-                    .fade-enter { opacity: 0; transform: translateY(-20px); }
-                    .fade-enter-active { opacity: 1; transform: translateY(0); transition: all 400ms ease-out; }
+                    .fade-enter { opacity: 0; transform: translateY(-100%); }
+                    .fade-enter-active { opacity: 1; transform: translateY(0); transition: all 500ms ease-out; }
                     .fade-exit { opacity: 1; transform: translateY(0); }
-                    .fade-exit-active { opacity: 0; transform: translateY(20px); transition: all 400ms ease-in; }
+                    .fade-exit-active { opacity: 0; transform: translateY(100%); transition: all 500ms ease-in; }
                 `}</style>
                 <SwitchTransition mode="out-in">
                     <CSSTransition
@@ -139,7 +187,11 @@ const Header = () => {
             <div className="flex items-center gap-4 sm:gap-5">
                 <div className="flex items-center gap-2 text-gray-600" title="Seus tokens restantes">
                     <Ticket size={20} className="text-brand-green" />
-                    <span className="font-semibold text-gray-800">{user?.tokens ?? '...'}</span>
+                    <span className="font-semibold text-gray-800">
+                        {user?.tokens !== undefined && user?.tokens !== null
+                            ? <CountUp end={user.tokens} />
+                            : '...'}
+                    </span>
                     <span className="text-sm hidden sm:inline">Tokens</span>
                 </div>
                 <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">

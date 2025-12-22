@@ -15,6 +15,50 @@ import html2canvas from 'html2canvas';
 
 registerLocale('pt-BR', ptBR);
 
+// --- Sub-componente para Animação de Números (Efeito Cassino) ---
+const CountUp = ({ end, duration = 1500 }) => {
+    const [count, setCount] = useState(0);
+    const countRef = useRef(0);
+    const requestRef = useRef();
+    const startTimeRef = useRef();
+
+    useEffect(() => {
+        const startValue = countRef.current;
+        const endValue = end;
+
+        if (startValue === endValue) return;
+
+        startTimeRef.current = null;
+
+        const animate = (time) => {
+            if (!startTimeRef.current) startTimeRef.current = time;
+            const progress = time - startTimeRef.current;
+            const percentage = Math.min(progress / duration, 1);
+            
+            // Easing: easeOutQuart para um efeito suave de desaceleração
+            const ease = 1 - Math.pow(1 - percentage, 4);
+            
+            const currentCount = Math.floor(startValue + (endValue - startValue) * ease);
+
+            setCount(currentCount);
+            countRef.current = currentCount;
+
+            if (progress < duration) {
+                requestRef.current = requestAnimationFrame(animate);
+            } else {
+                setCount(endValue);
+                countRef.current = endValue;
+            }
+        };
+
+        requestRef.current = requestAnimationFrame(animate);
+
+        return () => cancelAnimationFrame(requestRef.current);
+    }, [end, duration]);
+
+    return new Intl.NumberFormat('pt-BR').format(count);
+};
+
 const AnalysisReport = ({ analysisData, onDownload }) => {
     const reportRef = useRef(null);
 
@@ -118,7 +162,9 @@ const StatCard = ({ icon: Icon, title, value, color }) => (
         <div className="flex items-start justify-between">
             <div className="flex flex-col">
                 <p className="text-sm font-medium text-gray-500">{title}</p>
-                <p className="text-3xl font-bold text-gray-800 mt-1">{value}</p>
+                <p className="text-3xl font-bold text-gray-800 mt-1">
+                    {typeof value === 'number' ? <CountUp end={value} /> : value}
+                </p>
             </div>
             <div className={`p-3 rounded-xl bg-opacity-10`} style={{ backgroundColor: `${color}20` }}>
                 <Icon size={24} style={{ color }} />
@@ -127,7 +173,7 @@ const StatCard = ({ icon: Icon, title, value, color }) => (
     </div>
 );
 
-const RecentCampaignItem = ({ name, status, timeAgo }) => {
+const RecentCampaignItem = ({ id, name, status, timeAgo, isSelected, onToggle }) => {
     const statusStyles = {
         'Concluído': 'bg-green-100 text-green-700',
         'Em Andamento': 'bg-blue-100 text-blue-700 animate-pulse',
@@ -137,10 +183,18 @@ const RecentCampaignItem = ({ name, status, timeAgo }) => {
     const formatTimeAgo = (days) => {
         if (days === 0) return 'hoje';
         if (days === 1) return 'há 1 dia';
+        if (days === -1) return 'N/A';
         return `há ${days} dias`;
     }
     return (
-        <div className="flex items-center justify-between py-3 px-2 rounded-lg hover:bg-gray-50">
+        <div 
+            onClick={() => onToggle(id)}
+            className={`flex items-center justify-between py-3 px-3 rounded-lg cursor-pointer transition-all border-2 ${
+                isSelected 
+                ? 'bg-blue-50 border-blue-500 shadow-sm' 
+                : 'hover:bg-gray-50 border-transparent'
+            }`}
+        >
             <div>
                 <p className="font-semibold text-gray-800 text-sm">{name}</p>
                 <p className="text-xs text-gray-500 flex items-center mt-1">
@@ -292,18 +346,29 @@ const Dashboard = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
     const [dateRange, setDateRange] = useState({ startDate: subDays(new Date(), 29), endDate: new Date() });
+    const [selectedCampaigns, setSelectedCampaigns] = useState([]);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [analysisResult, setAnalysisResult] = useState(null);
     const [analysisError, setAnalysisError] = useState('');
 
-    const fetchData = useCallback(async (startDate, endDate) => {
+    const toggleCampaign = (id) => {
+        setSelectedCampaigns(prev => 
+            prev.includes(id) 
+            ? prev.filter(cId => cId !== id) 
+            : [...prev, id]
+        );
+    };
+
+    const fetchData = useCallback(async (startDate, endDate, prospectIds) => {
         setIsLoading(true);
         setError('');
         try {
-            const params = {
-                start_date: startDate.toISOString(),
-                end_date: endDate.toISOString(),
-            };
+            const params = new URLSearchParams();
+            params.append('start_date', startDate.toISOString());
+            params.append('end_date', endDate.toISOString());
+            if (prospectIds && prospectIds.length > 0) {
+                prospectIds.forEach(id => params.append('prospect_ids', id));
+            }
             const response = await api.get('/dashboard/', { params });
             setData(response.data);
         } catch (err) {
@@ -315,8 +380,8 @@ const Dashboard = () => {
     }, []);
 
     useEffect(() => {
-        fetchData(dateRange.startDate, dateRange.endDate);
-    }, [fetchData, dateRange]);
+        fetchData(dateRange.startDate, dateRange.endDate, selectedCampaigns);
+    }, [fetchData, dateRange, selectedCampaigns]);
 
     const handleDateChange = (startDate, endDate) => {
         setDateRange({ startDate, endDate });
@@ -331,6 +396,7 @@ const Dashboard = () => {
                 question,
                 start_date: dateRange.startDate.toISOString(),
                 end_date: dateRange.endDate.toISOString(),
+                prospect_ids: selectedCampaigns
             });
             setAnalysisResult(response.data.analysis);
         } catch (err) {
@@ -358,8 +424,8 @@ const Dashboard = () => {
             <div className="animate-fade-in p-6 md:p-10">
                  <div className="h-10 w-1/3 bg-gray-200 rounded-lg animate-pulse mb-2"></div>
                  <div className="h-4 w-1/2 bg-gray-200 rounded-lg animate-pulse mb-8"></div>
-                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 animate-pulse">
-                    {[...Array(4)].map((_, i) => <div key={i} className="h-32 bg-gray-200 rounded-2xl"></div>)}
+                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6 animate-pulse">
+                    {[...Array(5)].map((_, i) => <div key={i} className="h-32 bg-gray-200 rounded-2xl"></div>)}
                  </div>
                  <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-6 animate-pulse">
                     <div className="lg:col-span-2 h-80 bg-gray-200 rounded-2xl"></div>
@@ -383,6 +449,7 @@ const Dashboard = () => {
         { icon: Target, title: 'Prospecções Ativas', value: data.stats.activeProspects, color: '#10b981' },
         { icon: CheckCircle, title: 'Leads Qualificados', value: data.stats.qualifiedLeads, color: '#f59e0b' },
         { icon: Percent, title: 'Taxa de Resposta', value: data.stats.responseRate, color: '#ef4444' },
+        { icon: Zap, title: 'Média de Tokens/Contato', value: data.stats.avgTokensPerContact, color: '#8b5cf6' },
     ];
 
     return (
@@ -398,7 +465,7 @@ const Dashboard = () => {
             {isLoading && <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10"><Loader2 size={32} className="animate-spin text-brand-green" /></div>}
 
             <div className="space-y-8">
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
                     {stats.map((stat, index) => (
                         <StatCard key={index} {...stat} />
                     ))}
@@ -428,8 +495,13 @@ const Dashboard = () => {
                     <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                         <h3 className="font-bold text-lg text-gray-800 mb-4">Campanhas Recentes</h3>
                         <div className="space-y-2">
-                            {data.recentCampaigns.length > 0 ? data.recentCampaigns.map((campaign, index) => (
-                               <RecentCampaignItem key={index} {...campaign} /> 
+                            {data.recentCampaigns.length > 0 ? data.recentCampaigns.map((campaign) => (
+                               <RecentCampaignItem 
+                                    key={campaign.id} 
+                                    {...campaign} 
+                                    isSelected={selectedCampaigns.includes(campaign.id)}
+                                    onToggle={toggleCampaign}
+                                /> 
                             )) : <p className="text-center text-gray-500 py-8">Nenhuma campanha recente.</p>}
                         </div>
                     </div>
