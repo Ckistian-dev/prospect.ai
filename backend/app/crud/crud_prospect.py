@@ -188,13 +188,14 @@ async def delete_prospect_contact(db: AsyncSession, prospect_contact_to_delete: 
     await db.delete(prospect_contact_to_delete)
     await db.commit()
 
-async def update_prospect_contact(db: AsyncSession, pc_id: int, situacao: str, conversa: Optional[str] = None, observacoes: Optional[str] = None, tokens_to_add: Optional[int] = None):
+async def update_prospect_contact(db: AsyncSession, pc_id: int, situacao: str, conversa: Optional[str] = None, observacoes: Optional[str] = None, tokens_to_add: Optional[int] = None, lead_score: Optional[int] = None):
     """Atualiza os dados de um único contato dentro de uma prospecção."""
     prospect_contact = await db.get(models.ProspectContact, pc_id)
     if prospect_contact:
         if situacao is not None: prospect_contact.situacao = situacao
         if conversa is not None: prospect_contact.conversa = conversa
         if observacoes is not None: prospect_contact.observacoes = observacoes
+        if lead_score is not None: prospect_contact.lead_score = lead_score
         if tokens_to_add and tokens_to_add > 0:
             prospect_contact.token_usage = (prospect_contact.token_usage or 0) + tokens_to_add
         prospect_contact.updated_at = datetime.now(timezone.utc)

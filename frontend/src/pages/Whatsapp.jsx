@@ -61,7 +61,7 @@ const StatusDisplay = ({ statusInfo, qrCode, onConnect, onDisconnect, onRefresh,
                                     alt="QR Code" width="256" height="256" />
                             ) : <Loader2 size={64} className="animate-spin text-brand-green" />}
                         </div>
-                        <p className="text-gray-600 mt-4">Abra o WhatsApp no seu telemóvel e leia o código.</p>
+                        <p className="text-gray-600 mt-4">Abra o WhatsApp no seu Celular e leia o código.</p>
                     </div>
                 );
             
@@ -164,7 +164,7 @@ const GoogleContactsCard = () => {
             </div>
             <p className="text-sm text-gray-600 mb-4">
                 Conecte sua conta Google (a mesma usada no seu celular) para salvar os contatos da prospecção. Isso ajuda o WhatsApp a reconhecer os números, evitando bloqueios.
-                <br/><strong className="text-gray-700">Importante:</strong> A sincronização de contatos do Google deve estar ativa no seu telemóvel.
+                <br/><strong className="text-gray-700">Importante:</strong> A sincronização de contatos do Google deve estar ativa no seu Celular.
             </p>
             {status === 'loading' && <div className="text-center"><Loader2 className="animate-spin mx-auto text-brand-green" /></div>}
             {status === 'disconnected' && <button onClick={handleGoogleConnect} disabled={isLoading} className="w-full flex items-center justify-center gap-2 bg-blue-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-600 transition-all disabled:bg-gray-400"><Link size={18} /> Conectar Conta Google</button>}

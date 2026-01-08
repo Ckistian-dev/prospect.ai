@@ -41,3 +41,4 @@ numpy
 # --- Rabbit MQ ---
 # bibliotecas para lidar com o Rabbit MQ
 pika
+aio_pika

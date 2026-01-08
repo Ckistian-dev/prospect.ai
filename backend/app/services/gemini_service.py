@@ -1,4 +1,5 @@
 import os
+import re
 from google import genai
 from google.genai import types
 from collections.abc import Set
@@ -9,7 +10,7 @@ import base64
 from typing import Optional, List, Dict, Any
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 import numpy as np
 
 from app.core.config import settings
@@ -33,7 +34,13 @@ class GeminiService:
                 raise ValueError("Nenhuma chave de API do Google foi encontrada na variável GOOGLE_API_KEYS.")
             
             self.current_key_index = 0
-            self.generation_config = {"temperature": 0.5, "top_p": 1, "top_k": 1}
+            self.generation_config = {
+                "temperature": 0.5,
+                "top_p": 0.95,
+                "top_k": 40,
+                "frequency_penalty": 0.6,
+                "presence_penalty": 0.4
+            }
             self.output_token_multiplier = 2.5 / 0.3
             self._initialize_model()
             
@@ -91,13 +98,40 @@ class GeminiService:
         except Exception as e:
             logger.error(f"Erro ao salvar prompt no log: {e}")
 
+    def _save_response_to_log(self, response_text: str):
+        """Adiciona a resposta gerada ao arquivo de log."""
+        try:
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            file_path = os.path.join(base_dir, "prompt_log.txt")
+            
+            with open(file_path, "a", encoding="utf-8") as f:
+                f.write("\n=== GEMINI RESPONSE ===\n")
+                f.write(str(response_text))
+                f.write("\n")
+        except Exception as e:
+            logger.error(f"Erro ao salvar resposta no log: {e}")
+
+    def _parse_json_response(self, response_text: str) -> dict:
+        """Limpa e parseia JSON da resposta da IA, com tratamento de erros de escape."""
+        clean_response = response_text.strip().replace("```json", "").replace("```", "")
+        
+        try:
+            return json.loads(clean_response)
+        except json.JSONDecodeError:
+            # Tenta corrigir backslashes soltos (comum em caminhos de arquivo ou LaTeX)
+            try:
+                fixed_response = re.sub(r'\\(?![/\"\\bfnrtu])', r'\\\\', clean_response)
+                return json.loads(fixed_response)
+            except json.JSONDecodeError:
+                raise
+
     async def _generate_with_retry_async(
         self, 
         prompt: Any, 
         db: AsyncSession, 
         user: models.User, 
         force_json: bool = True,
-        model_name: str = 'gemini-2.5-flash',
+        model_name: str = 'gemini-2.5-flash-lite',
         system_instruction: Optional[str] = None
     ):
         """
@@ -110,6 +144,12 @@ class GeminiService:
             "top_p": self.generation_config.get("top_p", 1),
             "top_k": self.generation_config.get("top_k", 1),
         }
+
+        # Penalties não são suportados no gemini-2.5-flash-lite
+        if "gemini-2.5-flash-lite" not in model_name:
+            config_args["frequency_penalty"] = self.generation_config.get("frequency_penalty", 0.0)
+            config_args["presence_penalty"] = self.generation_config.get("presence_penalty", 0.0)
+
         if force_json:
             config_args["response_mime_type"] = "application/json"
         
@@ -148,6 +188,11 @@ class GeminiService:
                     if tokens_to_deduct > 0:
                         # Usa 'amount' conforme padrão do ProspectAI
                         await crud_user.decrement_user_tokens(db, db_user=user, amount=tokens_to_deduct)
+
+                    try:
+                        self._save_response_to_log(response.text)
+                    except Exception:
+                        pass
 
                     return response, tokens_to_deduct
 
@@ -210,7 +255,9 @@ class GeminiService:
         if not query_text: return ""
         
         query_embedding = await self.generate_embedding(query_text)
-        if not query_embedding: return ""
+        if not query_embedding:
+            logger.warning(f"RAG: Falha ao gerar embedding para a query: '{query_text[:50]}...'")
+            return ""
 
         # Busca principal: Top 10 mais relevantes
         stmt = select(models.KnowledgeVector).where(
@@ -222,14 +269,24 @@ class GeminiService:
         result = await db.execute(stmt)
         vectors = result.scalars().all()
         
-        if not vectors: return ""
+        if not vectors:
+            # Debug: Verifica se existem vetores para esta configuração
+            count_stmt = select(func.count()).select_from(models.KnowledgeVector).where(models.KnowledgeVector.config_id == config_id)
+            count = (await db.execute(count_stmt)).scalar()
+            if count == 0:
+                logger.warning(f"RAG: Nenhum vetor encontrado no banco para config_id {config_id}. A base de conhecimento pode estar vazia.")
+            else:
+                logger.info(f"RAG: Vetores existem ({count}), mas nenhum foi retornado pela busca de similaridade.")
+            return ""
 
         # Prioriza Drive se não houver na lista (opcional, baseado no AtendAI)
         # Aqui simplificamos pegando os chunks únicos
         chunks = [v.content for v in vectors]
         unique_chunks = list(dict.fromkeys(chunks))
         
-        return "\n".join(unique_chunks)
+        context = "\n".join(unique_chunks)
+        logger.info(f"RAG: Contexto recuperado com sucesso. {len(vectors)} vetores encontrados.")
+        return context
 
     def _format_history_for_prompt(self, db_history: List[dict]) -> str:
         """Formata o histórico de conversa em uma string simples e legível."""
@@ -370,7 +427,7 @@ class GeminiService:
 
             try:
                 response, tokens_used = await self._generate_with_retry_async(prompt_contents, db, user, force_json=True, system_instruction=system_instruction)
-                response_json = json.loads(response.text)
+                response_json = self._parse_json_response(response.text)
                 analysis = response_json.get("analise", "[Não foi possível extrair a análise]").strip()
                 logger.info(f"Análise de mídia gerada: '{analysis[:100]}...'")
                 return analysis, tokens_used
@@ -417,16 +474,30 @@ class GeminiService:
             f"# DADOS DO CONTATO\n"
             f"Nome: {contact.nome}\n"
             f"Observações: {contact.observacoes}\n\n"
+            f"# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)\n"
+            f"- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.\n"
+            f"- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.\n"
+            f"- **Continuidade Real:** Trate o histórico como uma conversa contínua de WhatsApp. Se já houver mensagens anteriores, JAMAIS use 'Olá' ou apresentações novamente.\n"
+            f"- **Zero Saudações Repetidas:** Se já houve um cumprimento no histórico recente, NÃO inicie a resposta com 'Olá', 'Oi', 'Bom dia', etc. Continue a conversa diretamente.\n"
+            f"- **Conexão Lógica:** Use conectivos de conversa real ('Então...', 'Nesse caso...', 'Ah, sobre isso...'). Evite listas com bullets se puder responder em uma frase corrida.\n"
+            f"- **Espelhamento de Tom:** Se a mensagem do cliente for curta (ex: 'qual o preço?'), seja direto ('Custa R$ 50,00'). Se ele for detalhista, explique mais.\n"
+            f"- **Formatação de Chat:** Evite listas com marcadores (bullets) ou negrito excessivo a menos que seja estritamente necessário. No WhatsApp, pessoas usam parágrafos curtos.\n"
+            f"- **Banalidade Controlada:** Em vez de 'Sinto muito pelo inconveniente causado', use algo mais leve como 'Poxa, entendo o problema' ou 'Que chato isso, vamos resolver'.\n"
+            f"- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, {contact.nome}', 'Olá {contact.nome}' ou similares. Fale direto.\n"
+            f"- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.\n"
+            f"- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.\n\n"
             f"# TAREFA ATUAL: {task_map.get(mode, 'Responder')}\n\n"
             f"# REGRAS DE EXECUÇÃO\n"
             f"1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG).\n"
-            f"2. **Arquivos:** Se o cliente pedir foto/catálogo e o arquivo estiver listado no RAG (origem: drive), inclua-o em `arquivos_anexos` usando o ID exato.\n"
-            f"3. **Objetivo:** Avançar a prospecção ou qualificar o lead.\n"
+            f"2. **Arquivos:** Se o cliente pedir foto/catálogo e o arquivo estiver listado no RAG, inclua-o em `arquivos_anexos` usando o ID exato. **PROIBIDO** colocar informações da imagem, links ou IDs no texto (`mensagem_para_enviar`).\n"
+            f"3. **Proibido Links Falsos:** JAMAIS invente links ou use placeholders como '[Link]'. Se tiver que enviar arquivo, use o campo JSON `arquivos_anexos`.\n"
+            f"4. **Objetivo:** Avançar a prospecção ou qualificar o lead.\n"
             f"# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)\n"
             f"Retorne APENAS um JSON válido, sem blocos de código.\n"
             f"{{\n"
             f'  "mensagem_para_enviar": "Texto da resposta (ou null)",\n'
             f'  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado",\n'
+            f'  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),\n'
             f'  "observacoes": "Resumo curto da conversa",\n'
             f'  "arquivos_anexos": ["ID_DO_ARQUIVO_1"]\n'
             f"}}"
@@ -444,20 +515,10 @@ class GeminiService:
                     force_json=True, 
                     system_instruction=system_instruction
                 )
-                clean_response_text = response.text.strip().replace("```json", "").replace("```", "")
-                response_data = json.loads(clean_response_text)
-                
-                print(response_data)
+                response_data = self._parse_json_response(response.text)
 
-                # Validação da resposta: verifica se a mensagem não é nula ou vazia (após remover espaços)
-                # A exceção é o modo 'followup', onde uma mensagem vazia pode ser intencional.
-                message_to_send = response_data.get("mensagem_para_enviar")
-                if mode != 'followup' and (message_to_send is None or not str(message_to_send).strip()):
-                    logger.warning(f"Tentativa {attempt + 1}/{max_retries}: IA gerou mensagem vazia. Tentando novamente...")
-                    last_error = "IA gerou mensagem vazia."
-                    await asyncio.sleep(1)  # Pequena pausa antes de tentar novamente
-                    continue
-
+                # A validação de mensagem vazia foi removida, pois a IA pode intencionalmente
+                # decidir não enviar uma mensagem. O agent_worker está preparado para lidar com essa situação.
                 response_data['token_usage'] = tokens_used
                 return response_data  # Retorna a resposta válida
 
@@ -532,7 +593,7 @@ class GeminiService:
         }
         
         response = await self._generate_with_retry_async(json.dumps(analysis_prompt, ensure_ascii=False, cls=SetEncoder), db, user, force_json=True)
-        return json.loads(response.text)
+        return self._parse_json_response(response.text)
 
 _gemini_service_instance = None
 def get_gemini_service():

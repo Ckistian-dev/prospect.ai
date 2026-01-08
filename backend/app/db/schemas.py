@@ -60,6 +60,7 @@ class ProspectContact(BaseModel):
     observacoes: Optional[str] = None
     conversa: str
     token_usage: Optional[int] = 0
+    lead_score: Optional[int] = 0
     updated_at: Optional[datetime] = None
 
     class Config:

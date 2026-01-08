@@ -256,31 +256,66 @@ class WhatsAppService:
             logger.error(f"Falha ao buscar mídia em base64 para msg {message_id}: {e}", exc_info=True)
             return None
 
-    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 999) -> List[Dict[str, Any]]:
+    async def get_media_by_message_id(self, instance_name: str, message_id: str) -> Optional[str]:
+        """
+        Busca o base64 da mídia apenas pelo ID da mensagem.
+        """
+        url = f"{self.api_url}/chat/getBase64FromMediaMessage/{instance_name}"
+        payload = {
+            "message": { "key": { "id": message_id } },
+            "convertToMp4": False
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=self.headers, json=payload, timeout=60.0)
+                response.raise_for_status()
+                return response.json().get("base64")
+        except Exception as e:
+            logger.error(f"Falha ao buscar mídia por ID {message_id}: {e}")
+            return None
+
+    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 999, mode: str = None) -> List[Dict[str, Any]]:
         """
         Busca o histórico de mensagens diretamente no banco de dados da Evolution API.
+        Aplica uma estratégia agressiva de busca: remove DDI (55), DDD e 9º dígito,
+        buscando por qualquer mensagem que contenha os últimos 8 dígitos do número.
         """
         if not self.db_url:
             logger.error("EVOLUTION_DATABASE_URL não configurada. Não é possível buscar histórico via DB.")
             return []
 
-        # Preparar JIDs para busca (com e sem o nono dígito se necessário)
+        # 1. Limpeza básica
         clean_number = "".join(filter(str.isdigit, str(number)))
-        if not clean_number.startswith("55") and len(clean_number) in [10, 11]:
-            clean_number = "55" + clean_number
-            
-        possible_numbers = {clean_number}
-        if clean_number.startswith("55") and len(clean_number) in [12, 13]:
-            country_code = "55"
-            ddd = clean_number[2:4]
-            if len(clean_number) == 13 and clean_number[4] == '9':
-                # Se tem 13 dígitos e o nono dígito é 9, adiciona a versão sem o 9 (12 dígitos)
-                possible_numbers.add(f"{country_code}{ddd}{clean_number[5:]}")
-            elif len(clean_number) == 12:
-                # Se tem 12 dígitos, adiciona a versão com o 9 (13 dígitos)
-                possible_numbers.add(f"{country_code}{ddd}9{clean_number[4:]}")
+        
+        # Estratégia de extração do "núcleo" do número (últimos 8 dígitos)
+        search_term = clean_number
 
-        jids = [f"{num}@s.whatsapp.net" for num in possible_numbers]
+        # Lógica para números brasileiros (geralmente > 8 dígitos)
+        if len(clean_number) >= 8:
+            # Se parece ser um número brasileiro completo (12 ou 13 dígitos começando com 55)
+            if clean_number.startswith("55") and len(clean_number) in [12, 13]:
+                # Remove 55 (DDI) e os 2 seguintes (DDD) -> Pula 4 caracteres
+                raw_local = clean_number[4:]
+            
+            # Se parece ser um número com DDD mas sem DDI (10 ou 11 dígitos)
+            elif len(clean_number) in [10, 11]:
+                # Remove os 2 primeiros (DDD) -> Pula 2 caracteres
+                raw_local = clean_number[2:]
+            
+            # Se já parece ser local (8 ou 9 dígitos)
+            else:
+                raw_local = clean_number
+
+            # Tratamento do 9º dígito no número local
+            if len(raw_local) == 9 and raw_local.startswith('9'):
+                search_term = raw_local[1:] # Pega os últimos 8
+            elif len(raw_local) >= 8:
+                search_term = raw_local[-8:] # Garante pegar apenas os últimos 8
+            else:
+                search_term = raw_local
+        
+        # LOG DE DEBUG: Essencial para entender o que ocorre em produção (verifique os logs do container)
+        logger.info(f"Fetch History: Instance='{instance_name}', Number='{number}', SearchTerm='{search_term}'")
 
         try:
             # Remove o prefixo '+asyncpg' se presente, pois o driver asyncpg puro não o reconhece
@@ -288,19 +323,27 @@ class WhatsAppService:
             
             conn = await asyncpg.connect(db_url)
             try:
-                # Query buscando por instanceName (via subquery na tabela Instance) e remoteJid
+                # 1. Verifica se a instância existe e pega o ID (Evita queries pesadas se o nome estiver errado)
+                instance_id = await conn.fetchval('SELECT id FROM "Instance" WHERE name = $1', instance_name)
+                
+                if not instance_id:
+                    logger.warning(f"Fetch History: Instância '{instance_name}' NÃO ENCONTRADA no banco da Evolution.")
+                    return []
+
+                # 2. Query otimizada usando o ID da instância
                 query = """
                     SELECT "key", "message", "messageTimestamp", "pushName", "status"
                     FROM "Message"
-                    WHERE "instanceId" = (SELECT id FROM "Instance" WHERE name = $1 LIMIT 1)
+                    WHERE "instanceId" = $1
                       AND (
-                        "key"->>'remoteJid' = ANY($2)
-                        OR "key"->>'remoteJidAlt' = ANY($2)
+                        "key"->>'remoteJid' LIKE $2
+                        OR "key"->>'remoteJidAlt' LIKE $2
                       )
                     ORDER BY "messageTimestamp" DESC
                     LIMIT $3
                 """
-                rows = await conn.fetch(query, instance_name, jids, count)
+                like_pattern = f"%{search_term}%"
+                rows = await conn.fetch(query, instance_id, like_pattern, count)
                 
                 messages = []
                 for row in rows:
@@ -313,10 +356,15 @@ class WhatsAppService:
                         "status": row["status"]
                     })
                 
-                logger.info(f"Histórico para {number} carregado via DB. Total de {len(messages)} mensagens.")
+                if not messages and mode and mode != 'initial':
+                    raise ValueError(f"Histórico vazio para contato {number} em modo '{mode}'.")
+
+                logger.info(f"Histórico carregado via DB (Termo: {like_pattern}). Total: {len(messages)}.")
                 return messages
             finally:
                 await conn.close()
+        except ValueError:
+            raise
         except Exception as e:
             logger.error(f"Erro ao buscar histórico no banco de dados da Evolution: {e}", exc_info=True)
             return []
@@ -332,6 +380,7 @@ class WhatsAppService:
             async with httpx.AsyncClient() as client:
                 # A rota da Evolution usa POST para essa verificação
                 response = await client.post(url, headers=self.headers, json=payload, timeout=30)
+                response.raise_for_status()
                 results = response.json()
             return results
         except Exception as e:
@@ -346,12 +395,16 @@ class WhatsAppService:
         url = f"{self.api_url}/chat/sendPresence/{instance_name}"
         payload = {
             "number": normalized_number,
-            "presence": presence,
-            "delay": delay
+            "options": {
+                "delay": delay,
+                "presence": presence,
+                "number": normalized_number
+            }
         }
         try:
             async with httpx.AsyncClient() as client:
-                await client.post(url, headers=self.headers, json=payload, timeout=5.0)
+                response = await client.post(url, headers=self.headers, json=payload, timeout=5.0)
+                response.raise_for_status()
         except Exception as e:
             logger.warning(f"Falha ao enviar status '{presence}' para {normalized_number}: {e}")
 

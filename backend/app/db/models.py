@@ -104,6 +104,7 @@ class ProspectContact(Base):
     conversa = Column(Text, default="[]")
     media_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     token_usage: Mapped[int] = mapped_column(Integer, default=0, comment="Total de tokens consumidos nesta conversa")
+    lead_score: Mapped[int] = mapped_column(Integer, default=0, comment="Pontuação do lead (0-10)")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     prospect = relationship("Prospect", back_populates="contacts")

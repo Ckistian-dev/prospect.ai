@@ -171,6 +171,12 @@ async def sync_google_sheet(
             # Processamento em Lote dos Embeddings
             if all_rag_lines:
                 embeddings = await gemini_service.generate_embeddings_batch(all_rag_lines)
+                
+                # --- PROTEÇÃO CONTRA PERDA DE DADOS ---
+                valid_embeddings = [e for e in embeddings if e]
+                if not valid_embeddings and len(all_rag_lines) > 0:
+                    raise HTTPException(status_code=500, detail="Falha crítica na geração de embeddings. A sincronização foi abortada para evitar perda de dados.")
+                
                 for line, embedding in zip(all_rag_lines, embeddings):
                     if embedding:
                         contextos_buffer.append(models.KnowledgeVector(
@@ -243,6 +249,12 @@ async def sync_google_drive(
         contextos_buffer = []
         if drive_lines:
             embeddings = await gemini_service.generate_embeddings_batch(drive_lines)
+            
+            # --- PROTEÇÃO CONTRA PERDA DE DADOS ---
+            valid_embeddings = [e for e in embeddings if e]
+            if not valid_embeddings and len(drive_lines) > 0:
+                raise HTTPException(status_code=500, detail="Falha crítica na geração de embeddings do Drive. A sincronização foi abortada.")
+
             for line, embedding in zip(drive_lines, embeddings):
                 if embedding:
                     contextos_buffer.append(models.KnowledgeVector(

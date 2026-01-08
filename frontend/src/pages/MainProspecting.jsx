@@ -89,6 +89,7 @@ function MainProspecting() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProspect, setEditingProspect] = useState(null);
   const logIntervalRef = useRef(null);
+  const campaignsIntervalRef = useRef(null);
 
   const [openMenuId, setOpenMenuId] = useState(null);
   const menuRef = useRef(null);
@@ -119,6 +120,13 @@ function MainProspecting() {
     }
   }, []);
 
+  const stopCampaignsPolling = useCallback(() => {
+    if (campaignsIntervalRef.current) {
+      clearInterval(campaignsIntervalRef.current);
+      campaignsIntervalRef.current = null;
+    }
+  }, []);
+
   const fetchActivityLog = useCallback(async (prospectId, isSilent = false) => {
     if (!prospectId) return;
 
@@ -140,26 +148,24 @@ function MainProspecting() {
     }
   }, [stopLogPolling]);
   
-  const fetchProspects = useCallback(async (keepSelection = false) => {
-    setLoadingStates(prev => ({ ...prev, campaigns: true }));
+  const fetchProspects = useCallback(async (isSilent = false) => {
+    if (!isSilent) {
+      setLoadingStates(prev => ({ ...prev, campaigns: true }));
+    }
     try {
       const response = await api.get('/prospecting/');
       const prospectsData = response.data;
       setProspects(prospectsData);
-      
-      if (!selectedProspect && prospectsData.length > 0) {
-        setSelectedProspect(prospectsData[0]); // Seleciona o primeiro por padrão
-      } else if (prospectsData.length === 0) {
-        setSelectedProspect(null);
-        setActivityLog([]);
-        setCurrentStatus('Pendente');
-      }
+      return prospectsData;
     } catch (error) {
       console.error("Erro ao buscar prospecções:", error);
+      return [];
     } finally {
-      setLoadingStates(prev => ({ ...prev, campaigns: false }));
+      if (!isSilent) {
+        setLoadingStates(prev => ({ ...prev, campaigns: false }));
+      }
     }
-  }, [selectedProspect]); // A dependência do selectedProspect é intencional para o caso de recarregar a lista
+  }, []);
 
   const startPolling = useCallback(() => {
     stopLogPolling();
@@ -168,17 +174,51 @@ function MainProspecting() {
     }
   }, [selectedProspect, fetchActivityLog, stopLogPolling]);
 
+  // Initial load and campaigns polling
   useEffect(() => {
-    fetchProspects();
-  }, []);
+    const init = async () => {
+      const data = await fetchProspects(false);
+      if (data.length > 0) {
+        setSelectedProspect(prev => prev || data[0]);
+      }
+    };
+    init();
+
+    campaignsIntervalRef.current = setInterval(() => {
+      fetchProspects(true);
+    }, 5000);
+
+    return () => {
+      stopCampaignsPolling();
+      stopLogPolling();
+    };
+  }, [fetchProspects, stopCampaignsPolling, stopLogPolling]);
   
+  // Sync selectedProspect with updated list
+  useEffect(() => {
+    if (selectedProspect) {
+      const updated = prospects.find(p => p.id === selectedProspect.id);
+      if (updated && (updated.status !== selectedProspect.status || updated.nome_prospeccao !== selectedProspect.nome_prospeccao)) {
+        setSelectedProspect(updated);
+        setCurrentStatus(updated.status);
+      }
+    } else if (prospects.length > 0 && !loadingStates.campaigns) {
+      setSelectedProspect(prospects[0]);
+    } else if (prospects.length === 0 && !loadingStates.campaigns) {
+      setSelectedProspect(null);
+      setActivityLog([]);
+      setCurrentStatus('Pendente');
+    }
+  }, [prospects, loadingStates.campaigns]);
+
+  // Fetch logs when selection changes (manual or initial)
   useEffect(() => {
     if (selectedProspect) {
       fetchActivityLog(selectedProspect.id, false);
-      setCurrentStatus(selectedProspect.status); // Garante que o status atual seja o da campanha selecionada
-      setCurrentPage(1); // Reseta a página ao selecionar nova campanha
+      setCurrentStatus(selectedProspect.status);
+      setCurrentPage(1);
     }
-  }, [selectedProspect, fetchActivityLog]);
+  }, [selectedProspect?.id, fetchActivityLog]); // Use ID to avoid re-fetching on status update only (logs polling handles updates)
 
   useEffect(() => {
     stopLogPolling();
@@ -215,8 +255,7 @@ function MainProspecting() {
     setActionLoading(prev => ({ ...prev, start: true }));
     try {
       await api.post(`/prospecting/${selectedProspect.id}/start`);
-      setCurrentStatus('Em Andamento');
-      fetchProspects(true); // Atualiza a lista de campanhas para refletir o novo status
+      await fetchProspects(true); 
     } catch (error) {
       alert(`Erro ao iniciar: ${error.response?.data?.detail || 'Erro desconhecido'}`);
     } finally {
@@ -229,8 +268,7 @@ function MainProspecting() {
     setActionLoading(prev => ({ ...prev, stop: true }));
     try {
       await api.post(`/prospecting/${selectedProspect.id}/stop`);
-      setCurrentStatus('Parado');
-      fetchProspects(true); // Atualiza a lista de campanhas para refletir o novo status
+      await fetchProspects(true);
     } catch (error) {
       alert(`Erro ao parar: ${error.response?.data?.detail || 'Erro desconhecido'}`);
     } finally {
@@ -247,14 +285,7 @@ function MainProspecting() {
         await api.delete(`/prospecting/${selectedProspect.id}`);
         const updatedProspects = prospects.filter(p => p.id !== selectedProspect.id);
         setProspects(updatedProspects);
-        const newSelected = updatedProspects.length > 0 ? updatedProspects[0] : null;
-        
-        setSelectedProspect(newSelected);
-        
-        if(!newSelected) {
-          setActivityLog([]);
-          setCurrentStatus('Pendente');
-        }
+        // Selection logic handled by useEffect [prospects]
       } catch (error) {
         alert(`Erro ao excluir: ${error.response?.data?.detail || 'Erro desconhecido'}`);
       } finally {

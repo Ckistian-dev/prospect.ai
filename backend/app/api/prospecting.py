@@ -4,6 +4,7 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timezone
 
 from app.api import dependencies
 from app.db.database import get_db
@@ -30,11 +31,13 @@ async def _process_raw_message(
         key = raw_msg.get("key", {})
         msg_content = raw_msg.get("message", {})
         msg_id = key.get("id")
+        timestamp_unix = raw_msg.get("messageTimestamp")
 
         if not msg_content or not msg_id: return None, 0
         role = "assistant" if key.get("fromMe") else "user"
         content = ""
         tokens_used = 0
+        media_meta = {}
         
         if msg_content.get("conversation") or msg_content.get("extendedTextMessage"):
             content = msg_content.get("conversation") or msg_content.get("extendedTextMessage", {}).get("text", "")
@@ -43,6 +46,10 @@ async def _process_raw_message(
             media_data = await whatsapp_service.get_media_and_convert(instance_name, raw_msg)
             if media_data:
                 # Passa o histórico apenas para análise de mídia, não para transcrição de áudio.
+                if 'image' in media_data['mime_type']:
+                    media_meta["mediaType"] = "image"
+                    media_meta["mimeType"] = media_data['mime_type']
+
                 history_for_analysis = history_list_for_context if 'audio' not in media_data['mime_type'] else None
                 analysis, tokens_used = await gemini_service.transcribe_and_analyze_media(
                     media_data, persona_config, db, user, db_history=history_for_analysis
@@ -59,12 +66,40 @@ async def _process_raw_message(
             else:
                 content = "[Falha ao processar mídia]"
 
-        if content and content.strip(): return {"id": msg_id, "role": role, "content": content}, tokens_used
+        timestamp_iso = None
+        if timestamp_unix:
+            try:
+                timestamp_iso = datetime.fromtimestamp(int(timestamp_unix), tz=timezone.utc).isoformat()
+            except (ValueError, TypeError):
+                logger.warning(f"Could not parse timestamp: {timestamp_unix}")
+
+        if content and content.strip():
+            processed_msg = {"id": msg_id, "role": role, "content": content}
+            if timestamp_iso:
+                processed_msg["timestamp"] = timestamp_iso
+            if media_meta:
+                processed_msg.update(media_meta)
+            return processed_msg, tokens_used
         return None, 0
         
     except Exception as e:
         logger.error(f"Erro ao processar mensagem individual ID {msg_id}: {e}", exc_info=True)
         return None, 0
+
+def _get_sort_key(msg: Dict[str, Any]) -> str:
+    """Helper para ordenar mensagens por timestamp, com fallback para o ID."""
+    if msg.get("timestamp"):
+        return msg["timestamp"]
+    
+    msg_id = str(msg.get("id", ""))
+    if msg_id.startswith(("sent_", "internal_")):
+        try:
+            parts = msg_id.split('_')
+            if len(parts) >= 2:
+                return parts[1]
+        except:
+            pass
+    return "1970-01-01T00:00:00+00:00"
 
 async def _synchronize_and_process_history(
     db: AsyncSession, 
@@ -72,7 +107,8 @@ async def _synchronize_and_process_history(
     user: models.User, 
     persona_config: models.Config,
     whatsapp_service: WhatsAppService,
-    gemini_service: GeminiService
+    gemini_service: GeminiService,
+    mode: str = None
 ) -> List[Dict[str, Any]]:
     
     if not user.instance_id:
@@ -94,7 +130,7 @@ async def _synchronize_and_process_history(
     contact_details = await crud_prospect.get_contact_details_from_prospect_contact(db, prospect_contact.id)
 
     # CORREÇÃO: A rota findMessages da Evolution usa o NOME da instância, não o ID.
-    raw_history_api = await whatsapp_service.fetch_chat_history(user.instance_name, contact_details.whatsapp, count=999)
+    raw_history_api = await whatsapp_service.fetch_chat_history(user.instance_name, contact_details.whatsapp, count=999, mode=mode)
 
     if not raw_history_api:
         logger.warning("Não foi possível buscar o histórico da API. Verifique a instância da Evolution API.")
@@ -129,8 +165,11 @@ async def _synchronize_and_process_history(
                 newly_processed_messages.append(processed_msg)
                 total_tokens_used += tokens_used
     
-    if newly_processed_messages: # A condição `len(db_history) > len(clean_db_history)` é redundante se `newly_processed_messages` for a fonte da verdade.
+    if newly_processed_messages:
         updated_history = clean_db_history + newly_processed_messages
+        # Garante a ordem cronológica correta, usando um valor padrão para mensagens antigas sem timestamp
+        updated_history.sort(key=_get_sort_key)
+
         logger.info(f"Sincronização: {len(newly_processed_messages)} mensagens novas/corrigidas processadas. Tokens: {total_tokens_used}")
         await crud_prospect.update_prospect_contact_conversation(
             db, 
@@ -141,7 +180,24 @@ async def _synchronize_and_process_history(
         return updated_history
     else:
         logger.info(f"Sincronização concluída. Nenhuma alteração no histórico.")
+        # Garante a ordem mesmo que não haja mensagens novas
+        clean_db_history.sort(key=_get_sort_key)
         return clean_db_history
+
+@router.get("/messages/{message_id}/media", summary="Obter mídia de uma mensagem")
+async def get_message_media(
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user)
+):
+    whatsapp = get_whatsapp_service()
+    if not current_user.instance_name:
+        raise HTTPException(status_code=400, detail="Usuário sem instância configurada.")
+    
+    base64_data = await whatsapp.get_media_by_message_id(current_user.instance_name, message_id)
+    if not base64_data:
+        raise HTTPException(status_code=404, detail="Mídia não encontrada ou expirada.")
+    return {"base64": base64_data}
 
 @router.get("/", response_model=List[Prospect], summary="Listar prospecções do usuário")
 async def get_prospects(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(dependencies.get_current_active_user)):
@@ -235,7 +291,7 @@ async def get_prospecting_sheet_data(prospect_id: int, db: AsyncSession = Depend
         raise HTTPException(status_code=404, detail="Campanha não encontrada.")
     
     contacts_data = await crud_prospect.get_prospect_contacts_with_details(db, prospect_id=prospect_id)
-    headers = ["id", "nome", "whatsapp", "situacao", "observacoes", "conversa"]
+    headers = ["id", "nome", "whatsapp", "situacao", "observacoes", "conversa", "lead_score"]
     data_rows = []
     for item in contacts_data:
         data_rows.append({
@@ -244,7 +300,8 @@ async def get_prospecting_sheet_data(prospect_id: int, db: AsyncSession = Depend
             "whatsapp": item.Contact.whatsapp, 
             "situacao": item.ProspectContact.situacao, 
             "observacoes": item.ProspectContact.observacoes, 
-            "conversa": item.ProspectContact.conversa
+            "conversa": item.ProspectContact.conversa,
+            "lead_score": item.ProspectContact.lead_score
         })
     return {"headers": headers, "data": data_rows, "prospect_name": prospect.nome_prospeccao}
 

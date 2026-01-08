@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axiosConfig';
-import { Play, Pause, Trash2, Edit, Loader2, Search, MessageSquare, ChevronDown, Table as TableIcon, AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from 'lucide-react';
+import { Play, Pause, Trash2, Edit, Loader2, Search, MessageSquare, ChevronDown, Table as TableIcon, AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Image as ImageIcon } from 'lucide-react';
 
 // --- COMPONENTES INTERNOS DE MODAL ---
 
@@ -18,6 +18,45 @@ const Modal = ({ onClose, children }) => {
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 animate-fade-in-up" onClick={e => e.stopPropagation()}>
                 {children}
             </div>
+        </div>
+    );
+};
+
+const ImageMessage = ({ messageId, mimeType, fallbackContent }) => {
+    const [imageUrl, setImageUrl] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
+
+    useEffect(() => {
+        const fetchImage = async () => {
+            try {
+                const response = await api.get(`/prospecting/messages/${messageId}/media`);
+                if (response.data.base64) {
+                    const base64 = response.data.base64;
+                    const src = base64.startsWith('data:') ? base64 : `data:${mimeType || 'image/jpeg'};base64,${base64}`;
+                    setImageUrl(src);
+                } else {
+                    setError(true);
+                }
+            } catch (err) {
+                setError(true);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchImage();
+    }, [messageId, mimeType]);
+
+    if (loading) return <div className="flex items-center gap-2 text-gray-500 text-sm p-2"><Loader2 size={14} className="animate-spin" /> Carregando imagem...</div>;
+    if (error) return <p className="whitespace-pre-wrap text-sm text-gray-600 italic">{fallbackContent}</p>;
+
+    return (
+        <div className="space-y-1">
+            <img 
+                src={imageUrl} 
+                alt="Imagem da conversa" 
+                className="rounded-lg max-w-full h-auto max-h-72 object-cover" 
+            />
         </div>
     );
 };
@@ -50,10 +89,17 @@ export const ConversationModal = ({ onClose, conversation, contactIdentifier }) 
                 <div ref={chatContainerRef} className="flex-1 p-4 md:p-6 overflow-y-auto space-y-4 bg-[url('https://i.redd.it/qwd83nc4xxf41.jpg')] bg-cover bg-center">
                     {messages.map((msg, index) => {
                         const isAssistant = msg.role === 'assistant';
+                        // Detecta se é imagem pelo novo campo mediaType ou pelo padrão de texto antigo
+                        const isImage = msg.mediaType === 'image' || (msg.content && msg.content.includes('[Análise de Mídia]'));
+                        
                         return (
                             <div key={index} className={`flex items-end gap-2 w-full ${isAssistant ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-xs md:max-w-md p-3 rounded-2xl shadow-sm break-words ${isAssistant ? 'bg-[#005c4b] text-white rounded-br-none' : 'bg-white text-gray-800 rounded-bl-none'}`}>
-                                    <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
+                                    {isImage ? (
+                                        <ImageMessage messageId={msg.id} mimeType={msg.mimeType} fallbackContent={msg.content} />
+                                    ) : (
+                                        <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
+                                    )}
                                 </div>
                             </div>
                         );
@@ -75,6 +121,11 @@ export const EditContactModal = ({ contact, statusOptions, onSave, onClose }) =>
     const [situacao, setSituacao] = useState(contact.situacao);
     const [observacoes, setObservacoes] = useState(contact.observacoes || '');
 
+    // Garante que a situação atual esteja na lista de opções para ser exibida corretamente
+    const availableOptions = statusOptions.includes(contact.situacao)
+        ? statusOptions
+        : [contact.situacao, ...statusOptions].filter(Boolean);
+
     const handleSave = () => {
         onSave(contact.id, { situacao, observacoes });
         onClose();
@@ -89,7 +140,7 @@ export const EditContactModal = ({ contact, statusOptions, onSave, onClose }) =>
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Situação</label>
                         <select value={situacao} onChange={e => setSituacao(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm">
-                            {statusOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                            {availableOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                         </select>
                     </div>
                     <div>
@@ -133,6 +184,7 @@ function Prospects() {
     const [isLoading, setIsLoading] = useState({ list: true, data: false });
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
+    const [minScore, setMinScore] = useState(0);
 
     // --- Estado da Paginação ---
     const [currentPage, setCurrentPage] = useState(1);
@@ -201,14 +253,16 @@ function Prospects() {
 
     useEffect(() => {
         const lowercasedFilter = searchTerm.toLowerCase();
-        const filtered = contacts.filter(item =>
-            Object.values(item).some(value =>
+        const filtered = contacts.filter(item => {
+            const matchesSearch = Object.values(item).some(value =>
                 String(value).toLowerCase().includes(lowercasedFilter)
-            )
-        );
+            );
+            const matchesScore = (item.lead_score || 0) >= minScore;
+            return matchesSearch && matchesScore;
+        });
         setFilteredContacts(filtered);
         setCurrentPage(1);
-    }, [searchTerm, contacts]);
+    }, [searchTerm, minScore, contacts]);
     
     const handleSaveContactEdit = async (contactId, updates) => {
         try {
@@ -246,6 +300,12 @@ function Prospects() {
         return `${baseClasses} ${statusMap[status] || 'bg-gray-100 text-gray-600'}`;
     };
 
+    const getScoreColor = (score) => {
+        if (score >= 8) return "text-green-600 bg-green-50 border-green-200";
+        if (score >= 5) return "text-yellow-600 bg-yellow-50 border-yellow-200";
+        return "text-gray-500 bg-gray-50 border-gray-200";
+    };
+
     // --- Lógica de Paginação ---
     const indexOfLastContact = currentPage * contactsPerPage;
     const indexOfFirstContact = indexOfLastContact - contactsPerPage;
@@ -267,8 +327,8 @@ function Prospects() {
             </div>
             
             <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 items-end">
-                    <div>
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6 items-end">
+                    <div className="md:col-span-5">
                         <label htmlFor="prospect-select" className="block text-sm font-medium text-gray-700 mb-2">
                             Campanha Ativa:
                         </label>
@@ -294,7 +354,7 @@ function Prospects() {
                             </div>
                         </div>
                     </div>
-                    <div className="relative">
+                    <div className="relative md:col-span-5">
                         <label htmlFor="search-input" className="block text-sm font-medium text-gray-700 mb-2">
                             Filtrar Contatos:
                         </label>
@@ -308,6 +368,19 @@ function Prospects() {
                             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                         />
                     </div>
+                    <div className="md:col-span-2">
+                        <label htmlFor="score-filter" className="block text-sm font-medium text-gray-700 mb-2">
+                            Score Mín.:
+                        </label>
+                        <input 
+                            id="score-filter"
+                            type="number" 
+                            min="0" max="10"
+                            value={minScore} 
+                            onChange={(e) => setMinScore(Number(e.target.value))} 
+                            className="w-full py-2 px-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                        />
+                    </div>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -316,6 +389,7 @@ function Prospects() {
                             <tr>
                                 <th className="p-4 text-sm font-semibold text-gray-600 uppercase">Nome</th>
                                 <th className="p-4 text-sm font-semibold text-gray-600 uppercase">WhatsApp</th>
+                                <th className="p-4 text-sm font-semibold text-gray-600 uppercase text-center">Score</th>
                                 <th className="p-4 text-sm font-semibold text-gray-600 uppercase">Situação</th>
                                 <th className="p-4 text-sm font-semibold text-gray-600 uppercase">Observações</th>
                                 <th className="p-4 text-sm font-semibold text-gray-600 uppercase text-center">Ações</th>
@@ -323,14 +397,19 @@ function Prospects() {
                         </thead>
                         <tbody>
                             {isLoading.data ? (
-                                <tr><td colSpan="5" className="text-center p-8"><Loader2 size={32} className="animate-spin text-green-600 mx-auto" /></td></tr>
+                                <tr><td colSpan="6" className="text-center p-8"><Loader2 size={32} className="animate-spin text-green-600 mx-auto" /></td></tr>
                             ) : error ? (
-                                <tr><td colSpan="5" className="text-center p-8 text-red-500">{error}</td></tr>
+                                <tr><td colSpan="6" className="text-center p-8 text-red-500">{error}</td></tr>
                             ) : currentContacts.length > 0 ? (
                                 currentContacts.map((row) => (
                                     <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
                                         <td className="p-4 font-medium text-gray-800">{row.nome}</td>
                                         <td className="p-4 text-gray-700">{row.whatsapp}</td>
+                                        <td className="p-4 text-center">
+                                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold border ${getScoreColor(row.lead_score || 0)}`}>
+                                                {row.lead_score || 0}
+                                            </span>
+                                        </td>
                                         <td className="p-4"><span className={getStatusClass(row.situacao)}>{row.situacao}</span></td>
                                         <td className="p-4 text-sm text-gray-600 max-w-screen-2xl" title={row.observacoes}>{row.observacoes}</td>
                                         <td className="p-4 text-center">
