@@ -70,13 +70,14 @@ const CountUp = ({ end, duration = 1500 }) => {
     return new Intl.NumberFormat('pt-BR').format(count);
 };
 
-const Header = () => {
+const Header = ({ isSuperUser }) => {
   const [user, setUser] = useState(null);
   const [latestActivity, setLatestActivity] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
   const fetchData = useCallback(async () => {
+    if (isSuperUser) return;
     try {
       // Usamos Promise.all para buscar os dados em paralelo
       const [userRes, dashboardRes] = await Promise.all([
@@ -100,19 +101,24 @@ const Header = () => {
       console.error("Erro ao buscar dados do header:", err);
       setError(true);
     }
-  }, []);
+  }, [isSuperUser]);
 
   useEffect(() => {
+    if (isSuperUser) {
+        setLoading(false);
+        return;
+    }
     const loadInitialData = async () => {
         setLoading(true);
         await fetchData();
         setLoading(false);
     };
     loadInitialData();
-  }, [fetchData]);
+  }, [fetchData, isSuperUser]);
 
   // Atualiza os dados periodicamente e ao focar na aba
   useEffect(() => {
+    if (isSuperUser) return;
     let isMounted = true;
     let timeoutId;
 
@@ -141,9 +147,12 @@ const Header = () => {
       clearTimeout(timeoutId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [fetchData]);
+  }, [fetchData, isSuperUser]);
 
   const renderContent = () => {
+    if (isSuperUser) {
+      return <div className="h-8"></div>;;
+    }
     if (loading) {
       return <div className="h-8 bg-gray-200 rounded-full w-full animate-pulse"></div>;
     }

@@ -129,8 +129,100 @@ async def _synchronize_and_process_history(
     processed_message_ids = {msg['id'] for msg in clean_db_history}
     contact_details = await crud_prospect.get_contact_details_from_prospect_contact(db, prospect_contact.id)
 
+    # --- Lógica de JID ---
+    target_jids = []
+    if prospect_contact.jid_options:
+        # jid_options agora é uma string separada por vírgulas
+        target_jids = [jid.strip() for jid in prospect_contact.jid_options.split(',') if jid.strip()]
+    
+    if not target_jids:
+        # Tenta buscar na API
+        logger.info(f"JIDs não encontrados para o contato {contact_details.whatsapp}. Verificando na API...")
+        try:
+            check_result = await whatsapp_service.check_whatsapp_numbers(user.instance_name, [contact_details.whatsapp])
+            if check_result and isinstance(check_result, list) and len(check_result) > 0:
+                first_result = check_result[0]
+                if first_result.get("exists"):
+                    found_jid = first_result.get("jid")
+                    
+                    # Busca jidOptions no banco da Evolution usando o JID encontrado
+                    db_jid_options = await whatsapp_service.get_jid_options_from_db(user.instance_name, found_jid)
+                    
+                    if db_jid_options:
+                        # Converte a lista de dicts para string CSV
+                        jid_list = [item.get("jid") for item in db_jid_options if isinstance(item, dict) and item.get("jid")]
+                        jid_options_str = ",".join(jid_list)
+                        await crud_prospect.update_prospect_contact(
+                            db, 
+                            pc_id=prospect_contact.id, 
+                            situacao=None, 
+                            jid_options=jid_options_str
+                        )
+                        target_jids = jid_list
+                        logger.info(f"JIDs encontrados no DB da Evolution e salvos: {target_jids}")
+                    else:
+                        # Fallback: Se não encontrar no DB, usa o JID retornado pela API
+                        target_jids = [found_jid]
+                        logger.warning(f"jidOptions não encontrado no DB para {found_jid}. Usando JID da API.")
+        except Exception as e:
+            logger.error(f"Erro ao verificar número no WhatsApp: {e}")
+
     # CORREÇÃO: A rota findMessages da Evolution usa o NOME da instância, não o ID.
-    raw_history_api = await whatsapp_service.fetch_chat_history(user.instance_name, contact_details.whatsapp, count=999, mode=mode)
+    raw_history_api = await whatsapp_service.fetch_chat_history(
+        user.instance_name, 
+        contact_details.whatsapp, 
+        count=999, 
+        mode=None,
+        jids=target_jids
+    )
+
+    if not raw_history_api:
+        logger.warning("Não foi possível buscar o histórico da API. Tentando fallback de LID...")
+        
+        lid_found = None
+        # Filtra mensagens da IA que tenham conteúdo de texto significativo (evita 'Oi', 'Olá')
+        # Usa db_history para incluir mensagens que talvez ainda estejam com ID temporário 'sent_'
+        ai_messages = [
+            msg for msg in db_history 
+            if msg.get('role') == 'assistant' and msg.get('content') and len(str(msg.get('content'))) > 5
+        ]
+        
+        # Itera do mais recente para o mais antigo
+        for msg in reversed(ai_messages):
+            content = msg.get('content')
+            found_jid = await whatsapp_service.find_lid_by_message_content(user.instance_name, content)
+            if found_jid:
+                lid_found = found_jid
+                logger.info(f"Fallback LID: Encontrado {lid_found} através da mensagem '{content[:20]}...'")
+                break
+        
+        if lid_found:
+            # Atualiza jid_options e tenta de novo
+            current_jids = []
+            if prospect_contact.jid_options:
+                current_jids = [j.strip() for j in prospect_contact.jid_options.split(',') if j.strip()]
+            
+            if lid_found not in current_jids:
+                current_jids.append(lid_found)
+                new_jid_options = ",".join(current_jids)
+                
+                await crud_prospect.update_prospect_contact(
+                    db, 
+                    pc_id=prospect_contact.id, 
+                    situacao=None, 
+                    jid_options=new_jid_options
+                )
+                
+                target_jids = current_jids # Atualiza a lista usada na busca
+                
+                logger.info(f"Tentando buscar histórico novamente com novo LID {lid_found}...")
+                raw_history_api = await whatsapp_service.fetch_chat_history(
+                    user.instance_name, 
+                    contact_details.whatsapp, 
+                    count=999, 
+                    mode=None,
+                    jids=target_jids
+                )
 
     if not raw_history_api:
         logger.warning("Não foi possível buscar o histórico da API. Verifique a instância da Evolution API.")
@@ -326,7 +418,8 @@ async def update_prospect_contact_details(
         db, 
         pc_id=prospect_contact_id, 
         situacao=contact_in.situacao, 
-        observacoes=contact_in.observacoes
+        observacoes=contact_in.observacoes,
+        jid_options=contact_in.jid_options
     )
     return {"detail": "Contato atualizado com sucesso."}
 

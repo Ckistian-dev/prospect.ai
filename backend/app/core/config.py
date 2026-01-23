@@ -27,15 +27,6 @@ class Settings(BaseSettings):
     EVOLUTION_API_KEY: str
     EVOLUTION_INSTANCE_NAME: str
     EVOLUTION_DATABASE_URL: str
-    
-    # RabbitMQ
-    RABBITMQ_USER: str
-    RABBITMQ_PASS: str
-    RABBITMQ_HOST: str = "rabbitmq" # Nome do serviço no docker-compose
-    @computed_field
-    @property
-    def RABBITMQ_URL(self) -> str:
-        return f"amqp://{self.RABBITMQ_USER}:{self.RABBITMQ_PASS}@{self.RABBITMQ_HOST}:5672/"
 
     # Google
     GOOGLE_API_KEYS: str
@@ -48,6 +39,10 @@ class Settings(BaseSettings):
 
     # URL do Frontend (para CORS)
     FRONTEND_URL: str
+
+    # SuperUsuário
+    ADMIN_EMAIL: str
+    ADMIN_PASSWORD: str
 
     # Carrega as variáveis de um arquivo .env
     # Adicionado extra='ignore' para não falhar com variáveis extras no ambiente

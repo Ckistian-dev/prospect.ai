@@ -289,6 +289,18 @@ const DateRangeFilter = ({ onDateChange }) => {
 const AIAnalyzer = ({ onAnalyze, isLoading, analysis, error, onDownloadPdf }) => {
     const [question, setQuestion] = useState('');
 
+    const predefinedQuestions = [
+        "Como posso melhorar minha taxa de resposta?",
+        "Quais são os principais motivos de perda?",
+        "Qual o perfil do cliente ideal?",
+        "Resuma o desempenho geral."
+    ];
+
+    const handlePredefinedQuestionClick = (q) => {
+        setQuestion(q);
+        onAnalyze(q);
+    };
+
     const handleSubmit = (e) => {
         e.preventDefault();
         if (question.trim()) {
@@ -317,6 +329,23 @@ const AIAnalyzer = ({ onAnalyze, isLoading, analysis, error, onDownloadPdf }) =>
                     Analisar
                 </button>
             </form>
+
+            <div className="mt-4">
+                <div className="flex flex-wrap gap-2">
+                    {predefinedQuestions.map((q, index) => (
+                        <button
+                            key={index}
+                            type="button"
+                            onClick={() => handlePredefinedQuestionClick(q)}
+                            className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-1.5 rounded-full hover:bg-green-100 hover:text-green-800 transition-colors"
+                            disabled={isLoading}
+                        >
+                            <Lightbulb size={14} />
+                            <span>{q}</span>
+                        </button>
+                    ))}
+                </div>
+            </div>
 
             {isLoading && (
                 <div className="mt-6 flex items-center justify-center text-gray-500">

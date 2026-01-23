@@ -88,6 +88,9 @@ async def process_active_prospects():
                     # 5. Processamento do contato
                     await crud_prospect.update_prospect_contact_status(db, pc_id=pc.id, situacao="Processando")
                     await db.commit()
+                    
+                    # Atualiza o objeto pc com os dados mais recentes do banco
+                    await db.refresh(pc)
 
                     # --- VERIFICAÇÃO DE NÚMERO (NOVO) ---
                     if mode == 'initial':

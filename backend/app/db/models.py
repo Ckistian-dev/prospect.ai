@@ -103,6 +103,7 @@ class ProspectContact(Base):
     observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="")
     conversa = Column(Text, default="[]")
     media_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    jid_options = Column(Text, nullable=True, comment="Opções de JID (CSV) retornadas pelo IsOnWhatsapp")
     token_usage: Mapped[int] = mapped_column(Integer, default=0, comment="Total de tokens consumidos nesta conversa")
     lead_score: Mapped[int] = mapped_column(Integer, default=0, comment="Pontuação do lead (0-10)")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

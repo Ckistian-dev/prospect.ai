@@ -59,6 +59,7 @@ class ProspectContact(BaseModel):
     situacao: str
     observacoes: Optional[str] = None
     conversa: str
+    jid_options: Optional[str] = None
     token_usage: Optional[int] = 0
     lead_score: Optional[int] = 0
     updated_at: Optional[datetime] = None
@@ -69,6 +70,7 @@ class ProspectContact(BaseModel):
 class ProspectContactUpdate(BaseModel):
     situacao: Optional[str] = None
     observacoes: Optional[str] = None
+    jid_options: Optional[str] = None
 
 
 # --- Schemas de Prospecção ---
@@ -126,6 +128,12 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
+class UserCreateByAdmin(UserBase):
+    password: str
+    instance_name: Optional[str] = None
+    tokens: Optional[int] = 0
+    spreadsheet_id: Optional[str] = None
+
 class UserUpdate(BaseModel):
     instance_name: Optional[str] = None
     instance_id: Optional[str] = None
@@ -139,6 +147,7 @@ class User(UserBase):
     instance_id: Optional[str] = None
     tokens: int
     google_credentials: Optional[Dict[str, Any]] = None
+    is_admin: bool = False
 
     @computed_field
     @property
@@ -153,6 +162,7 @@ class User(UserBase):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    is_admin: bool = False
 
 class TokenData(BaseModel):
     email: Optional[str] = None

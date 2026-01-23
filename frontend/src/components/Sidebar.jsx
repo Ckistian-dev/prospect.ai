@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Users, MessageSquareQuote, Bot, Settings, GitBranch, LogOut, Rocket, BluetoothConnectedIcon, Phone, Link } from 'lucide-react';
 
-const Sidebar = () => {
+const Sidebar = ({ isSuperUser }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const navigate = useNavigate();
 
@@ -38,8 +38,9 @@ const Sidebar = () => {
                 </span>
             </div>
             
-            <nav className="flex-1 flex flex-col space-y-2">
-                {navItems.map(item => (
+            {!isSuperUser ? (
+                <nav className="flex-1 flex flex-col space-y-2">
+                    {navItems.map(item => (
                     <NavLink
                         key={item.name}
                         to={item.path}
@@ -54,8 +55,11 @@ const Sidebar = () => {
                             {item.name}
                         </span>
                     </NavLink>
-                ))}
-            </nav>
+                    ))}
+                </nav>
+            ) : (
+                <div className="flex-1" />
+            )}
 
             <div className="border-t border-white/20 pt-4">
                  <button onClick={handleLogout} className="flex items-center p-3 rounded-lg w-full hover:bg-brand-green-light/20 transition-colors duration-200">
@@ -70,4 +74,3 @@ const Sidebar = () => {
 };
 
 export default Sidebar;
-

@@ -131,7 +131,7 @@ class GeminiService:
         db: AsyncSession, 
         user: models.User, 
         force_json: bool = True,
-        model_name: str = 'gemini-2.5-flash-lite',
+        model_name: str = 'gemini-2.5-flash',
         system_instruction: Optional[str] = None
     ):
         """
@@ -145,8 +145,8 @@ class GeminiService:
             "top_k": self.generation_config.get("top_k", 1),
         }
 
-        # Penalties não são suportados no gemini-2.5-flash-lite
-        if "gemini-2.5-flash-lite" not in model_name:
+        # Penalties não são suportados no gemini-2.5-flash e variantes lite
+        if "gemini-2.5-flash" not in model_name:
             config_args["frequency_penalty"] = self.generation_config.get("frequency_penalty", 0.0)
             config_args["presence_penalty"] = self.generation_config.get("presence_penalty", 0.0)
 
@@ -486,11 +486,19 @@ class GeminiService:
             f"- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, {contact.nome}', 'Olá {contact.nome}' ou similares. Fale direto.\n"
             f"- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.\n"
             f"- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.\n\n"
+            f"# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)\n"
+            f"- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica sem engajamento ou pede para parar.\n"
+            f"- **3-5 (Morno):** Curioso, faz perguntas genéricas, responde educadamente mas sem urgência.\n"
+            f"- **6-8 (Interessado):** Engajado, pede detalhes técnicos, preços, fotos específicas ou demonstra interesse claro no produto/serviço.\n"
+            f"- **9-10 (Quente):** Pede reunião, visita, orçamento, demonstra urgência ou intenção de compra imediata.\n\n"
             f"# TAREFA ATUAL: {task_map.get(mode, 'Responder')}\n\n"
             f"# REGRAS DE EXECUÇÃO\n"
-            f"1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG).\n"
-            f"2. **Arquivos:** Se o cliente pedir foto/catálogo e o arquivo estiver listado no RAG, inclua-o em `arquivos_anexos` usando o ID exato. **PROIBIDO** colocar informações da imagem, links ou IDs no texto (`mensagem_para_enviar`).\n"
-            f"3. **Proibido Links Falsos:** JAMAIS invente links ou use placeholders como '[Link]'. Se tiver que enviar arquivo, use o campo JSON `arquivos_anexos`.\n"
+            f"1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).\n"
+            f"2. **Envio de Arquivos do Drive (IMPORTANTE):**\n"
+            f"   - Identifique arquivos no CONTEXTO (RAG) que começam com `[DRIVE]`. O ID está no formato `| ID: <ID_DO_ARQUIVO> |`.\n"
+            f"   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.\n"
+            f"   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.\n"
+            f"3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.\n"
             f"4. **Objetivo:** Avançar a prospecção ou qualificar o lead.\n"
             f"# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)\n"
             f"Retorne APENAS um JSON válido, sem blocos de código.\n"
@@ -547,7 +555,8 @@ class GeminiService:
         user: models.User,
         question: str,
         start_date: Optional[datetime],
-        end_date: Optional[datetime]
+        end_date: Optional[datetime],
+        prospect_ids: Optional[List[int]] = None
     ) -> Dict[str, Any]:
         """Usa a IA para analisar dados de prospecção com base em uma pergunta do usuário."""
         from app.crud import crud_prospect, crud_config
@@ -558,17 +567,25 @@ class GeminiService:
         prospects = await crud_prospect.get_prospects_by_user(db, user_id=user.id)
         simplified_prospects = []
         for p in prospects:
-            if p.created_at.replace(tzinfo=timezone.utc) >= start_date and p.created_at.replace(tzinfo=timezone.utc) <= end_date:
-                contacts_summary = {
-                    "total": len(p.contacts),
-                    "concluido": sum(1 for c in p.contacts if c.situacao == 'Concluído'),
-                    "lead_qualificado": sum(1 for c in p.contacts if c.situacao == 'Lead Qualificado'),
-                    "aguardando_resposta": sum(1 for c in p.contacts if c.situacao == 'Aguardando Resposta'),
-                }
-                simplified_prospects.append({
-                    "id": p.id, "nome": p.nome_prospeccao, "status": p.status,
-                    "created_at": p.created_at.isoformat(), "contacts_summary": contacts_summary
-                })
+            if prospect_ids and p.id not in prospect_ids:
+                continue
+
+            p_date = p.created_at.replace(tzinfo=timezone.utc)
+            if start_date and p_date < start_date:
+                continue
+            if end_date and p_date > end_date:
+                continue
+
+            contacts_summary = {
+                "total": len(p.contacts),
+                "concluido": sum(1 for c in p.contacts if c.situacao == 'Concluído'),
+                "lead_qualificado": sum(1 for c in p.contacts if c.situacao == 'Lead Qualificado'),
+                "aguardando_resposta": sum(1 for c in p.contacts if c.situacao == 'Aguardando Resposta'),
+            }
+            simplified_prospects.append({
+                "id": p.id, "nome": p.nome_prospeccao, "status": p.status,
+                "created_at": p.created_at.isoformat(), "contacts_summary": contacts_summary
+            })
 
         analysis_prompt = {
             "objetivo": "Você é um analista de vendas sênior. Analise os dados de prospecção fornecidos para responder à pergunta do usuário. Sua resposta DEVE ser um objeto JSON.",
@@ -592,7 +609,7 @@ class GeminiService:
             }
         }
         
-        response = await self._generate_with_retry_async(json.dumps(analysis_prompt, ensure_ascii=False, cls=SetEncoder), db, user, force_json=True)
+        response, _ = await self._generate_with_retry_async(json.dumps(analysis_prompt, ensure_ascii=False, cls=SetEncoder), db, user, force_json=True)
         return self._parse_json_response(response.text)
 
 _gemini_service_instance = None

@@ -8,6 +8,7 @@ from sqlalchemy import text
 from app.api import auth as auth_router
 from app.api import contacts as contacts_router
 from app.api import configs as configs_router
+from app.api import admin as admin_router
 from app.api import whatsapp as whatsapp_router
 from app.api import prospecting as prospecting_router
 from app.api import webhook as webhook_router
@@ -84,6 +85,7 @@ API_PREFIX = "/api/v1"
 app.include_router(auth_router.router, prefix=f"{API_PREFIX}/auth", tags=["Autenticação"])
 app.include_router(contacts_router.router, prefix=f"{API_PREFIX}/contacts", tags=["Contatos"])
 app.include_router(configs_router.router, prefix=f"{API_PREFIX}/configs", tags=["Configurações de IA"])
+app.include_router(admin_router.router, prefix=f"{API_PREFIX}/admin", tags=["Admin"])
 app.include_router(whatsapp_router.router, prefix=f"{API_PREFIX}/whatsapp", tags=["WhatsApp"])
 app.include_router(prospecting_router.router, prefix=f"{API_PREFIX}/prospecting", tags=["Prospecção"])
 app.include_router(webhook_router.router, prefix=f"{API_PREFIX}/webhook", tags=["Webhook"])

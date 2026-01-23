@@ -7,6 +7,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> list[models.User]:
+    """Retorna uma lista de usuários."""
+    result = await db.execute(select(models.User).offset(skip).limit(limit))
+    return result.scalars().all()
+
 async def get_user_by_email(db: AsyncSession, email: str) -> models.User | None:
     """Busca um usuário pelo seu endereço de e-mail."""
     result = await db.execute(select(models.User).filter(models.User.email == email))

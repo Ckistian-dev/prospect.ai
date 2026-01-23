@@ -32,6 +32,12 @@ function Login({ setIsAuthenticated }) {
 
       setIsAuthenticated(true);
 
+      // Verifica se é admin para redirecionar
+      if (response.data.is_admin) {
+        navigate('/admin');
+        return;
+      }
+
       const redirectPath = location.state?.from?.pathname || '/dashboard';
       navigate(redirectPath);
 

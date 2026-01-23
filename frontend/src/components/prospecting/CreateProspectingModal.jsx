@@ -126,6 +126,12 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
     setIsSaving(true);
     setError('');
 
+    if (!formData.config_id) {
+      setError("Por favor, selecione um Modelo de Mensagem (Persona) para a campanha.");
+      setIsSaving(false);
+      return;
+    }
+
     if (!isEditMode && formData.categorias_selecionadas.length === 0) {
       setError("Por favor, selecione pelo menos uma categoria de contatos para criar uma campanha.");
       setIsSaving(false);

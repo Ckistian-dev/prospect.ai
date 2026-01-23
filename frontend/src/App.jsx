@@ -10,7 +10,8 @@ import Whatsapp from './pages/Whatsapp';
 import MainProspecting from './pages/MainProspecting'; 
 import PrivacyPolicy from './pages/PrivacyPolicy'; 
 import TermsOfService from './pages/TermsOfService';
-import LandingPage from './pages/LandingPage'; // <--- IMPORTANTE: Importar a LandingPage
+import LandingPage from './pages/LandingPage';
+import Admin from './pages/Admin';
 
 import MainLayout from './components/MainLayout';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -36,6 +37,7 @@ function App() {
         <Route path="contacts" element={<Contacts />} />
         <Route path="prospects" element={<Prospects />} />
         <Route path="configs" element={<Configs />} />
+        <Route path="admin" element={<Admin />} />
         <Route path="whatsapp" element={<Whatsapp />} />
         <Route path="prospecting" element={<MainProspecting />} />
         

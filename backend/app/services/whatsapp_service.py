@@ -222,15 +222,9 @@ class WhatsAppService:
         # 2. Montar o payload para a API
         url = f"{self.api_url}/chat/getBase64FromMediaMessage/{instance_name}"
         payload = {
-            "message": {
-                "key": {
-                    "id": message_id
-                }
-            }
+            "message": message,
+            "convertToMp4": True if media_type_key == "videoMessage" else False
         }
-        # Adiciona a conversão para MP4 se for um vídeo
-        if media_type_key == "videoMessage":
-            payload["convertToMp4"] = True
 
         # 3. Fazer a requisição para obter o base64
         try:
@@ -274,48 +268,18 @@ class WhatsAppService:
             logger.error(f"Falha ao buscar mídia por ID {message_id}: {e}")
             return None
 
-    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 999, mode: str = None) -> List[Dict[str, Any]]:
+    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 999, mode: str = None, jids: List[str] = None) -> List[Dict[str, Any]]:
         """
         Busca o histórico de mensagens diretamente no banco de dados da Evolution API.
-        Aplica uma estratégia agressiva de busca: remove DDI (55), DDD e 9º dígito,
-        buscando por qualquer mensagem que contenha os últimos 8 dígitos do número.
+        Se 'jids' for fornecido, busca por esses JIDs exatos.
+        Caso contrário, usa 'number' para uma busca aproximada (LIKE).
         """
         if not self.db_url:
             logger.error("EVOLUTION_DATABASE_URL não configurada. Não é possível buscar histórico via DB.")
             return []
 
-        # 1. Limpeza básica
-        clean_number = "".join(filter(str.isdigit, str(number)))
-        
-        # Estratégia de extração do "núcleo" do número (últimos 8 dígitos)
-        search_term = clean_number
-
-        # Lógica para números brasileiros (geralmente > 8 dígitos)
-        if len(clean_number) >= 8:
-            # Se parece ser um número brasileiro completo (12 ou 13 dígitos começando com 55)
-            if clean_number.startswith("55") and len(clean_number) in [12, 13]:
-                # Remove 55 (DDI) e os 2 seguintes (DDD) -> Pula 4 caracteres
-                raw_local = clean_number[4:]
-            
-            # Se parece ser um número com DDD mas sem DDI (10 ou 11 dígitos)
-            elif len(clean_number) in [10, 11]:
-                # Remove os 2 primeiros (DDD) -> Pula 2 caracteres
-                raw_local = clean_number[2:]
-            
-            # Se já parece ser local (8 ou 9 dígitos)
-            else:
-                raw_local = clean_number
-
-            # Tratamento do 9º dígito no número local
-            if len(raw_local) == 9 and raw_local.startswith('9'):
-                search_term = raw_local[1:] # Pega os últimos 8
-            elif len(raw_local) >= 8:
-                search_term = raw_local[-8:] # Garante pegar apenas os últimos 8
-            else:
-                search_term = raw_local
-        
         # LOG DE DEBUG: Essencial para entender o que ocorre em produção (verifique os logs do container)
-        logger.info(f"Fetch History: Instance='{instance_name}', Number='{number}', SearchTerm='{search_term}'")
+        logger.info(f"Fetch History: Instance='{instance_name}', Number='{number}', JIDs='{jids}'")
 
         try:
             # Remove o prefixo '+asyncpg' se presente, pois o driver asyncpg puro não o reconhece
@@ -331,19 +295,64 @@ class WhatsAppService:
                     return []
 
                 # 2. Query otimizada usando o ID da instância
-                query = """
-                    SELECT "key", "message", "messageTimestamp", "pushName", "status"
-                    FROM "Message"
-                    WHERE "instanceId" = $1
-                      AND (
-                        "key"->>'remoteJid' LIKE $2
-                        OR "key"->>'remoteJidAlt' LIKE $2
-                      )
-                    ORDER BY "messageTimestamp" DESC
-                    LIMIT $3
-                """
-                like_pattern = f"%{search_term}%"
-                rows = await conn.fetch(query, instance_id, like_pattern, count)
+                like_pattern = None
+                if jids:
+                    query = """
+                        SELECT "key", "message", "messageTimestamp", "pushName", "status"
+                        FROM "Message"
+                        WHERE "instanceId" = $1
+                          AND (
+                            "key"->>'remoteJid' = ANY($2::text[])
+                            OR "key"->>'remoteJidAlt' = ANY($2::text[])
+                          )
+                        ORDER BY "messageTimestamp" DESC
+                        LIMIT $3
+                    """
+                    rows = await conn.fetch(query, instance_id, jids, count)
+                else:
+                    # 1. Limpeza básica
+                    clean_number = "".join(filter(str.isdigit, str(number)))
+                    
+                    # Estratégia de extração do "núcleo" do número (últimos 8 dígitos)
+                    search_term = clean_number
+
+                    # Lógica para números brasileiros (geralmente > 8 dígitos)
+                    if len(clean_number) >= 8:
+                        # Se parece ser um número brasileiro completo (12 ou 13 dígitos começando com 55)
+                        if clean_number.startswith("55") and len(clean_number) in [12, 13]:
+                            # Remove 55 (DDI) e os 2 seguintes (DDD) -> Pula 4 caracteres
+                            raw_local = clean_number[4:]
+                        
+                        # Se parece ser um número com DDD mas sem DDI (10 ou 11 dígitos)
+                        elif len(clean_number) in [10, 11]:
+                            # Remove os 2 primeiros (DDD) -> Pula 2 caracteres
+                            raw_local = clean_number[2:]
+                        
+                        # Se já parece ser local (8 ou 9 dígitos)
+                        else:
+                            raw_local = clean_number
+
+                        # Tratamento do 9º dígito no número local
+                        if len(raw_local) == 9 and raw_local.startswith('9'):
+                            search_term = raw_local[1:] # Pega os últimos 8
+                        elif len(raw_local) >= 8:
+                            search_term = raw_local[-8:] # Garante pegar apenas os últimos 8
+                        else:
+                            search_term = raw_local
+
+                    query = """
+                        SELECT "key", "message", "messageTimestamp", "pushName", "status"
+                        FROM "Message"
+                        WHERE "instanceId" = $1
+                          AND (
+                            "key"->>'remoteJid' LIKE $2
+                            OR "key"->>'remoteJidAlt' LIKE $2
+                          )
+                        ORDER BY "messageTimestamp" DESC
+                        LIMIT $3
+                    """
+                    like_pattern = f"%{search_term}%"
+                    rows = await conn.fetch(query, instance_id, like_pattern, count)
                 
                 messages = []
                 for row in rows:
@@ -359,7 +368,8 @@ class WhatsAppService:
                 if not messages and mode and mode != 'initial':
                     raise ValueError(f"Histórico vazio para contato {number} em modo '{mode}'.")
 
-                logger.info(f"Histórico carregado via DB (Termo: {like_pattern}). Total: {len(messages)}.")
+                search_desc = f"JIDs: {jids}" if jids else f"Termo: {like_pattern}"
+                logger.info(f"Histórico carregado via DB ({search_desc}). Total: {len(messages)}.")
                 return messages
             finally:
                 await conn.close()
@@ -368,6 +378,82 @@ class WhatsAppService:
         except Exception as e:
             logger.error(f"Erro ao buscar histórico no banco de dados da Evolution: {e}", exc_info=True)
             return []
+
+    async def find_lid_by_message_content(self, instance_name: str, content: str) -> Optional[str]:
+        """
+        Busca uma mensagem enviada pela IA no banco da Evolution para tentar descobrir o LID.
+        Retorna o remoteJid se for um LID e se a mensagem for única.
+        """
+        if not self.db_url:
+            return None
+
+        try:
+            # Remove o prefixo '+asyncpg' se presente, pois o driver asyncpg puro não o reconhece
+            db_url = self.db_url.replace("postgresql+asyncpg://", "postgresql://")
+            
+            conn = await asyncpg.connect(db_url)
+            try:
+                # Busca mensagens enviadas pela instância (fromMe=true) com o conteúdo exato
+                # Retorna remoteJid
+                query = """
+                    SELECT "key"->>'remoteJid' as remote_jid
+                    FROM "Message"
+                    WHERE "instanceId" = (SELECT id FROM "Instance" WHERE name = $1)
+                      AND "key"->>'fromMe' = 'true'
+                      AND (
+                          "message"->>'conversation' = $2
+                          OR "message"->'extendedTextMessage'->>'text' = $2
+                      )
+                    LIMIT 2
+                """
+                rows = await conn.fetch(query, instance_name, content)
+                
+                # Se retornar mais de 1, é ambíguo, pula.
+                if len(rows) != 1:
+                    return None
+                
+                remote_jid = rows[0]['remote_jid']
+                if remote_jid and '@lid' in remote_jid:
+                    return remote_jid
+                
+                return None
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.error(f"Erro ao buscar LID por conteúdo: {e}")
+            return None
+
+    async def get_jid_options_from_db(self, instance_name: str, remote_jid: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        Busca as opções de JID (jidOptions) na tabela IsOnWhatsapp do banco da Evolution.
+        """
+        if not self.db_url:
+            logger.error("EVOLUTION_DATABASE_URL não configurada.")
+            return None
+
+        try:
+            db_url = self.db_url.replace("postgresql+asyncpg://", "postgresql://")
+            conn = await asyncpg.connect(db_url)
+            try:
+                query = 'SELECT "jidOptions" FROM "IsOnWhatsapp" WHERE "remoteJid" = $1'
+                jid_options_json = await conn.fetchval(query, remote_jid)
+
+                if jid_options_json:
+                    if isinstance(jid_options_json, str):
+                        try:
+                            return json.loads(jid_options_json)
+                        except json.JSONDecodeError:
+                            # Se falhar o JSON, tenta processar como string separada por vírgulas
+                            if ',' in jid_options_json or '@' in jid_options_json:
+                                return [{"jid": j.strip()} for j in jid_options_json.split(',') if j.strip()]
+                            return None
+                    return jid_options_json
+                return None
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.error(f"Erro ao buscar jidOptions no DB da Evolution: {e}")
+            return None
 
     async def check_whatsapp_numbers(self, instance_name: str, numbers: List[str]) -> Optional[List[Dict[str, Any]]]:
         results = []
@@ -393,20 +479,49 @@ class WhatsAppService:
         """
         normalized_number = self._normalize_number(number)
         url = f"{self.api_url}/chat/sendPresence/{instance_name}"
-        payload = {
-            "number": normalized_number,
-            "options": {
-                "delay": delay,
-                "presence": presence,
-                "number": normalized_number
+        
+        # Tenta diferentes formatos de payload para compatibilidade com versões da Evolution API
+        payloads = [
+            # 1. Nested sem number (Correção provável para erro 400 de redundância)
+            {
+                "number": normalized_number,
+                "options": {
+                    "delay": int(delay),
+                    "presence": presence
+                }
+            },
+            # 2. Flat (Versões mais novas)
+            {
+                "number": normalized_number,
+                "delay": int(delay),
+                "presence": presence
+            },
+            # 3. Swagger (Nested com number - O que falhou, mas mantemos como fallback)
+            {
+                "number": normalized_number,
+                "options": {
+                    "delay": int(delay),
+                    "presence": presence,
+                    "number": normalized_number
+                }
             }
-        }
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(url, headers=self.headers, json=payload, timeout=5.0)
-                response.raise_for_status()
-        except Exception as e:
-            logger.warning(f"Falha ao enviar status '{presence}' para {normalized_number}: {e}")
+        ]
+
+        async with httpx.AsyncClient() as client:
+            for i, payload in enumerate(payloads):
+                try:
+                    response = await client.post(url, headers=self.headers, json=payload, timeout=5.0)
+                    response.raise_for_status()
+                    return # Sucesso
+                except httpx.HTTPStatusError as e:
+                    # Se for erro 400 (Bad Request), tenta o próximo formato
+                    if e.response.status_code == 400 and i < len(payloads) - 1:
+                        continue
+                    logger.warning(f"Falha ao enviar status '{presence}' para {normalized_number} (Payload {i}): {e}")
+                    return
+                except Exception as e:
+                    logger.warning(f"Erro de conexão ao enviar status '{presence}': {e}")
+                    return
 
 _whatsapp_service_instance = None
 def get_whatsapp_service():

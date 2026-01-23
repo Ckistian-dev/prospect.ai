@@ -25,6 +25,8 @@ const ActivityLogTable = ({ logData, onOpenConversation, onOpenEditContact, isLo
         'Sem Whatsapp': "bg-gray-200 text-gray-700",
         'Não Interessado': "bg-red-100 text-red-700",
         'Aguardando Início': "bg-purple-100 text-purple-800",
+        'Conversa Manual': "bg-orange-100 text-orange-800",
+        'Fechado': "bg-emerald-100 text-emerald-800",
     };
     return `${baseClasses} ${statusMap[status] || 'bg-gray-100 text-gray-600'}`;
   };
@@ -96,7 +98,7 @@ function MainProspecting() {
 
   // Estado unificado para modais
   const [modal, setModal] = useState({ type: null, data: null });
-  const statusOptions = ["Aguardando Início", "Aguardando Resposta", "Resposta Recebida", "Lead Qualificado", "Não Interessado", "Concluído", "Sem Whatsapp", "Falha no Envio", "Erro IA"];
+  const statusOptions = ["Aguardando Início", "Aguardando Resposta", "Resposta Recebida", "Lead Qualificado", "Não Interessado", "Concluído", "Sem Whatsapp", "Falha no Envio", "Erro IA", "Conversa Manual", "Fechado"];
 
   // --- Estado da Paginação ---
   const [currentPage, setCurrentPage] = useState(1);
