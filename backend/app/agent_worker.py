@@ -4,10 +4,12 @@ import os
 import json
 import random
 from datetime import datetime, timezone, timedelta
+from sqlalchemy import select
 
 from app.db.database import SessionLocal
 from app.db import models
-from app.crud import crud_prospect, crud_user, crud_config
+from app.db.schemas import ContactCreate
+from app.crud import crud_prospect, crud_user, crud_config, crud_contact
 from app.services.whatsapp_service import get_whatsapp_service, MessageSendError
 from app.services.gemini_service import get_gemini_service
 from app.services.google_drive_service import get_drive_service
@@ -139,7 +141,9 @@ async def process_active_prospects():
                     full_history = await _synchronize_and_process_history(db, pc, user, persona_config, whatsapp_service, gemini_service, mode=mode)
 
                     if mode == 'reply' and (not full_history or full_history[-1]['role'] != 'user'):
-                        raise ValueError(f"Contato {pc.id} em modo 'reply' mas a última mensagem não é do usuário.")
+                        logger.warning(f"AGENTE WORKER: Contato {pc.id} em modo 'reply' mas a última mensagem não é do usuário. Ignorando e voltando para 'Aguardando Resposta'.")
+                        await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao="Aguardando Resposta")
+                        continue
                     
                     ia_response = await gemini_service.generate_conversation_action(
                         config=persona_config, contact=contact, conversation_history_db=full_history,
@@ -151,6 +155,7 @@ async def process_active_prospects():
                     new_observation = ia_response.get("observacoes", "")
                     lead_score = ia_response.get("lead_score", 0)
                     files_to_send = ia_response.get("arquivos_anexos", [])
+                    novos_contatos = ia_response.get("novos_contatos", [])
                     ia_tokens_used = ia_response.get("token_usage", 0)
                     
                     history_after_response = full_history.copy()
@@ -213,6 +218,60 @@ async def process_active_prospects():
                                     sent_any_message = True
                             except Exception as e:
                                 logger.error(f"AGENTE WORKER: Falha ao enviar arquivo {file_id}: {e}")
+
+                    # --- PROCESSAMENTO DE NOVOS CONTATOS INDICADOS PELA IA ---
+                    if novos_contatos and isinstance(novos_contatos, list):
+                        for nc in novos_contatos:
+                            try:
+                                nc_nome = nc.get("nome")
+                                nc_numero = nc.get("numero")
+                                nc_obs = nc.get("observacao")
+
+                                if nc_nome and nc_numero:
+                                    # Limpeza básica do número
+                                    clean_number = "".join(filter(str.isdigit, str(nc_numero)))
+                                    
+                                    # Verifica se o contato já existe
+                                    existing_contact = await crud_contact.get_contact_by_whatsapp(db, clean_number, user.id)
+                                    
+                                    contact_id = None
+                                    if existing_contact:
+                                        contact_id = existing_contact.id
+                                        logger.info(f"AGENTE WORKER: Contato existente encontrado para indicação: {existing_contact.nome}")
+                                    else:
+                                        # Cria o contato
+                                        new_contact_in = ContactCreate(
+                                            nome=nc_nome,
+                                            whatsapp=clean_number,
+                                            observacoes=nc_obs,
+                                            categoria=["Indicado pela IA"]
+                                        )
+                                        created_contact = await crud_contact.create_contact(db, new_contact_in, user.id)
+                                        contact_id = created_contact.id
+                                        logger.info(f"AGENTE WORKER: Novo contato criado pela IA: {nc_nome}")
+                                    
+                                    # Adiciona à campanha atual se tivermos um ID válido
+                                    if contact_id:
+                                        # Verifica se já está na campanha para evitar duplicidade
+                                        stmt = select(models.ProspectContact).where(
+                                            models.ProspectContact.prospect_id == campaign.id,
+                                            models.ProspectContact.contact_id == contact_id
+                                        )
+                                        result = await db.execute(stmt)
+                                        existing_association = result.scalars().first()
+
+                                        if not existing_association:
+                                            new_association = models.ProspectContact(
+                                                prospect_id=campaign.id,
+                                                contact_id=contact_id,
+                                                situacao="Aguardando Início",
+                                                observacoes=f"Indicado por {contact.nome}. Contexto: {nc_obs}"
+                                            )
+                                            db.add(new_association)
+                                            await db.commit()
+                                            logger.info(f"AGENTE WORKER: Contato {nc_nome} adicionado à campanha {campaign.id}.")
+                            except Exception as e:
+                                logger.error(f"AGENTE WORKER: Erro ao processar novo contato da IA: {e}", exc_info=True)
 
                     if not sent_any_message:
                         logger.info(f"AGENTE WORKER: IA decidiu não enviar mensagem para {contact.whatsapp} (Modo: {mode}).")

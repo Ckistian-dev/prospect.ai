@@ -500,6 +500,7 @@ class GeminiService:
             f"   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.\n"
             f"3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.\n"
             f"4. **Objetivo:** Avançar a prospecção ou qualificar o lead.\n"
+            f"5. **Novos Contatos:** Se o cliente indicar outra pessoa para contato (ex: 'Fale com meu sócio Fulano no 99999-9999'), extraia os dados para o campo `novos_contatos`.\n"
             f"# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)\n"
             f"Retorne APENAS um JSON válido, sem blocos de código.\n"
             f"{{\n"
@@ -507,7 +508,8 @@ class GeminiService:
             f'  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado",\n'
             f'  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),\n'
             f'  "observacoes": "Resumo curto da conversa",\n'
-            f'  "arquivos_anexos": ["ID_DO_ARQUIVO_1"]\n'
+            f'  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],\n'
+            f'  "novos_contatos": [{{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}}]\n'
             f"}}"
         )
 

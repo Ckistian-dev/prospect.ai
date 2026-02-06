@@ -259,7 +259,17 @@ async def find_prospect_contact_by_number(db: AsyncSession, user_id: int, number
         )
         .order_by(models.Prospect.created_at.desc())
     )
-    return result.first()
+    rows = result.all()
+
+    # Prioriza encontrar um contato que esteja em uma campanha ativa (não finalizada)
+    situacoes_de_parada = ["Não Interessado", "Concluído", "Falha no Envio", "Conversa Manual", "Fechado"]
+    
+    for row in rows:
+        _contact, prospect_contact, _prospect = row
+        if prospect_contact.situacao not in situacoes_de_parada:
+            return row
+            
+    return rows[0] if rows else None
 
 
 async def get_prospect_contacts_with_details(db: AsyncSession, prospect_id: int):
@@ -269,6 +279,7 @@ async def get_prospect_contacts_with_details(db: AsyncSession, prospect_id: int)
         .join(models.Contact, models.ProspectContact.contact_id == models.Contact.id)
         .where(models.ProspectContact.prospect_id == prospect_id)
         .options(joinedload(models.ProspectContact.contact))
+        .order_by(models.ProspectContact.updated_at.desc())
     )
     return result.all()
 

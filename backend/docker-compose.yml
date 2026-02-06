@@ -142,7 +142,7 @@ services:
     networks:
       - app-network
 
-  # --- Túnel Serveo (Expõe a App para Webhook) ---
+# --- Túnel Serveo (Expõe a App para Webhook) ---
   tunnel:
     image: alpine:latest
     container_name: serveo_tunnel

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from typing import Dict, List, Any, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +43,16 @@ async def _process_raw_message(
         if msg_content.get("conversation") or msg_content.get("extendedTextMessage"):
             content = msg_content.get("conversation") or msg_content.get("extendedTextMessage", {}).get("text", "")
         
+        elif msg_content.get("contactMessage"):
+            contact_msg = msg_content.get("contactMessage")
+            display_name = contact_msg.get("displayName", "Desconhecido")
+            vcard = contact_msg.get("vcard", "")
+            content = f"[Contato Compartilhado] Nome: {display_name}"
+            if vcard:
+                waid_match = re.search(r'waid=(\d+)', vcard)
+                if waid_match:
+                    content += f", WhatsApp: {waid_match.group(1)}"
+
         elif msg_content.get("audioMessage") or msg_content.get("imageMessage") or msg_content.get("documentMessage"):
             media_data = await whatsapp_service.get_media_and_convert(instance_name, raw_msg)
             if media_data:

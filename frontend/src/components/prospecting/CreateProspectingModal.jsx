@@ -14,8 +14,8 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
     horario_fim: '',
   });
 
-  const [initialIntervalValue, setInitialIntervalValue] = useState(90);
-  const [initialIntervalUnit, setInitialIntervalUnit] = useState('seconds');
+  const [initialIntervalValue, setInitialIntervalValue] = useState(15);
+  const [initialIntervalUnit, setInitialIntervalUnit] = useState('minutes');
 
   const [followupEnabled, setFollowupEnabled] = useState(false);
   const [followupValue, setFollowupValue] = useState(1);
