@@ -35,7 +35,7 @@ class GeminiService:
             
             self.current_key_index = 0
             self.generation_config = {
-                "temperature": 0.5,
+                "temperature": 0.2,
                 "top_p": 0.95,
                 "top_k": 40,
                 "frequency_penalty": 0.6,
@@ -140,7 +140,7 @@ class GeminiService:
         
         # Configuração do novo SDK
         config_args = {
-            "temperature": self.generation_config.get("temperature", 0.5),
+            "temperature": self.generation_config.get("temperature", 0.2),
             "top_p": self.generation_config.get("top_p", 1),
             "top_k": self.generation_config.get("top_k", 1),
         }
@@ -184,6 +184,12 @@ class GeminiService:
                         # Calcula o custo equivalente em "tokens de input"
                         equivalent_total_tokens = input_tokens + (output_tokens * self.output_token_multiplier)
                         tokens_to_deduct = round(equivalent_total_tokens)
+                        
+                        logger.info(
+                            f"Uso de tokens (User {user.id}): "
+                            f"Input={input_tokens}, Output={output_tokens}. "
+                            f"Custo Equivalente (x{self.output_token_multiplier:.2f}) = {tokens_to_deduct} tokens."
+                        )
 
                     if tokens_to_deduct > 0:
                         # Usa 'amount' conforme padrão do ProspectAI
@@ -217,11 +223,21 @@ class GeminiService:
                 raise Exception("Todas as chaves de API excederam a quota.")
 
     async def generate_embedding(self, text: str) -> List[float]:
-        """Gera embedding para um texto usando o modelo do Google (text-embedding-004)."""
+        """
+        Gera embedding usando o modelo gemini-embedding-001.
+        Força 768 dimensões para compatibilidade e eficiência.
+        """
         try:
+            # Configuração para reduzir de 3072 para 768 dimensões (Matryoshka)
+            # Isso economiza 4x de espaço no banco e mantém a performance.
+            embed_config = types.EmbedContentConfig(
+                output_dimensionality=768
+            )
+
             response = await self.client.aio.models.embed_content(
-                model="text-embedding-004",
-                contents=text
+                model="gemini-embedding-001",
+                contents=text,
+                config=embed_config
             )
             if response.embeddings:
                 return response.embeddings[0].values
@@ -231,19 +247,29 @@ class GeminiService:
             return []
 
     async def generate_embeddings_batch(self, texts: List[str], batch_size: int = 100) -> List[List[float]]:
-        """Gera embeddings para uma lista de textos em lotes (batching)."""
+        """
+        Gera embeddings em lote usando gemini-embedding-001 com 768 dimensões.
+        """
         all_embeddings = []
+        
+        # Configuração para 768 dimensões
+        embed_config = types.EmbedContentConfig(
+            output_dimensionality=768
+        )
+
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
             try:
                 response = await self.client.aio.models.embed_content(
-                    model="text-embedding-004",
-                    contents=batch
+                    model="gemini-embedding-001",
+                    contents=batch,
+                    config=embed_config
                 )
                 if response.embeddings:
                     batch_embeddings = [e.values for e in response.embeddings]
                     all_embeddings.extend(batch_embeddings)
                 else:
+                    logger.warning(f"Batch {i} retornou sem embeddings.")
                     all_embeddings.extend([[] for _ in batch])
             except Exception as e:
                 logger.error(f"Erro ao gerar embeddings em lote (índice {i}): {e}")
@@ -290,8 +316,19 @@ class GeminiService:
 
     def _format_history_for_prompt(self, db_history: List[dict]) -> str:
         """Formata o histórico de conversa em uma string simples e legível."""
+        
+        # --- LÓGICA DE RESET ---
+        # Filtra o histórico para enviar ao prompt apenas o que ocorreu APÓS o último '/reset'
+        start_index = 0
+        for i, msg in enumerate(db_history):
+            content = str(msg.get("content", "")).strip()
+            if "/reset" in content:
+                start_index = i + 1
+        
+        filtered_history = db_history[start_index:]
+        
         history_lines = []
-        for msg in db_history:
+        for msg in filtered_history:
             # Define o remetente como 'ia' ou 'contato'
             role = "IA" if msg.get("role") == "assistant" else "Contato"
             content = str(msg.get("content", "")).strip()
@@ -487,10 +524,17 @@ class GeminiService:
             f"- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.\n"
             f"- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.\n\n"
             f"# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)\n"
-            f"- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica sem engajamento ou pede para parar.\n"
-            f"- **3-5 (Morno):** Curioso, faz perguntas genéricas, responde educadamente mas sem urgência.\n"
-            f"- **6-8 (Interessado):** Engajado, pede detalhes técnicos, preços, fotos específicas ou demonstra interesse claro no produto/serviço.\n"
-            f"- **9-10 (Quente):** Pede reunião, visita, orçamento, demonstra urgência ou intenção de compra imediata.\n\n"
+            f"- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica, pede para parar ou ignora perguntas.\n"
+            f"- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento. Faz perguntas genéricas sem demonstrar intenção real de avanço.\n"
+            f"- **6-8 (Interessado):** Engajado na conversa, responde a perguntas de qualificação, solicita informações específicas (preços, fotos, prazos) e mantém o diálogo fluido.\n"
+            f"- **9-10 (Quente):** Demonstra urgência, solicita visita técnica, reunião ou orçamento formal. Aceita prontamente os próximos passos propostos.\n\n"
+            f"# CRITÉRIOS PARA SITUAÇÃO 'Lead Qualificado'\n"
+            f"Mude a `nova_situacao` para 'Lead Qualificado' APENAS se:\n"
+            f"1. O contato demonstrou interesse real e ativo (Score >= 7).\n"
+            f"2. Houve uma troca de mensagens significativa (não apenas uma resposta isolada).\n"
+            f"3. O contato concordou com um próximo passo claro (visita, reunião, envio de projeto).\n"
+            f"Se o interesse for vago ou inicial, mantenha como 'Aguardando Resposta'.\n"
+            f"Se a pessoa demonstrar desinterece, hostilidade, mude para 'Não Interessado'.\n\n"
             f"# TAREFA ATUAL: {task_map.get(mode, 'Responder')}\n\n"
             f"# REGRAS DE EXECUÇÃO\n"
             f"1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).\n"
@@ -499,13 +543,14 @@ class GeminiService:
             f"   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.\n"
             f"   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.\n"
             f"3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.\n"
-            f"4. **Objetivo:** Avançar a prospecção ou qualificar o lead.\n"
-            f"5. **Novos Contatos:** Se o cliente indicar outra pessoa para contato (ex: 'Fale com meu sócio Fulano no 99999-9999'), extraia os dados para o campo `novos_contatos`.\n"
+            f"4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.\n"
+            f"5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.\n"
+            f"6. **Novos Contatos:** Se o cliente indicar outra pessoa para contato (ex: 'Fale com meu sócio Fulano no 99999-9999'), extraia os dados para o campo `novos_contatos`.\n"
             f"# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)\n"
             f"Retorne APENAS um JSON válido, sem blocos de código.\n"
             f"{{\n"
             f'  "mensagem_para_enviar": "Texto da resposta (ou null)",\n'
-            f'  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado",\n'
+            f'  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",\n'
             f'  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),\n'
             f'  "observacoes": "Resumo curto da conversa",\n'
             f'  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],\n'

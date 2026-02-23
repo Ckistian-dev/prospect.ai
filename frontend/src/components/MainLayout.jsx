@@ -15,7 +15,6 @@ const MainLayout = () => {
         const response = await api.get('/auth/me');
         setIsSuperUser(response.data.is_superuser || response.data.is_admin);
       } catch (error) {
-        console.error("Erro ao buscar dados do usuário:", error);
         localStorage.removeItem('accessToken');
         navigate('/login');
       } finally {

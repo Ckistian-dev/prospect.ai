@@ -1,4 +1,4 @@
-from sqlalchemy import ( Column, Integer, String, ForeignKey, Text, DateTime, func, ARRAY, Time )
+from sqlalchemy import ( Column, Integer, String, ForeignKey, Text, DateTime, func, ARRAY, Time, Boolean )
 from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
 from typing import List, Optional
@@ -16,12 +16,6 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    instance_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    
-    # --- NOVO CAMPO ADICIONADO ---
-    # Armazena o UUID da instância da Evolution API, obtido na conexão.
-    instance_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
-    google_credentials: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     tokens: Mapped[int] = mapped_column(Integer, default=0)
     spreadsheet_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -30,6 +24,25 @@ class User(Base):
     configs: Mapped[List["Config"]] = relationship(back_populates="owner")
     prospects: Mapped[List["Prospect"]] = relationship(back_populates="owner")
     contacts: Mapped[List["Contact"]] = relationship(back_populates="owner")
+    whatsapp_instances: Mapped[List["WhatsappInstance"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
+
+class WhatsappInstance(Base):
+    """Modelo de Instância do WhatsApp."""
+    __tablename__ = "whatsapp_instances"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    name: Mapped[str] = mapped_column(String(100))
+    instance_name: Mapped[str] = mapped_column(String(100), unique=True)
+    instance_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    google_credentials: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    interval_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    last_message_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    owner: Mapped["User"] = relationship(back_populates="whatsapp_instances")
+    prospect_contacts: Mapped[List["ProspectContact"]] = relationship(back_populates="whatsapp_instance")
 
 class Contact(Base):
     """Modelo de Contato."""
@@ -89,6 +102,10 @@ class Prospect(Base):
     initial_message_interval_seconds = Column(Integer, default=90, nullable=False)
     horario_inicio = Column(Time, nullable=True)
     horario_fim = Column(Time, nullable=True)
+    notification_number = Column(String, nullable=True)
+    notification_instance_id = Column(Integer, ForeignKey("whatsapp_instances.id"), nullable=True)
+    whatsapp_instance_ids: Mapped[Optional[List[int]]] = mapped_column(JSONB, nullable=True)
+    categorias: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
     
     owner = relationship("User", back_populates="prospects")
     config = relationship("Config")
@@ -107,6 +124,9 @@ class ProspectContact(Base):
     token_usage: Mapped[int] = mapped_column(Integer, default=0, comment="Total de tokens consumidos nesta conversa")
     lead_score: Mapped[int] = mapped_column(Integer, default=0, comment="Pontuação do lead (0-10)")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    last_notification_message_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    whatsapp_instance_id: Mapped[Optional[int]] = mapped_column(ForeignKey("whatsapp_instances.id"), nullable=True)
     
     prospect = relationship("Prospect", back_populates="contacts")
     contact = relationship("Contact")
+    whatsapp_instance = relationship("WhatsappInstance", back_populates="prospect_contacts")

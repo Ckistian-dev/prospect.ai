@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axiosConfig';
-import { Plus, Play, Pause, Trash2, MoreVertical, Edit, Loader2, MessageSquare, Clock, AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from 'lucide-react';
+import { Plus, Play, Pause, Trash2, Edit, Loader2, MessageSquare, Clock, AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from 'lucide-react';
+import toast from 'react-hot-toast';
 import CreateProspectingModal from '../components/prospecting/CreateProspectingModal';
-import { ConversationModal, EditContactModal } from './Prospects'; // Reutilizando os modais
+import { ConversationModal, EditContactModal, DeleteConfirmationModal } from './Prospects'; // Reutilizando os modais
 
 // --- Componentes Internos ---
 const CampaignSkeleton = () => (
@@ -27,6 +28,7 @@ const ActivityLogTable = ({ logData, onOpenConversation, onOpenEditContact, isLo
         'Aguardando Início': "bg-purple-100 text-purple-800",
         'Conversa Manual': "bg-orange-100 text-orange-800",
         'Fechado': "bg-emerald-100 text-emerald-800",
+        'Atendente Chamado': "bg-orange-500 text-white",
     };
     return `${baseClasses} ${statusMap[status] || 'bg-gray-100 text-gray-600'}`;
   };
@@ -92,13 +94,11 @@ function MainProspecting() {
   const [editingProspect, setEditingProspect] = useState(null);
   const logIntervalRef = useRef(null);
   const campaignsIntervalRef = useRef(null);
-
-  const [openMenuId, setOpenMenuId] = useState(null);
-  const menuRef = useRef(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState({ isOpen: false, prospect: null });
 
   // Estado unificado para modais
   const [modal, setModal] = useState({ type: null, data: null });
-  const statusOptions = ["Aguardando Início", "Aguardando Resposta", "Resposta Recebida", "Lead Qualificado", "Não Interessado", "Concluído", "Sem Whatsapp", "Falha no Envio", "Erro IA", "Conversa Manual", "Fechado"];
+  const statusOptions = ["Aguardando Início", "Aguardando Resposta", "Resposta Recebida", "Lead Qualificado", "Não Interessado", "Concluído", "Sem Whatsapp", "Falha no Envio", "Erro IA", "Conversa Manual", "Fechado", "Atendente Chamado"];
 
   // --- Estado da Paginação ---
   const [currentPage, setCurrentPage] = useState(1);
@@ -141,7 +141,6 @@ function MainProspecting() {
       // O status da campanha será atualizado ao buscar a lista de prospecções
       // ou ao selecionar uma nova campanha.
     } catch (error) {
-      console.error("Erro ao buscar log:", error);
       stopLogPolling();
     } finally {
       if (!isSilent) {
@@ -160,7 +159,6 @@ function MainProspecting() {
       setProspects(prospectsData);
       return prospectsData;
     } catch (error) {
-      console.error("Erro ao buscar prospecções:", error);
       return [];
     } finally {
       if (!isSilent) {
@@ -240,18 +238,6 @@ function MainProspecting() {
     }
   }, [log.status, selectedProspect]);*/
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
-        setOpenMenuId(null);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
-
   const handleStart = async () => {
     if (!selectedProspect) return;
     setActionLoading(prev => ({ ...prev, start: true }));
@@ -259,7 +245,7 @@ function MainProspecting() {
       await api.post(`/prospecting/${selectedProspect.id}/start`);
       await fetchProspects(true); 
     } catch (error) {
-      alert(`Erro ao iniciar: ${error.response?.data?.detail || 'Erro desconhecido'}`);
+      toast.error(`Erro ao iniciar: ${error.response?.data?.detail || 'Erro desconhecido'}`);
     } finally {
       setActionLoading(prev => ({ ...prev, start: false }));
     }
@@ -272,27 +258,31 @@ function MainProspecting() {
       await api.post(`/prospecting/${selectedProspect.id}/stop`);
       await fetchProspects(true);
     } catch (error) {
-      alert(`Erro ao parar: ${error.response?.data?.detail || 'Erro desconhecido'}`);
+      toast.error(`Erro ao parar: ${error.response?.data?.detail || 'Erro desconhecido'}`);
     } finally {
       setActionLoading(prev => ({ ...prev, stop: false }));
     }
   };
   
-  const handleDelete = async () => {
+  const handleDeleteClick = () => {
     if (!selectedProspect) return;
-    const isConfirmed = window.confirm(`Tem certeza que deseja excluir a campanha "${selectedProspect.nome_prospeccao}"? Esta ação não pode ser desfeita.`);
-    if (isConfirmed) {
-      setActionLoading(prev => ({ ...prev, delete: true }));
-      try {
-        await api.delete(`/prospecting/${selectedProspect.id}`);
-        const updatedProspects = prospects.filter(p => p.id !== selectedProspect.id);
-        setProspects(updatedProspects);
-        // Selection logic handled by useEffect [prospects]
-      } catch (error) {
-        alert(`Erro ao excluir: ${error.response?.data?.detail || 'Erro desconhecido'}`);
-      } finally {
-        setActionLoading(prev => ({ ...prev, delete: false }));
-      }
+    setDeleteConfirmation({ isOpen: true, prospect: selectedProspect });
+  };
+
+  const confirmDelete = async () => {
+    const prospect = deleteConfirmation.prospect;
+    if (!prospect) return;
+    setActionLoading(prev => ({ ...prev, delete: true }));
+    try {
+      await api.delete(`/prospecting/${prospect.id}`);
+      const updatedProspects = prospects.filter(p => p.id !== prospect.id);
+      setProspects(updatedProspects);
+      toast.success('Campanha excluída com sucesso!');
+    } catch (error) {
+      toast.error(`Erro ao excluir: ${error.response?.data?.detail || 'Erro desconhecido'}`);
+    } finally {
+      setActionLoading(prev => ({ ...prev, delete: false }));
+      setDeleteConfirmation({ isOpen: false, prospect: null });
     }
   };
 
@@ -309,7 +299,7 @@ function MainProspecting() {
 
   const handleOpenEditModal = (prospect) => {
     if (prospect.status === 'Em Andamento') {
-      alert('Pare a campanha antes de editá-la.');
+      toast.error('Pare a campanha antes de editá-la.');
       return;
     }
     setEditingProspect(prospect);
@@ -340,8 +330,9 @@ function MainProspecting() {
       await api.put(`/prospecting/contacts/${contactId}`, updates);
       setModal({ type: null, data: null });
       fetchActivityLog(selectedProspect.id, true); // Atualiza o log silenciosamente
+      toast.success('Contato atualizado com sucesso!');
     } catch (err) {
-      alert('Erro ao salvar as alterações do contato.');
+      toast.error('Erro ao salvar as alterações do contato.');
     }
   };
 
@@ -398,32 +389,13 @@ function MainProspecting() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setOpenMenuId(openMenuId === p.id ? null : p.id);
+                          handleOpenEditModal(p);
                         }}
-                        className={`p-1 rounded-full transition-colors ${selectedProspect?.id === p.id ? 'hover:bg-white/20' : 'hover:bg-gray-200'}`}
-                        title="Opções"
+                        className={`p-2 rounded-full transition-colors ${selectedProspect?.id === p.id ? 'hover:bg-white/20' : 'hover:bg-gray-200'}`}
+                        title="Editar Campanha"
                       >
-                        <MoreVertical size={20} />
+                        <Edit size={20} />
                       </button>
-                      
-                      {openMenuId === p.id && (
-                        <div ref={menuRef} className="absolute right-0 top-full mt-2 z-20 w-48 bg-white rounded-md shadow-lg border animate-in fade-in-5">
-                          <ul className="py-1">
-                            <li>
-                              <button
-                                onClick={() => {
-                                  handleOpenEditModal(p);
-                                  setOpenMenuId(null);
-                                }}
-                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2 disabled:text-gray-400"
-                                disabled={p.status === 'Em Andamento'}
-                              >
-                                <Edit size={14} /> Editar Campanha
-                              </button>
-                            </li>
-                          </ul>
-                        </div>
-                      )}
                     </div>
                   </li>
                 ))
@@ -446,7 +418,7 @@ function MainProspecting() {
                     {actionLoading.stop ? 'Parando...' : 'Parar'}
                   </button>
                 </div>
-                <button onClick={handleDelete} disabled={isAnyActionLoading || isRunning || loadingStates.log} className="w-full flex items-center justify-center gap-2 bg-red-600 text-white font-semibold py-2 rounded-lg shadow-md hover:bg-red-700 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
+                <button onClick={handleDeleteClick} disabled={isAnyActionLoading || isRunning || loadingStates.log} className="w-full flex items-center justify-center gap-2 bg-red-600 text-white font-semibold py-2 rounded-lg shadow-md hover:bg-red-700 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
                   {actionLoading.delete ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16}/>}
                   {actionLoading.delete ? 'Excluindo...' : 'Excluir Campanha'}
                 </button>
@@ -515,6 +487,15 @@ function MainProspecting() {
           onClose={() => setModal({ type: null, data: null })}
         />
       )}
+
+            {deleteConfirmation.isOpen && (
+                <DeleteConfirmationModal
+                    title="Excluir Campanha"
+                    message={`Tem certeza que deseja excluir a campanha "<strong>${deleteConfirmation.prospect?.nome_prospeccao}</strong>"? Esta ação não pode ser desfeita.`}
+                    onConfirm={confirmDelete}
+                    onClose={() => setDeleteConfirmation({ isOpen: false, prospect: null })}
+                />
+            )}
     </div>
   );
 }

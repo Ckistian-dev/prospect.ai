@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import api from '../api/axiosConfig';
 import {
     Plus, Save, Trash2, FileText, ChevronRight, Loader2,
-    Link as LinkIcon, Folder, Copy, Share2, Database, ExternalLink
+    Link as LinkIcon, Folder, Copy, Share2, Database, ExternalLink, AlertTriangle
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 // --- CONFIGURAÇÃO ---
 // Substitua pelo client_email do seu JSON de credenciais do service account
@@ -16,6 +17,30 @@ const initialFormData = {
   drive_id: ''
 };
 
+const Modal = ({ onClose, children }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm animate-fade-in" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 animate-fade-in-up" onClick={e => e.stopPropagation()}>
+          {children}
+      </div>
+  </div>
+);
+
+const DeleteConfirmationModal = ({ onClose, onConfirm }) => (
+  <Modal onClose={onClose}>
+      <div className="p-6 text-center">
+          <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
+              <AlertTriangle className="h-6 w-6 text-red-600" aria-hidden="true" />
+          </div>
+          <h3 className="mt-4 text-lg font-semibold text-gray-900">Excluir Configuração</h3>
+          <p className="mt-2 text-sm text-gray-500">Tem certeza que deseja excluir esta configuração?</p>
+          <div className="mt-6 flex justify-center gap-4">
+              <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition">Cancelar</button>
+              <button onClick={onConfirm} className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition">Sim, Excluir</button>
+          </div>
+      </div>
+  </Modal>
+);
+
 function Configs() {
   const [configs, setConfigs] = useState([]);
   const [selectedConfig, setSelectedConfig] = useState(null);
@@ -25,6 +50,7 @@ function Configs() {
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState({ isOpen: false, configId: null });
 
   const [activeTab, setActiveTab] = useState('system'); // 'system', 'rag', 'drive'
 
@@ -101,34 +127,41 @@ function Configs() {
       }
       await fetchData();
       handleSelectConfig(updatedConfig);
+      toast.success('Configuração salva com sucesso!');
     } catch (err) {
-      setError('Erro ao salvar. Verifique os campos.');
+      toast.error('Erro ao salvar. Verifique os campos.');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('Tem certeza que deseja excluir esta configuração?')) {
-      try {
-        await api.delete(`/configs/${id}`);
-        await fetchData();
-        handleNewConfig();
-      } catch (err) {
-        setError('Erro ao excluir. Esta configuração pode estar em uso.');
-      }
+  const handleDeleteClick = (id) => {
+    setDeleteConfirmation({ isOpen: true, configId: id });
+  };
+
+  const confirmDelete = async () => {
+    const { configId } = deleteConfirmation;
+    try {
+      await api.delete(`/configs/${configId}`);
+      await fetchData();
+      handleNewConfig();
+      toast.success('Configuração excluída com sucesso!');
+    } catch (err) {
+      toast.error('Erro ao excluir. Esta configuração pode estar em uso.');
+    } finally {
+      setDeleteConfirmation({ isOpen: false, configId: null });
     }
   };
 
   const handleCopyEmail = () => {
     navigator.clipboard.writeText(BOT_EMAIL);
-    alert("Email copiado para a área de transferência!");
+    toast.success("Email copiado para a área de transferência!");
   };
 
   const handleSyncSheet = async (type) => {
-    if (!selectedConfig) return alert("Salve a configuração antes de sincronizar.");
+    if (!selectedConfig) return toast.error("Salve a configuração antes de sincronizar.");
     const targetId = type === 'rag' ? formData.spreadsheet_rag_id : formData.spreadsheet_id;
-    if (!targetId) return alert("Insira o ID ou Link da planilha.");
+    if (!targetId) return toast.error("Insira o ID ou Link da planilha.");
 
     setIsSyncing(true);
     setError('');
@@ -136,26 +169,26 @@ function Configs() {
       const payload = { config_id: selectedConfig.id, spreadsheet_id: targetId, type };
       const response = await api.post('/configs/sync_sheet', payload);
       
-      alert(`Sucesso! ${response.data.sheets_found.length} abas processadas (${type.toUpperCase()}).\nVetores criados: ${response.data.vectors_created}`);
+      toast.success(`Sucesso! ${response.data.sheets_found.length} abas processadas (${type.toUpperCase()}). Vetores criados: ${response.data.vectors_created}`);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Falha ao sincronizar. Verifique se compartilhou a planilha com o e-mail do robô.');
+      toast.error(err.response?.data?.detail || 'Falha ao sincronizar. Verifique se compartilhou a planilha com o e-mail do robô.');
     } finally {
       setIsSyncing(false);
     }
   };
 
   const handleSyncDrive = async () => {
-    if (!selectedConfig) return alert("Salve a configuração antes de sincronizar.");
-    if (!formData.drive_id) return alert("Insira o ID da pasta do Drive.");
+    if (!selectedConfig) return toast.error("Salve a configuração antes de sincronizar.");
+    if (!formData.drive_id) return toast.error("Insira o ID da pasta do Drive.");
 
     setIsSyncing(true);
     setError('');
     try {
       const payload = { config_id: selectedConfig.id, drive_id: formData.drive_id };
       const response = await api.post('/configs/sync_drive', payload);
-      alert(`Sucesso! ${response.data.files_count} arquivos encontrados.\nVetores criados: ${response.data.vectors_created}`);
+      toast.success(`Sucesso! ${response.data.files_count} arquivos encontrados. Vetores criados: ${response.data.vectors_created}`);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Falha ao sincronizar Drive. Verifique o ID e o compartilhamento.');
+      toast.error(err.response?.data?.detail || 'Falha ao sincronizar Drive. Verifique o ID e o compartilhamento.');
     } finally {
       setIsSyncing(false);
     }
@@ -314,7 +347,7 @@ function Configs() {
             </div>
 
             <div className="flex justify-end items-center gap-4 pt-6 mt-auto">
-              {selectedConfig && (<button type="button" onClick={() => handleDelete(selectedConfig.id)} className="font-semibold text-red-600 hover:text-red-800 flex items-center gap-2 mr-auto mb-6"><Trash2 size={16} /> Excluir</button>)}
+              {selectedConfig && (<button type="button" onClick={() => handleDeleteClick(selectedConfig.id)} className="font-semibold text-red-600 hover:text-red-800 flex items-center gap-2 mr-auto mb-6"><Trash2 size={16} /> Excluir</button>)}
               <button type="submit" disabled={isSaving} className="flex items-center gap-2 bg-brand-green text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-brand-green-dark transition-all disabled:bg-gray-400 disabled:shadow-none mb-6">
                 {isSaving ? <><Loader2 className="animate-spin" size={20} /> Salvando...</> : <><Save size={20} /> Salvar</>}
               </button>
@@ -322,6 +355,9 @@ function Configs() {
           </form>
         </div>
       </div>
+      {deleteConfirmation.isOpen && (
+        <DeleteConfirmationModal onClose={() => setDeleteConfirmation({ isOpen: false, configId: null })} onConfirm={confirmDelete} />
+      )}
     </div>
   );
 }

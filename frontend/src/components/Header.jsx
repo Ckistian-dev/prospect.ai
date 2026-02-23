@@ -98,7 +98,6 @@ const Header = ({ isSuperUser }) => {
       });
 
     } catch (err) {
-      console.error("Erro ao buscar dados do header:", err);
       setError(true);
     }
   }, [isSuperUser]);
@@ -168,7 +167,7 @@ const Header = ({ isSuperUser }) => {
         <div className="w-full flex justify-between items-center">
             {/* Lado Esquerdo */}
             <div className="flex items-center gap-4 sm:gap-5">
-                <style jsx global>{`
+                <style>{`
                     .activity-ticker-wrapper {
                         position: relative;
                         height: 34px;

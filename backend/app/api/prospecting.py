@@ -2,8 +2,11 @@ import asyncio
 import json
 import logging
 import re
+import csv
+import io
 from typing import Dict, List, Any, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 
@@ -119,11 +122,20 @@ async def _synchronize_and_process_history(
     persona_config: models.Config,
     whatsapp_service: WhatsAppService,
     gemini_service: GeminiService,
-    mode: str = None
+    mode: str = None,
+    whatsapp_instance: Optional[models.WhatsappInstance] = None
 ) -> List[Dict[str, Any]]:
     
-    if not user.instance_id:
-        logger.warning(f"Usuário {user.id} não possui um instance_id configurado. Não é possível buscar o histórico.")
+    # Prioriza a instância passada como argumento
+    if not whatsapp_instance:
+        whatsapp_instance = prospect_contact.whatsapp_instance
+        
+    # Se ainda for None, tenta carregar pelo ID (caso não tenha sido feito eager load)
+    if not whatsapp_instance and prospect_contact.whatsapp_instance_id:
+        whatsapp_instance = await db.get(models.WhatsappInstance, prospect_contact.whatsapp_instance_id)
+
+    if not whatsapp_instance or not whatsapp_instance.instance_id:
+        logger.warning(f"Contato {prospect_contact.id} não possui instância WhatsApp associada ou configurada.")
         # Retorna o histórico do DB para não perder o que já existe
         return json.loads(prospect_contact.conversa) if prospect_contact.conversa else []
 
@@ -150,14 +162,14 @@ async def _synchronize_and_process_history(
         # Tenta buscar na API
         logger.info(f"JIDs não encontrados para o contato {contact_details.whatsapp}. Verificando na API...")
         try:
-            check_result = await whatsapp_service.check_whatsapp_numbers(user.instance_name, [contact_details.whatsapp])
+            check_result = await whatsapp_service.check_whatsapp_numbers(whatsapp_instance.instance_name, [contact_details.whatsapp])
             if check_result and isinstance(check_result, list) and len(check_result) > 0:
                 first_result = check_result[0]
                 if first_result.get("exists"):
                     found_jid = first_result.get("jid")
                     
                     # Busca jidOptions no banco da Evolution usando o JID encontrado
-                    db_jid_options = await whatsapp_service.get_jid_options_from_db(user.instance_name, found_jid)
+                    db_jid_options = await whatsapp_service.get_jid_options_from_db(whatsapp_instance.instance_name, found_jid)
                     
                     if db_jid_options:
                         # Converte a lista de dicts para string CSV
@@ -180,11 +192,12 @@ async def _synchronize_and_process_history(
 
     # CORREÇÃO: A rota findMessages da Evolution usa o NOME da instância, não o ID.
     raw_history_api = await whatsapp_service.fetch_chat_history(
-        user.instance_name, 
-        contact_details.whatsapp, 
+        instance_name=whatsapp_instance.instance_name, 
+        number=contact_details.whatsapp, 
         count=999, 
         mode=None,
-        jids=target_jids
+        jids=target_jids,
+        evolution_instance_id=whatsapp_instance.instance_id
     )
 
     if not raw_history_api:
@@ -201,7 +214,7 @@ async def _synchronize_and_process_history(
         # Itera do mais recente para o mais antigo
         for msg in reversed(ai_messages):
             content = msg.get('content')
-            found_jid = await whatsapp_service.find_lid_by_message_content(user.instance_name, content)
+            found_jid = await whatsapp_service.find_lid_by_message_content(whatsapp_instance.instance_name, content)
             if found_jid:
                 lid_found = found_jid
                 logger.info(f"Fallback LID: Encontrado {lid_found} através da mensagem '{content[:20]}...'")
@@ -228,11 +241,12 @@ async def _synchronize_and_process_history(
                 
                 logger.info(f"Tentando buscar histórico novamente com novo LID {lid_found}...")
                 raw_history_api = await whatsapp_service.fetch_chat_history(
-                    user.instance_name, 
-                    contact_details.whatsapp, 
+                    instance_name=whatsapp_instance.instance_name, 
+                    number=contact_details.whatsapp, 
                     count=999, 
                     mode=None,
-                    jids=target_jids
+                    jids=target_jids,
+                    evolution_instance_id=whatsapp_instance.instance_id
                 )
 
     if not raw_history_api:
@@ -262,7 +276,7 @@ async def _synchronize_and_process_history(
             current_context_history = clean_db_history + newly_processed_messages # A lista `newly_processed_messages` cresce a cada iteração.
             
             processed_msg, tokens_used = await _process_raw_message(
-                raw_msg, current_context_history, user.instance_name, persona_config, whatsapp_service, gemini_service, db, user
+                raw_msg, current_context_history, whatsapp_instance.instance_name, persona_config, whatsapp_service, gemini_service, db, user
             )
             if processed_msg: 
                 newly_processed_messages.append(processed_msg)
@@ -287,17 +301,61 @@ async def _synchronize_and_process_history(
         clean_db_history.sort(key=_get_sort_key)
         return clean_db_history
 
-@router.get("/messages/{message_id}/media", summary="Obter mídia de uma mensagem")
+@router.get("/whatsapp/destinations/{instance_id}", summary="Listar contatos e grupos do WhatsApp para notificação")
+async def list_whatsapp_destinations(
+    instance_id: int,
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
+    db: AsyncSession = Depends(get_db)
+):
+    instance = await crud_user.get_whatsapp_instance(db, instance_id, current_user.id)
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instância não encontrada.")
+    
+    if not instance.instance_name:
+        return []
+    
+    # Busca contatos e grupos em paralelo
+    contacts_task = whatsapp_service.find_contacts(instance.instance_name)
+    groups_task = whatsapp_service.fetch_all_groups(instance.instance_name)
+    
+    results = await asyncio.gather(contacts_task, groups_task, return_exceptions=True)
+    
+    contacts = results[0] if isinstance(results[0], list) else []
+    groups = results[1] if isinstance(results[1], list) else []
+    
+    formatted_destinations = []
+    
+    for c in contacts:
+        jid = c.get("id")
+        name = c.get("name") or c.get("pushName") or c.get("verifiedName") or jid
+        if jid:
+            formatted_destinations.append({"id": jid, "name": name, "type": "contact"})
+            
+    for g in groups:
+        jid = g.get("id")
+        subject = g.get("subject") or "Grupo sem nome"
+        if jid:
+            formatted_destinations.append({"id": jid, "name": subject, "type": "group"})
+            
+    return formatted_destinations
+
+@router.get("/messages/{message_id}/media/{instance_id}", summary="Obter mídia de uma mensagem")
 async def get_message_media(
     message_id: str,
+    instance_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(dependencies.get_current_active_user)
 ):
     whatsapp = get_whatsapp_service()
-    if not current_user.instance_name:
-        raise HTTPException(status_code=400, detail="Usuário sem instância configurada.")
     
-    base64_data = await whatsapp.get_media_by_message_id(current_user.instance_name, message_id)
+    instance = await crud_user.get_whatsapp_instance(db, instance_id, current_user.id)
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instância não encontrada.")
+    if not instance.instance_name:
+        raise HTTPException(status_code=400, detail="Instância sem nome configurado.")
+    
+    base64_data = await whatsapp.get_media_by_message_id(instance.instance_name, message_id)
     if not base64_data:
         raise HTTPException(status_code=404, detail="Mídia não encontrada ou expirada.")
     return {"base64": base64_data}
@@ -408,6 +466,61 @@ async def get_prospecting_sheet_data(prospect_id: int, db: AsyncSession = Depend
         })
     return {"headers": headers, "data": data_rows, "prospect_name": prospect.nome_prospeccao}
 
+@router.get("/{prospect_id}/export/csv", summary="Exportar dados da campanha para CSV")
+async def export_prospect_csv(
+    prospect_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user)
+):
+    prospect = await crud_prospect.get_prospect(db, prospect_id=prospect_id, user_id=current_user.id)
+    if not prospect:
+        raise HTTPException(status_code=404, detail="Campanha não encontrada.")
+
+    contacts_data = await crud_prospect.get_prospect_contacts_with_details(db, prospect_id=prospect_id)
+    
+    output = io.StringIO()
+    # Usando ponto e vírgula para melhor compatibilidade com Excel em PT-BR
+    writer = csv.writer(output, delimiter=';')
+    writer.writerow(["ID", "Nome", "WhatsApp", "Situação", "Lead Score", "Observações", "Conversa"])
+
+    for item in contacts_data:
+        pc = item.ProspectContact
+        contact = item.Contact
+        
+        # Formata a conversa para um layout amigável
+        formatted_conversa = ""
+        try:
+            conversa_json = json.loads(pc.conversa) if pc.conversa else []
+            lines = []
+            for msg in conversa_json:
+                role = "IA" if msg.get("role") == "assistant" else "Contato"
+                content = msg.get("content", "")
+                timestamp_str = ""
+                if msg.get("timestamp"):
+                    try:
+                        dt = datetime.fromisoformat(msg["timestamp"].replace('Z', '+00:00'))
+                        timestamp_str = dt.strftime("%d/%m/%Y %H:%M")
+                    except Exception:
+                        timestamp_str = msg["timestamp"]
+                
+                prefix = f"[{timestamp_str}] " if timestamp_str else ""
+                lines.append(f"{prefix}{role}: {content}")
+            
+            formatted_conversa = "\n".join(lines)
+        except Exception:
+            formatted_conversa = pc.conversa
+
+        writer.writerow([pc.id, contact.nome, contact.whatsapp, pc.situacao, pc.lead_score or 0, pc.observacoes or "", formatted_conversa])
+
+    output.seek(0)
+    # utf-8-sig adiciona o BOM para o Excel reconhecer a codificação automaticamente
+    content = output.getvalue().encode('utf-8-sig')
+    filename = f"prospeccao_{prospect.nome_prospeccao.replace(' ', '_')}.csv"
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 @router.put("/contacts/{prospect_contact_id}", summary="Atualizar um contato em uma prospecção")
 async def update_prospect_contact_details(

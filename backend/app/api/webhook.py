@@ -38,19 +38,19 @@ async def process_webhook_message(data: dict):
         normalized_contact_number = _normalize_number(contact_number)
         
         async with SessionLocal() as db:
-            user = await crud_user.get_user_by_instance(db, instance_name=instance_name)
-            if not user:
-                logger.warning(f"Webhook: Usuário não encontrado para a instância {instance_name}")
+            instance = await crud_user.get_whatsapp_instance_by_name(db, instance_name)
+            if not instance:
+                logger.warning(f"Webhook: Instância não encontrada no banco: {instance_name}")
                 return
 
-            prospect_info = await crud_prospect.find_prospect_contact_by_number(db, user_id=user.id, number=normalized_contact_number)
+            prospect_info = await crud_prospect.find_prospect_contact_by_number(db, user_id=instance.user_id, number=normalized_contact_number)
             if not prospect_info:
-                logger.info(f"Webhook: Contato {normalized_contact_number} não encontrado em nenhuma prospecção para o usuário {user.id}.")
+                logger.info(f"Webhook: Contato {normalized_contact_number} não encontrado em nenhuma prospecção para o usuário {instance.user_id}.")
                 return
             
             _contact, prospect_contact, prospect = prospect_info
 
-            situacoes_de_parada = ["Não Interessado", "Concluído", "Falha no Envio", "Conversa Manual", "Fechado"]
+            situacoes_de_parada = ["Não Interessado", "Concluído", "Falha no Envio", "Conversa Manual", "Fechado", "Atendente Chamado"]
             if prospect_contact.situacao in situacoes_de_parada:
                 logger.info(f"Webhook: Contato {contact_number} encontrado, mas em situação terminal ({prospect_contact.situacao}). Ignorando.")
                 return
@@ -64,6 +64,16 @@ async def process_webhook_message(data: dict):
     except Exception as e:
         logger.error(f"Erro ao processar mensagem no webhook: {e}", exc_info=True)
 
+async def process_connection_open(instance_name: str):
+    """Processa evento de conexão aberta para verificar mensagens perdidas."""
+    from app.services.whatsapp_service import get_whatsapp_service
+    
+    async with SessionLocal() as db:
+        instance = await crud_user.get_whatsapp_instance_by_name(db, instance_name)
+        if instance:
+            whatsapp_service = get_whatsapp_service()
+            await whatsapp_service.check_prospect_messages(db, instance.owner)
+
 @router.post("", summary="Receber eventos de webhook da Evolution API")
 async def receive_evolution_webhook(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -76,12 +86,19 @@ async def receive_evolution_webhook(request: Request, background_tasks: Backgrou
             not data.get("data", {}).get("key", {}).get("fromMe", False)
         )
 
-        # is_connection_update = event == "connection.update" # Opcional: processar conexão se necessário
+        is_connection_update = event == "connection.update"
 
         if is_new_message:
             # Processa diretamente em background
             background_tasks.add_task(process_webhook_message, data)
             return {"status": "processing"}
+        
+        if is_connection_update:
+            state = data.get("data", {}).get("state")
+            if state == "open":
+                instance_name = data.get("instance")
+                background_tasks.add_task(process_connection_open, instance_name)
+                return {"status": "connection_checked"}
 
         return {"status": "event_ignored"}
     except Exception as e:

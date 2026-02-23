@@ -35,7 +35,7 @@ async def create_prospect(db: AsyncSession, prospect_in: ProspectCreate, user_id
     db_prospect = models.Prospect(
         **prospect_in.model_dump(exclude={"contact_ids"}),
         user_id=user_id,
-        status="Pendente"
+        status="Pendente",
     )
     db.add(db_prospect)
     await db.commit()
@@ -133,7 +133,8 @@ async def get_prospects_para_processar(db: AsyncSession, prospect: models.Prospe
             "Resposta Recebida", # Já tratado pela primeira query (maior prioridade)
             "Aguardando Início",   # Já tratado pela última query (menor prioridade)
             "Conversa Manual",
-            "Fechado"
+            "Fechado",
+            "Atendente Chamado"
         ]
 
         followup_query = (
@@ -190,7 +191,7 @@ async def delete_prospect_contact(db: AsyncSession, prospect_contact_to_delete: 
     await db.delete(prospect_contact_to_delete)
     await db.commit()
 
-async def update_prospect_contact(db: AsyncSession, pc_id: int, situacao: str, conversa: Optional[str] = None, observacoes: Optional[str] = None, tokens_to_add: Optional[int] = None, lead_score: Optional[int] = None, jid_options: Optional[str] = None):
+async def update_prospect_contact(db: AsyncSession, pc_id: int, situacao: str, conversa: Optional[str] = None, observacoes: Optional[str] = None, tokens_to_add: Optional[int] = None, lead_score: Optional[int] = None, jid_options: Optional[str] = None, last_notification_message_id: Optional[str] = None):
     """Atualiza os dados de um único contato dentro de uma prospecção."""
     prospect_contact = await db.get(models.ProspectContact, pc_id)
     if prospect_contact:
@@ -199,6 +200,7 @@ async def update_prospect_contact(db: AsyncSession, pc_id: int, situacao: str, c
         if observacoes is not None: prospect_contact.observacoes = observacoes
         if lead_score is not None: prospect_contact.lead_score = lead_score
         if jid_options is not None: prospect_contact.jid_options = jid_options
+        if last_notification_message_id is not None: prospect_contact.last_notification_message_id = last_notification_message_id
         if tokens_to_add and tokens_to_add > 0:
             prospect_contact.token_usage = (prospect_contact.token_usage or 0) + tokens_to_add
         prospect_contact.updated_at = datetime.now(timezone.utc)
@@ -262,7 +264,7 @@ async def find_prospect_contact_by_number(db: AsyncSession, user_id: int, number
     rows = result.all()
 
     # Prioriza encontrar um contato que esteja em uma campanha ativa (não finalizada)
-    situacoes_de_parada = ["Não Interessado", "Concluído", "Falha no Envio", "Conversa Manual", "Fechado"]
+    situacoes_de_parada = ["Não Interessado", "Concluído", "Falha no Envio", "Conversa Manual", "Fechado", "Atendente Chamado"]
     
     for row in rows:
         _contact, prospect_contact, _prospect = row
@@ -278,7 +280,10 @@ async def get_prospect_contacts_with_details(db: AsyncSession, prospect_id: int)
         select(models.ProspectContact, models.Contact)
         .join(models.Contact, models.ProspectContact.contact_id == models.Contact.id)
         .where(models.ProspectContact.prospect_id == prospect_id)
-        .options(joinedload(models.ProspectContact.contact))
+        .options(
+            joinedload(models.ProspectContact.contact),
+            joinedload(models.ProspectContact.whatsapp_instance)
+        )
         .order_by(models.ProspectContact.updated_at.desc())
     )
     return result.all()

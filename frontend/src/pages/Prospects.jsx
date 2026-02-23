@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axiosConfig';
-import { Play, Pause, Trash2, Edit, Loader2, Search, MessageSquare, ChevronDown, Table as TableIcon, AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Image as ImageIcon } from 'lucide-react';
+import { Play, Pause, Trash2, Edit, Loader2, Search, MessageSquare, ChevronDown, Table as TableIcon, AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Image as ImageIcon, Download } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 // --- COMPONENTES INTERNOS DE MODAL ---
 
@@ -52,10 +53,10 @@ const ImageMessage = ({ messageId, mimeType, fallbackContent }) => {
 
     return (
         <div className="space-y-1">
-            <img 
-                src={imageUrl} 
-                alt="Imagem da conversa" 
-                className="rounded-lg max-w-full h-auto max-h-72 object-cover" 
+            <img
+                src={imageUrl}
+                alt="Imagem da conversa"
+                className="rounded-lg max-w-full h-auto max-h-72 object-cover"
             />
         </div>
     );
@@ -77,7 +78,6 @@ export const ConversationModal = ({ onClose, conversation, contactIdentifier }) 
             messages = parsedData;
         }
     } catch (e) {
-        console.error("Erro ao analisar JSON da conversa:", e);
     }
 
     return (
@@ -91,7 +91,7 @@ export const ConversationModal = ({ onClose, conversation, contactIdentifier }) 
                         const isAssistant = msg.role === 'assistant';
                         // Detecta se é imagem pelo novo campo mediaType ou pelo padrão de texto antigo
                         const isImage = msg.mediaType === 'image' || (msg.content && msg.content.includes('[Análise de Mídia]'));
-                        
+
                         return (
                             <div key={index} className={`flex items-end gap-2 w-full ${isAssistant ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-xs md:max-w-md p-3 rounded-2xl shadow-sm break-words ${isAssistant ? 'bg-[#005c4b] text-white rounded-br-none' : 'bg-white text-gray-800 rounded-bl-none'}`}>
@@ -135,7 +135,6 @@ export const EditContactModal = ({ contact, statusOptions, onSave, onClose }) =>
         <Modal onClose={onClose}>
             <div className="p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Editar Contato</h3>
-                <p className="text-sm text-gray-500 mb-6">A alterar o contato: <strong className="text-gray-700">{contact.nome}</strong> ({contact.whatsapp})</p>
                 <div className="space-y-4">
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Situação</label>
@@ -157,7 +156,7 @@ export const EditContactModal = ({ contact, statusOptions, onSave, onClose }) =>
     );
 };
 
-const DeleteConfirmationModal = ({ title, message, onConfirm, onClose }) => (
+export const DeleteConfirmationModal = ({ title, message, onConfirm, onClose }) => (
     <Modal onClose={onClose}>
         <div className="p-6 text-center">
             <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
@@ -180,10 +179,11 @@ function Prospects() {
     const [selectedProspect, setSelectedProspect] = useState(null);
     const [contacts, setContacts] = useState([]);
     const [filteredContacts, setFilteredContacts] = useState([]);
-    
+
     const [isLoading, setIsLoading] = useState({ list: true, data: false });
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
+    const [isExporting, setIsExporting] = useState(false);
     const [minScore, setMinScore] = useState(0);
 
     // --- Estado da Paginação ---
@@ -191,8 +191,8 @@ function Prospects() {
     const contactsPerPage = 10;
 
     const [modal, setModal] = useState({ type: null, data: null });
-    
-    const statusOptions = ["Aguardando Início", "Aguardando Resposta", "Resposta Recebida", "Lead Qualificado", "Não Interessado", "Concluído", "Sem Whatsapp", "Falha no Envio", "Erro IA", "Conversa Manual", "Fechado"];
+
+    const statusOptions = ["Aguardando Início", "Aguardando Resposta", "Resposta Recebida", "Lead Qualificado", "Não Interessado", "Concluído", "Sem Whatsapp", "Falha no Envio", "Erro IA", "Conversa Manual", "Fechado", "Atendente Chamado"];
 
     const fetchProspectsList = useCallback(async (selectFirst = false) => {
         setIsLoading(prev => ({ ...prev, list: true }));
@@ -232,7 +232,7 @@ function Prospects() {
             const response = await api.get(`/prospecting/sheet/${selectedProspect.id}`);
             const enrichedData = response.data.data.map(row => ({
                 ...row,
-                contactName: row.nome 
+                contactName: row.nome
             }));
             setContacts(enrichedData || []);
             setCurrentPage(1);
@@ -243,13 +243,33 @@ function Prospects() {
             setIsLoading(prev => ({ ...prev, data: false }));
         }
     }, [selectedProspect]);
-    
+
     useEffect(() => {
         if (selectedProspect) {
             fetchProspectData(); // Busca inicial quando a campanha muda
         }
     }, [selectedProspect, fetchProspectData]);
-    
+
+    const handleExportCSV = async () => {
+        if (!selectedProspect) return;
+        setIsExporting(true);
+        try {
+            const response = await api.get(`/prospecting/${selectedProspect.id}/export/csv`, {
+                responseType: 'blob',
+            });
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `prospeccao_${selectedProspect.nome_prospeccao.replace(/\s+/g, '_')}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            link.parentNode.removeChild(link);
+        } catch (err) {
+            toast.error("Erro ao exportar os dados da campanha.");
+        } finally {
+            setIsExporting(false);
+        }
+    };
 
     useEffect(() => {
         const lowercasedFilter = searchTerm.toLowerCase();
@@ -263,14 +283,15 @@ function Prospects() {
         setFilteredContacts(filtered);
         setCurrentPage(1);
     }, [searchTerm, minScore, contacts]);
-    
+
     const handleSaveContactEdit = async (contactId, updates) => {
         try {
             await api.put(`/prospecting/contacts/${contactId}`, updates);
             setModal({ type: null, data: null });
             fetchProspectData();
+            toast.success('Contato atualizado com sucesso!');
         } catch (err) {
-            alert('Erro ao salvar as alterações do contato.');
+            toast.error('Erro ao salvar as alterações do contato.');
         }
     };
 
@@ -279,11 +300,12 @@ function Prospects() {
             await api.delete(`/prospecting/contacts/${contactId}`);
             setModal({ type: null, data: null });
             fetchProspectData();
+            toast.success('Contato removido com sucesso!');
         } catch (err) {
-            alert('Erro ao remover o contato da campanha.');
+            toast.error('Erro ao remover o contato da campanha.');
         }
     };
-    
+
     const getStatusClass = (status) => {
         const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full inline-block text-center min-w-[140px]";
         const statusMap = {
@@ -298,6 +320,7 @@ function Prospects() {
             'Aguardando Início': "bg-purple-100 text-purple-800",
             'Conversa Manual': "bg-orange-100 text-orange-800",
             'Fechado': "bg-emerald-100 text-emerald-800",
+            'Atendente Chamado': "bg-orange-500 text-white",
         };
         return `${baseClasses} ${statusMap[status] || 'bg-gray-100 text-gray-600'}`;
     };
@@ -326,8 +349,18 @@ function Prospects() {
                     <h1 className="text-3xl font-bold text-gray-800">Contatos da Prospecção</h1>
                     <p className="text-gray-500 mt-1">Gerencie os contatos de suas campanhas ativas.</p>
                 </div>
+                {selectedProspect && (
+                    <button
+                        onClick={handleExportCSV}
+                        disabled={isLoading.data || contacts.length === 0 || isExporting}
+                        className="flex items-center gap-2 bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-blue-300 shadow-md"
+                    >
+                        {isExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                        Exportar CSV
+                    </button>
+                )}
             </div>
-            
+
             <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6 items-end">
                     <div className="md:col-span-5">
@@ -361,12 +394,12 @@ function Prospects() {
                             Filtrar Contatos:
                         </label>
                         <Search className="absolute left-3 top-1/2 mt-3 -translate-y-1/2 text-gray-400" size={20} />
-                        <input 
+                        <input
                             id="search-input"
-                            type="text" 
-                            placeholder="Pesquisar por nome, telefone, situação..." 
-                            value={searchTerm} 
-                            onChange={(e) => setSearchTerm(e.target.value)} 
+                            type="text"
+                            placeholder="Pesquisar por nome, telefone, situação..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
                             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                         />
                     </div>
@@ -374,12 +407,12 @@ function Prospects() {
                         <label htmlFor="score-filter" className="block text-sm font-medium text-gray-700 mb-2">
                             Score Mín.:
                         </label>
-                        <input 
+                        <input
                             id="score-filter"
-                            type="number" 
+                            type="number"
                             min="0" max="10"
-                            value={minScore} 
-                            onChange={(e) => setMinScore(Number(e.target.value))} 
+                            value={minScore}
+                            onChange={(e) => setMinScore(Number(e.target.value))}
                             className="w-full py-2 px-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                         />
                     </div>
@@ -467,7 +500,7 @@ function Prospects() {
                     onClose={() => setModal({ type: null, data: null })}
                 />
             )}
-            
+
             {modal.type === 'delete_contact' && (
                 <DeleteConfirmationModal
                     title="Remover Contato"

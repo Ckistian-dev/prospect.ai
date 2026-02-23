@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axiosConfig';
 import Modal from '../components/Modal';
 import { Plus, Edit, Trash2, Search, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, AlertTriangle, Upload, Download, Loader2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 // --- COMPONENTE DO FORMULÁRIO ---
 function ContactForm({ contact, onSave, onCancel, apiError }) {
@@ -104,7 +105,6 @@ function Contacts() {
       setContacts(response.data);
     } catch (err) {
       setError('Não foi possível carregar os contatos. Tente recarregar a página.');
-      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -158,11 +158,10 @@ function Contacts() {
       } else {
         await api.post('/contacts/', contactData);
       }
-      setSuccess('Contato salvo com sucesso!');
+      toast.success('Contato salvo com sucesso!');
       fetchContacts();
       handleCloseModals();
     } catch (err) {
-      console.error('Erro ao salvar contato:', err);
       setFormApiError(err.response?.data?.detail || 'Não foi possível salvar. Verifique os dados e a conexão.');
     }
   };
@@ -172,11 +171,10 @@ function Contacts() {
     setSuccess('');
     try {
       await api.delete(`/contacts/${contactToDelete.id}`);
-      setSuccess('Contato excluído com sucesso!');
+      toast.success('Contato excluído com sucesso!');
       fetchContacts();
       handleCloseModals();
     } catch (err) {
-      console.error('Erro ao excluir contato:', err);
       setError('Não foi possível excluir o contato.');
       handleCloseModals();
     }
@@ -195,9 +193,9 @@ function Contacts() {
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
-      setSuccess('Contatos exportados com sucesso!');
+      toast.success('Contatos exportados com sucesso!');
     } catch (err) {
-      setError('Falha ao exportar contatos.');
+      toast.error('Falha ao exportar contatos.');
     } finally {
       setIsProcessing(false);
     }
@@ -218,10 +216,10 @@ function Contacts() {
       const response = await api.post('/contacts/import/csv', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setSuccess(response.data.message);
+      toast.success(response.data.message);
       fetchContacts();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Falha ao importar contatos.');
+      toast.error(err.response?.data?.detail || 'Falha ao importar contatos.');
     } finally {
       setIsProcessing(false);
       if (fileInputRef.current) {

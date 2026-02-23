@@ -10,7 +10,7 @@ from app.db.database import SessionLocal
 from app.db import models
 from app.db.schemas import ContactCreate
 from app.crud import crud_prospect, crud_user, crud_config, crud_contact
-from app.services.whatsapp_service import get_whatsapp_service, MessageSendError
+from app.services.whatsapp_service import get_whatsapp_service, MessageSendError, WhatsAppService
 from app.services.gemini_service import get_gemini_service
 from app.services.google_drive_service import get_drive_service
 from app.api.prospecting import _synchronize_and_process_history
@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Dicionário para rastrear o último envio de cada campanha
-last_message_sent_times = {}
+# last_message_sent_times = {} # Agora será por instância no banco
 
 async def process_active_prospects():
     """
@@ -55,8 +55,8 @@ async def process_active_prospects():
                     if not campaign: continue
 
                     user = await crud_user.get_user(db, user_id=campaign.user_id)
-                    if not user or not user.instance_name:
-                        logger.warning(f"Usuário {campaign.user_id} ou nome da instância não encontrado para a campanha {campaign.id}. Pulando.")
+                    if not user:
+                        logger.warning(f"Usuário {campaign.user_id} não encontrado para a campanha {campaign.id}. Pulando.")
                         continue
 
                     # 3. Encontra o próximo contato a ser processado para esta campanha
@@ -67,9 +67,12 @@ async def process_active_prospects():
                         continue
                     
                     pc, contact = contact_to_process
+                    original_status = pc.situacao # Captura o status original antes de mudar para 'Processando'
                     mode = "reply" if pc.situacao == "Resposta Recebida" else ("initial" if pc.situacao == "Aguardando Início" else "followup")
                     
                     logger.info(f"AGENTE WORKER: Contato selecionado: '{contact.nome}' (Campanha: {campaign.id}, Modo: {mode}).")
+                    
+                    selected_instance = None
 
                     # 4. Lógica de controle de tempo e horário (para 'initial' e 'followup')
                     if mode in ['initial', 'followup']:
@@ -79,12 +82,55 @@ async def process_active_prospects():
                                 logger.info(f"Campanha {campaign.id} fora do horário de funcionamento. Pausando verificação para esta campanha.")
                                 continue
                         
-                        interval_seconds = campaign.initial_message_interval_seconds
-                        last_sent = last_message_sent_times.get(campaign.id, datetime.min.replace(tzinfo=timezone.utc))
-                        time_since_last = (datetime.now(timezone.utc) - last_sent).total_seconds()
+                        # Seleção de Instância e Controle de Intervalo
+                        instance_ids = campaign.whatsapp_instance_ids or []
+                        if not instance_ids:
+                            logger.warning(f"Campanha {campaign.id} sem instâncias configuradas.")
+                            continue
 
-                        if time_since_last < interval_seconds:
-                            logger.info(f"Aguardando intervalo de {interval_seconds}s para a campanha {campaign.id}. Faltam {interval_seconds - time_since_last:.1f}s.")
+                        # Busca instâncias no banco
+                        stmt = select(models.WhatsappInstance).where(models.WhatsappInstance.id.in_(instance_ids), models.WhatsappInstance.is_active == True)
+                        instances_result = await db.execute(stmt)
+                        available_instances = instances_result.scalars().all()
+
+                        if not available_instances:
+                            logger.warning(f"Nenhuma instância ativa encontrada para a campanha {campaign.id}.")
+                            continue
+
+                        # Encontra uma instância que respeite o intervalo
+                        ready_instance = None
+                        for inst in available_instances:
+                            last_sent = inst.last_message_at or datetime.min.replace(tzinfo=timezone.utc)
+                            interval = inst.interval_seconds or 60
+                            time_since_last = (datetime.now(timezone.utc) - last_sent).total_seconds()
+                            
+                            if time_since_last >= interval:
+                                ready_instance = inst
+                                break
+                            else:
+                                logger.debug(f"Instância {inst.name} em cooldown. Faltam {interval - time_since_last:.1f}s")
+
+                        if not ready_instance:
+                            logger.info(f"Todas as instâncias da campanha {campaign.id} estão em intervalo. Aguardando...")
+                            continue
+                        
+                        selected_instance = ready_instance
+                    
+                    elif mode == 'reply':
+                        # Para respostas, usa a instância associada ao contato ou a primeira disponível
+                        if pc.whatsapp_instance_id:
+                            selected_instance = await db.get(models.WhatsappInstance, pc.whatsapp_instance_id)
+                        
+                        if not selected_instance:
+                             # Fallback: pega a primeira instância ativa da campanha
+                             instance_ids = campaign.whatsapp_instance_ids or []
+                             if instance_ids:
+                                 stmt = select(models.WhatsappInstance).where(models.WhatsappInstance.id == instance_ids[0])
+                                 result = await db.execute(stmt)
+                                 selected_instance = result.scalars().first()
+                        
+                        if not selected_instance:
+                            logger.error(f"Não foi possível determinar a instância para responder ao contato {contact.id}.")
                             continue
                     
                     # 5. Processamento do contato
@@ -93,11 +139,16 @@ async def process_active_prospects():
                     
                     # Atualiza o objeto pc com os dados mais recentes do banco
                     await db.refresh(pc)
+                    
+                    # Associa a instância ao contato se ainda não estiver (para 'initial')
+                    if mode == 'initial' and selected_instance:
+                        pc.whatsapp_instance_id = selected_instance.id
+                        await db.commit()
 
                     # --- VERIFICAÇÃO DE NÚMERO (NOVO) ---
                     if mode == 'initial':
                         logger.info(f"AGENTE WORKER: Verificando existência do número {contact.whatsapp} no WhatsApp...")
-                        check_result = await whatsapp_service.check_whatsapp_numbers(user.instance_name, [contact.whatsapp])
+                        check_result = await whatsapp_service.check_whatsapp_numbers(selected_instance.instance_name, [contact.whatsapp])
                         
                         if check_result is None:
                             logger.error(f"AGENTE WORKER: Erro técnico ao verificar número {contact.whatsapp}. Pausando campanha {campaign.id}.")
@@ -138,7 +189,16 @@ async def process_active_prospects():
                         await db.commit()
                         continue
 
-                    full_history = await _synchronize_and_process_history(db, pc, user, persona_config, whatsapp_service, gemini_service, mode=mode)
+                    full_history = await _synchronize_and_process_history(
+                        db=db, 
+                        prospect_contact=pc, 
+                        user=user, 
+                        persona_config=persona_config, 
+                        whatsapp_service=whatsapp_service, 
+                        gemini_service=gemini_service, 
+                        mode=mode,
+                        whatsapp_instance=selected_instance
+                    )
 
                     if mode == 'reply' and (not full_history or full_history[-1]['role'] != 'user'):
                         logger.warning(f"AGENTE WORKER: Contato {pc.id} em modo 'reply' mas a última mensagem não é do usuário. Ignorando e voltando para 'Aguardando Resposta'.")
@@ -157,10 +217,45 @@ async def process_active_prospects():
                     files_to_send = ia_response.get("arquivos_anexos", [])
                     novos_contatos = ia_response.get("novos_contatos", [])
                     ia_tokens_used = ia_response.get("token_usage", 0)
+                    new_notification_id = None
                     
                     history_after_response = full_history.copy()
                     sent_any_message = False
                     
+                    # --- NOTIFICAÇÃO DE STATUS ---
+                    if campaign.notification_number and new_status in ["Lead Qualificado", "Atendente Chamado"]:
+                        # Usa original_status pois pc.situacao agora é 'Processando'
+                        if original_status != new_status:
+                            # Determina qual instância enviará a notificação
+                            notify_instance_name = selected_instance.instance_name
+                            if campaign.notification_instance_id:
+                                # Busca a instância específica configurada para notificações
+                                notify_inst_obj = await db.get(models.WhatsappInstance, campaign.notification_instance_id)
+                                if notify_inst_obj:
+                                    notify_instance_name = notify_inst_obj.instance_name
+
+                            # Tenta apagar a notificação anterior se existir
+                            if pc.last_notification_message_id:
+                                logger.info(f"Apagando notificação antiga {pc.last_notification_message_id} para {campaign.notification_number}")
+                                await whatsapp_service.delete_message_for_everyone(notify_instance_name, campaign.notification_number, pc.last_notification_message_id)
+
+                            try:
+                                notify_msg = (
+                                    f"📢 *Atualização de Prospecção*\n\n"
+                                    f"📋 *Campanha:* {campaign.nome_prospeccao}\n"
+                                    f"👤 *Contato:* {contact.nome}\n"
+                                    f"📱 *WhatsApp:* {contact.whatsapp}\n"
+                                    f"🏷️ *Novo Status:* {new_status}\n"
+                                    f"📝 *Obs:* {new_observation or 'Sem observações'}\n"
+                                    f"⭐ *Score:* {lead_score}"
+                                )
+                                sent_notification = await whatsapp_service.send_text_message(notify_instance_name, campaign.notification_number, notify_msg)
+                                if sent_notification and 'key' in sent_notification:
+                                    new_notification_id = sent_notification['key'].get('id')
+
+                            except Exception as e:
+                                logger.error(f"AGENTE WORKER: Falha ao enviar notificação para {campaign.notification_number}: {e}")
+
                     if message_to_send and str(message_to_send).strip():
                         try:
                             # Divide a mensagem por quebras de linha para enviar separadamente
@@ -174,10 +269,10 @@ async def process_active_prospects():
                                 typing_delay = min(2 + (len(part) * 0.1), 10.0)
                                 
                                 # Envia status "Digitando..." (composing)
-                                await whatsapp_service.send_presence(user.instance_name, contact.whatsapp, "composing", delay=int(typing_delay * 1000))
+                                await whatsapp_service.send_presence(selected_instance.instance_name, contact.whatsapp, "composing", delay=int(typing_delay * 1000))
                                 await asyncio.sleep(typing_delay)
 
-                                await whatsapp_service.send_text_message(user.instance_name, contact.whatsapp, part)
+                                await whatsapp_service.send_text_message(selected_instance.instance_name, contact.whatsapp, part)
                                 logger.info(f"AGENTE WORKER: Parte da mensagem enviada para {contact.whatsapp}.")
                                 now_iso = datetime.now(timezone.utc).isoformat()
                                 pending_id = f"sent_{now_iso}_{random.randint(1000, 9999)}"
@@ -203,7 +298,7 @@ async def process_active_prospects():
                                     else: media_type = 'document'
 
                                     await whatsapp_service.send_media_message(
-                                        instance_name=user.instance_name,
+                                        instance_name=selected_instance.instance_name,
                                         number=contact.whatsapp,
                                         media=file_data['base64'],
                                         media_type=media_type,
@@ -279,7 +374,9 @@ async def process_active_prospects():
                         pending_id = f"internal_{now_iso}"
                         history_after_response.append({"id": pending_id, "role": "assistant", "content": f"[Ação Interna: Não responder - Modo: {mode}]", "timestamp": now_iso})
                     elif mode in ['initial', 'followup']:
-                        last_message_sent_times[campaign.id] = datetime.now(timezone.utc)
+                        # Atualiza o cooldown da instância
+                        selected_instance.last_message_at = datetime.now(timezone.utc)
+                        await db.commit()
 
                     # --- PAUSA AUTOMÁTICA EM CASO DE ERRO ---
                     if new_status and (str(new_status).startswith("Erro") or str(new_status).startswith("Falha")):
@@ -291,7 +388,8 @@ async def process_active_prospects():
                         conversa=json.dumps(history_after_response), 
                         observacoes=new_observation,
                         tokens_to_add=ia_tokens_used,
-                        lead_score=lead_score
+                        lead_score=lead_score,
+                        last_notification_message_id=new_notification_id
                     )
                     # O commit já é feito dentro do crud_prospect.update_prospect_contact
 

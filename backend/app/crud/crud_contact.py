@@ -55,10 +55,13 @@ async def create_contact(db: AsyncSession, contact: ContactCreate, user_id: int)
 
     # Sincronização com Google Contacts
     user = await crud_user.get_user(db, user_id=user_id)
-    if user and user.google_credentials:
-        logger.info(f"Iniciando sincronização com Google Contacts para o novo contato: {db_contact.id}")
-        google_service = GoogleContactsService(user=user)
-        google_service.create_or_update_contact(contact)
+    # Sincroniza com TODAS as instâncias conectadas do usuário
+    instances = await crud_user.get_whatsapp_instances(db, user_id)
+    for instance in instances:
+        if instance.google_credentials:
+            logger.info(f"Iniciando sincronização com Google Contacts (Instância {instance.id}) para o novo contato: {db_contact.id}")
+            google_service = GoogleContactsService(whatsapp_instance=instance)
+            await google_service.create_or_update_contact(contact)
 
     return db_contact
 
@@ -176,12 +179,13 @@ async def import_contacts_from_csv_file(file: UploadFile, db: AsyncSession, user
         created_contacts = await _create_contacts_in_db(db, contacts_to_create)
 
         # Sincronização em massa (e em paralelo) com Google Contacts
-        user = await crud_user.get_user(db, user_id=user_id)
-        if user and user.google_credentials:
-            logger.info(f"Iniciando sincronização em massa de {len(created_contacts)} contatos com o Google.")
-            google_service = GoogleContactsService(user=user)
-            # Usa o novo método de criação em lote para uma única requisição à API do Google
-            await google_service.batch_create_contacts(created_contacts)
+        instances = await crud_user.get_whatsapp_instances(db, user_id)
+        for instance in instances:
+            if instance.google_credentials:
+                logger.info(f"Iniciando sincronização em massa de {len(created_contacts)} contatos com o Google (Instância {instance.id}).")
+                google_service = GoogleContactsService(whatsapp_instance=instance)
+                # Usa o novo método de criação em lote para uma única requisição à API do Google
+                await google_service.batch_create_contacts(created_contacts)
 
         return len(created_contacts)
 

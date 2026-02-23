@@ -43,7 +43,6 @@ function Login({ setIsAuthenticated }) {
 
     } catch (err) {
       setError('Email ou senha inválidos. Tente novamente.');
-      console.error('Erro de login:', err);
     } finally {
       setLoading(false);
     }

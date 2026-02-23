@@ -6,6 +6,8 @@ from typing import Dict, Any, List, Optional
 import base64
 import asyncio
 import asyncpg
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db import models
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,35 @@ class WhatsAppService:
             if clean_number[4] == '9':
                 return clean_number[:4] + clean_number[5:]
         return clean_number
+
+    async def fetch_instance(self, instance_name: str) -> dict:
+        """
+        Busca os dados da instância na Evolution API (fetchInstances).
+        Útil para recuperar o 'owner' (número conectado).
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.api_url}/instance/fetchInstances",
+                    headers=self.headers,
+                    params={"instanceName": instance_name},
+                    timeout=10.0
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                print(data)
+
+                # A resposta é uma lista.
+                if isinstance(data, list) and len(data) > 0:
+                    item = data[0]
+                    if "instance" in item:
+                        return item.get("instance", {})
+                    return item
+                return {}
+        except Exception as e:
+            logger.error(f"Erro ao buscar instância '{instance_name}': {e}")
+            return {}
 
     async def get_connection_status(self, instance_name: str) -> dict:
         """
@@ -148,7 +179,11 @@ class WhatsAppService:
         return {"status": "deleted"}
 
     async def send_text_message(self, instance_name: str, number: str, text: str):
-        normalized_number = self._normalize_number(number)
+        if "@" in number:
+            normalized_number = number
+        else:
+            normalized_number = self._normalize_number(number)
+            
         # Rota correta da Evolution API para enviar texto
         url = f"{self.api_url}/message/sendText/{instance_name}"
         payload = {
@@ -160,6 +195,7 @@ class WhatsAppService:
                 response = await client.post(url, headers=self.headers, json=payload, timeout=30.0)
                 response.raise_for_status()
                 logger.info(f"Mensagem enviada com sucesso para {normalized_number}.")
+                return response.json()
         except Exception as e:
             logger.error(f"Falha CRÍTICA ao enviar mensagem para {normalized_number}. Erro: {e}")
             raise MessageSendError(f"Falha no envio: {e}") from e
@@ -268,7 +304,7 @@ class WhatsAppService:
             logger.error(f"Falha ao buscar mídia por ID {message_id}: {e}")
             return None
 
-    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 999, mode: str = None, jids: List[str] = None) -> List[Dict[str, Any]]:
+    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 999, mode: str = None, jids: List[str] = None, evolution_instance_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Busca o histórico de mensagens diretamente no banco de dados da Evolution API.
         Se 'jids' for fornecido, busca por esses JIDs exatos.
@@ -288,7 +324,10 @@ class WhatsAppService:
             conn = await asyncpg.connect(db_url)
             try:
                 # 1. Verifica se a instância existe e pega o ID (Evita queries pesadas se o nome estiver errado)
-                instance_id = await conn.fetchval('SELECT id FROM "Instance" WHERE name = $1', instance_name)
+                if evolution_instance_id:
+                    instance_id = evolution_instance_id
+                else:
+                    instance_id = await conn.fetchval('SELECT id FROM "Instance" WHERE name = $1', instance_name)
                 
                 if not instance_id:
                     logger.warning(f"Fetch History: Instância '{instance_name}' NÃO ENCONTRADA no banco da Evolution.")
@@ -423,6 +462,53 @@ class WhatsAppService:
             logger.error(f"Erro ao buscar LID por conteúdo: {e}")
             return None
 
+    async def find_contacts(self, instance_name: str) -> List[Dict[str, Any]]:
+        """Busca contatos na Evolution API."""
+        url = f"{self.api_url}/chat/findContacts/{instance_name}"
+        payload = {"where": {}}
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=self.headers, json=payload, timeout=30.0)
+                response.raise_for_status()
+                data = response.json()
+                return data if isinstance(data, list) else []
+        except Exception as e:
+            logger.error(f"Erro ao buscar contatos: {e}")
+            return []
+
+    async def fetch_all_groups(self, instance_name: str) -> List[Dict[str, Any]]:
+        """Busca grupos na Evolution API."""
+        url = f"{self.api_url}/group/fetchAllGroups/{instance_name}?getParticipants=false"
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=self.headers, timeout=30.0)
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"Erro ao buscar grupos: {e}")
+            return []
+
+    async def delete_message_for_everyone(self, instance_name: str, remote_jid: str, message_id: str):
+        """Deleta uma mensagem para todos (Revoke)."""
+        url = f"{self.api_url}/chat/deleteMessageForEveryone/{instance_name}"
+        
+        # Garante que o remoteJid esteja no formato correto se não for um grupo
+        if "@" not in remote_jid:
+            normalized = self._normalize_number(remote_jid)
+            remote_jid = f"{normalized}@s.whatsapp.net"
+
+        payload = {
+            "id": message_id,
+            "remoteJid": remote_jid,
+            "fromMe": True
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                # Usa request("DELETE") para garantir o envio do body, já que client.delete pode ignorar
+                await client.request("DELETE", url, headers=self.headers, json=payload, timeout=10.0)
+        except Exception as e:
+            logger.error(f"Falha ao deletar mensagem {message_id} em {remote_jid}: {e}")
+
     async def get_jid_options_from_db(self, instance_name: str, remote_jid: str) -> Optional[List[Dict[str, Any]]]:
         """
         Busca as opções de JID (jidOptions) na tabela IsOnWhatsapp do banco da Evolution.
@@ -480,48 +566,78 @@ class WhatsAppService:
         normalized_number = self._normalize_number(number)
         url = f"{self.api_url}/chat/sendPresence/{instance_name}"
         
-        # Tenta diferentes formatos de payload para compatibilidade com versões da Evolution API
-        payloads = [
-            # 1. Nested sem number (Correção provável para erro 400 de redundância)
-            {
-                "number": normalized_number,
-                "options": {
-                    "delay": int(delay),
-                    "presence": presence
-                }
-            },
-            # 2. Flat (Versões mais novas)
-            {
-                "number": normalized_number,
+        # Payload conforme documentação oficial da Evolution API
+        payload = {
+            "number": normalized_number,
+            "options": {
                 "delay": int(delay),
-                "presence": presence
-            },
-            # 3. Swagger (Nested com number - O que falhou, mas mantemos como fallback)
-            {
-                "number": normalized_number,
-                "options": {
-                    "delay": int(delay),
-                    "presence": presence,
-                    "number": normalized_number
-                }
+                "presence": presence,
+                "number": normalized_number
             }
-        ]
+        }
 
-        async with httpx.AsyncClient() as client:
-            for i, payload in enumerate(payloads):
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=self.headers, json=payload, timeout=5.0)
+                response.raise_for_status()
+        except Exception as e:
+            logger.warning(f"Falha ao enviar status '{presence}' para {normalized_number}: {e}")
+
+    async def check_prospect_messages(self, db: AsyncSession, user: models.User):
+        """
+        Verifica se há novas mensagens de contatos em prospecção e atualiza o status.
+        """
+        from app.crud import crud_prospect, crud_config
+        from app.services.gemini_service import get_gemini_service
+        from app.api.prospecting import _synchronize_and_process_history
+        
+        logger.info(f"Verificando mensagens de prospecção para o usuário {user.id}...")
+        
+        gemini_service = get_gemini_service()
+        prospects = await crud_prospect.get_prospects_by_user(db, user.id)
+        
+        for prospect in prospects:
+            if prospect.status not in ["Em Andamento", "Pausado"]:
+                continue
+            
+            persona_config = await crud_config.get_config(db, prospect.config_id, user.id)
+            if not persona_config:
+                continue
+
+            contacts_details = await crud_prospect.get_prospect_contacts_with_details(db, prospect.id)
+            
+            for item in contacts_details:
+                pc = item.ProspectContact
+                contact = item.Contact
+                
+                terminal_statuses = ["Não Interessado", "Concluído", "Falha no Envio", "Conversa Manual", "Fechado", "Atendente Chamado", "Resposta Recebida"]
+                if pc.situacao in terminal_statuses:
+                    continue
+                
+                if not pc.whatsapp_instance:
+                    continue
+
                 try:
-                    response = await client.post(url, headers=self.headers, json=payload, timeout=5.0)
-                    response.raise_for_status()
-                    return # Sucesso
-                except httpx.HTTPStatusError as e:
-                    # Se for erro 400 (Bad Request), tenta o próximo formato
-                    if e.response.status_code == 400 and i < len(payloads) - 1:
-                        continue
-                    logger.warning(f"Falha ao enviar status '{presence}' para {normalized_number} (Payload {i}): {e}")
-                    return
+                    history = await _synchronize_and_process_history(
+                        db=db,
+                        prospect_contact=pc,
+                        user=user,
+                        persona_config=persona_config,
+                        whatsapp_service=self,
+                        gemini_service=gemini_service,
+                        whatsapp_instance=pc.whatsapp_instance
+                    )
+                    
+                    if history:
+                        last_msg = history[-1]
+                        role = last_msg.get("role")
+                        
+                        if role == "user":
+                            logger.info(f"Mensagem recente encontrada de {contact.nome}. Atualizando para 'Resposta Recebida'.")
+                            await crud_prospect.update_prospect_contact_status(db, pc.id, "Resposta Recebida")
+                            
                 except Exception as e:
-                    logger.warning(f"Erro de conexão ao enviar status '{presence}': {e}")
-                    return
+                    logger.error(f"Erro ao verificar mensagens para {contact.nome}: {e}")
 
 _whatsapp_service_instance = None
 def get_whatsapp_service():

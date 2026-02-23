@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import toast from 'react-hot-toast';
-import { Edit, Trash2, Loader2, UserPlus, Save, CheckCircle, XCircle, Settings, Shield, Search } from 'lucide-react';
+import { Edit, Trash2, Loader2, UserPlus, Save, CheckCircle, XCircle, Settings, Shield, Search, AlertTriangle } from 'lucide-react';
 
 // Modal Genérico
 const Modal = ({ onClose, children }) => (
@@ -11,6 +11,22 @@ const Modal = ({ onClose, children }) => (
             {children}
         </div>
     </div>
+);
+
+const DeleteConfirmationModal = ({ onClose, onConfirm }) => (
+    <Modal onClose={onClose}>
+        <div className="p-6 text-center">
+            <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
+                <AlertTriangle className="h-6 w-6 text-red-600" aria-hidden="true" />
+            </div>
+            <h3 className="mt-4 text-lg font-semibold text-gray-900">Excluir Usuário</h3>
+            <p className="mt-2 text-sm text-gray-500">Tem certeza que deseja apagar este usuário? Esta ação não pode ser desfeita.</p>
+            <div className="mt-6 flex justify-center gap-4">
+                <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition">Cancelar</button>
+                <button onClick={onConfirm} className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition">Sim, Excluir</button>
+            </div>
+        </div>
+    </Modal>
 );
 
 // Modal de Edição/Criação de Usuário
@@ -100,6 +116,7 @@ function Admin() {
     const [error, setError] = useState('');
     const [modalState, setModalState] = useState({ type: null, data: null });
     const [searchTerm, setSearchTerm] = useState('');
+    const [deleteConfirmation, setDeleteConfirmation] = useState({ isOpen: false, userId: null });
     const navigate = useNavigate();
 
     const fetchUsers = useCallback(async () => {
@@ -109,7 +126,6 @@ function Admin() {
             setUsers(usersRes.data);
             setError('');
         } catch (err) {
-            console.error("Erro ao carregar usuários:", err);
             setError('Falha ao carregar usuários. Você pode não ter privilégios de administrador.');
             toast.error('Falha ao carregar usuários.');
         } finally {
@@ -142,16 +158,21 @@ function Admin() {
         }
     };
 
-    const handleDeleteUser = async (userId) => {
-        if (window.confirm('Tem certeza que deseja apagar este usuário? Esta ação não pode ser desfeita.')) {
-            try {
-                await api.delete(`/admin/users/${userId}`);
-                setUsers(prev => prev.filter(u => u.id !== userId));
-                toast.success('Usuário apagado com sucesso!');
-            } catch (err) {
-                const detail = err.response?.data?.detail || '';
-                toast.error(`Falha ao apagar usuário. ${detail}`);
-            }
+    const handleDeleteClick = (userId) => {
+        setDeleteConfirmation({ isOpen: true, userId });
+    };
+
+    const confirmDeleteUser = async () => {
+        const { userId } = deleteConfirmation;
+        try {
+            await api.delete(`/admin/users/${userId}`);
+            setUsers(prev => prev.filter(u => u.id !== userId));
+            toast.success('Usuário apagado com sucesso!');
+        } catch (err) {
+            const detail = err.response?.data?.detail || '';
+            toast.error(`Falha ao apagar usuário. ${detail}`);
+        } finally {
+            setDeleteConfirmation({ isOpen: false, userId: null });
         }
     };
 
@@ -220,7 +241,7 @@ function Admin() {
                                     <td className="p-4">
                                         <div className="flex justify-center items-center gap-2">
                                             <button onClick={() => setModalState({ type: 'edit', data: user })} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors" title="Editar Usuário"><Edit size={18} /></button>
-                                            <button onClick={() => handleDeleteUser(user.id)} className="p-2 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded-full transition-colors" title="Apagar Usuário"><Trash2 size={18} /></button>
+                                            <button onClick={() => handleDeleteClick(user.id)} className="p-2 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded-full transition-colors" title="Apagar Usuário"><Trash2 size={18} /></button>
                                         </div>
                                     </td>
                                 </tr>
@@ -236,6 +257,9 @@ function Admin() {
                     onClose={() => setModalState({ type: null, data: null })}
                     isCreating={modalState.type === 'create'}
                 />
+            )}
+            {deleteConfirmation.isOpen && (
+                <DeleteConfirmationModal onClose={() => setDeleteConfirmation({ isOpen: false, userId: null })} onConfirm={confirmDeleteUser} />
             )}
         </div>
     );

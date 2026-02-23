@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 SCOPES = ['https://www.googleapis.com/auth/contacts']
 
 class GoogleContactsService:
-    def __init__(self, user: Optional[models.User] = None):
-        self.user = user
+    def __init__(self, whatsapp_instance: Optional[models.WhatsappInstance] = None):
+        self.whatsapp_instance = whatsapp_instance
         # O flow será criado sob demanda para permitir um redirect_uri dinâmico
         self.flow: Optional[Flow] = None
 
@@ -73,9 +73,9 @@ class GoogleContactsService:
 
     def _get_credentials(self) -> Optional[Credentials]:
         """Recria o objeto de credenciais a partir dos dados salvos no usuário."""
-        if not self.user or not self.user.google_credentials:
+        if not self.whatsapp_instance or not self.whatsapp_instance.google_credentials:
             return None
-        return Credentials.from_authorized_user_info(self.user.google_credentials, SCOPES)
+        return Credentials.from_authorized_user_info(self.whatsapp_instance.google_credentials, SCOPES)
 
     def _get_service(self):
         """Cria o cliente de serviço da People API."""
@@ -108,23 +108,23 @@ class GoogleContactsService:
                 lambda: service.people().createContact(body=person_body).execute()
             )
             
-            logger.info(f"Contato '{contact.nome}' criado com sucesso no Google Contacts para o usuário {self.user.id}.")
+            logger.info(f"Contato '{contact.nome}' criado com sucesso no Google Contacts para a instância {self.whatsapp_instance.id}.")
             return created_person
         except HttpError as e:
-            logger.error(f"Erro na API do Google ao criar contato para user {self.user.id}: {e}")
+            logger.error(f"Erro na API do Google ao criar contato para instância {self.whatsapp_instance.id}: {e}")
             if e.resp.status in [401, 403]:
                 raise HTTPException(status_code=403, detail="Permissão negada pela API do Google. A API pode estar desativada ou o token foi revogado. Tente reconectar a conta Google.")
             return None
         except Exception as e:
-            logger.error(f"Erro inesperado ao sincronizar contato para user {self.user.id}: {e}")
+            logger.error(f"Erro inesperado ao sincronizar contato para instância {self.whatsapp_instance.id}: {e}")
             return None
 
     async def sync_multiple_contacts(self, contacts: List[models.Contact]) -> Dict[str, int]:
         """
         Sincroniza uma lista de contatos com o Google Contacts usando batch requests (lotes).
         """
-        if not self.user or not self.user.google_credentials:
-            logger.warning(f"Tentativa de sincronização em massa para o usuário {self.user.id} sem credenciais do Google.")
+        if not self.whatsapp_instance or not self.whatsapp_instance.google_credentials:
+            logger.warning(f"Tentativa de sincronização em massa para a instância {self.whatsapp_instance.id if self.whatsapp_instance else 'N/A'} sem credenciais do Google.")
             return {"success": 0, "failed": len(contacts)}
 
         if not contacts:
@@ -172,22 +172,22 @@ class GoogleContactsService:
                     total_failed += (len(chunk) - success_count)
                     
                 except Exception as e:
-                    logger.error(f"Erro no lote {i//BATCH_SIZE + 1} da sincronização para user {self.user.id}: {e}")
+                    logger.error(f"Erro no lote {i//BATCH_SIZE + 1} da sincronização para instância {self.whatsapp_instance.id}: {e}")
                     total_failed += len(chunk)
 
-            logger.info(f"Sincronização em massa (Batch) para o usuário {self.user.id} concluída. Sucesso: {total_success}, Falhas: {total_failed}.")
+            logger.info(f"Sincronização em massa (Batch) para a instância {self.whatsapp_instance.id} concluída. Sucesso: {total_success}, Falhas: {total_failed}.")
             return {"success": total_success, "failed": total_failed}
 
         except Exception as e:
-            logger.error(f"Erro crítico na sincronização em massa para user {self.user.id}: {e}")
+            logger.error(f"Erro crítico na sincronização em massa para instância {self.whatsapp_instance.id}: {e}")
             return {"success": 0, "failed": len(contacts)}
 
     async def batch_create_contacts(self, contacts: List[models.Contact]) -> Dict[str, int]:
         """
         Cria múltiplos contatos no Google Contacts em uma única requisição de lote.
         """
-        if not self.user or not self.user.google_credentials:
-            logger.warning(f"Tentativa de criação em lote para o usuário {self.user.id} sem credenciais do Google.")
+        if not self.whatsapp_instance or not self.whatsapp_instance.google_credentials:
+            logger.warning(f"Tentativa de criação em lote para a instância {self.whatsapp_instance.id if self.whatsapp_instance else 'N/A'} sem credenciais do Google.")
             return {"success": 0, "failed": len(contacts)}
 
         if not contacts:
@@ -222,13 +222,13 @@ class GoogleContactsService:
             )
             
             success_count = len(result.get('createdPeople', []))
-            logger.info(f"Criação em lote para o usuário {self.user.id} concluída. Sucesso: {success_count}, Total: {len(contacts)}.")
+            logger.info(f"Criação em lote para a instância {self.whatsapp_instance.id} concluída. Sucesso: {success_count}, Total: {len(contacts)}.")
             return {"success": success_count, "failed": len(contacts) - success_count}
         except Exception as e:
-            logger.error(f"Erro inesperado na criação em lote de contatos para user {self.user.id}: {e}")
+            logger.error(f"Erro inesperado na criação em lote de contatos para instância {self.whatsapp_instance.id}: {e}")
             return {"success": 0, "failed": len(contacts)}
 
 
-def get_google_contacts_service(user: models.User) -> GoogleContactsService:
+def get_google_contacts_service(whatsapp_instance: models.WhatsappInstance) -> GoogleContactsService:
     """Função de dependência para obter o serviço de contatos do Google."""
-    return GoogleContactsService(user=user)
+    return GoogleContactsService(whatsapp_instance=whatsapp_instance)

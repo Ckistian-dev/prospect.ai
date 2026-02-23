@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../../api/axiosConfig';
 import Modal from '../Modal';
-import { Loader2, Check, ChevronDown, Clock } from 'lucide-react';
+import { Loader2, Check, ChevronDown, Clock, Bell } from 'lucide-react';
 
 function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
   const isEditMode = Boolean(prospectToEdit);
@@ -12,10 +12,10 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
     config_id: '',
     horario_inicio: '',
     horario_fim: '',
+    notification_number: '',
+    notification_instance_id: null,
+    whatsapp_instance_ids: [],
   });
-
-  const [initialIntervalValue, setInitialIntervalValue] = useState(15);
-  const [initialIntervalUnit, setInitialIntervalUnit] = useState('minutes');
 
   const [followupEnabled, setFollowupEnabled] = useState(false);
   const [followupValue, setFollowupValue] = useState(1);
@@ -23,17 +23,27 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
 
   const [categories, setCategories] = useState([]);
   const [configs, setConfigs] = useState([]);
+  const [whatsappInstances, setWhatsappInstances] = useState([]);
+  const [notificationDestinations, setNotificationDestinations] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
 
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const categoryDropdownRef = useRef(null);
+  const [isInstanceDropdownOpen, setIsInstanceDropdownOpen] = useState(false);
+  const instanceDropdownRef = useRef(null);
+  const [isNotificationDropdownOpen, setIsNotificationDropdownOpen] = useState(false);
+  const [currentNotificationInstanceId, setCurrentNotificationInstanceId] = useState(null);
+  const [notificationSearch, setNotificationSearch] = useState('');
 
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (categoryDropdownRef.current && !categoryDropdownRef.current.contains(event.target)) {
         setIsCategoryDropdownOpen(false);
+      }
+      if (instanceDropdownRef.current && !instanceDropdownRef.current.contains(event.target)) {
+        setIsInstanceDropdownOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -47,9 +57,12 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
       setFormData({
         nome_prospeccao: prospectToEdit.nome_prospeccao,
         config_id: prospectToEdit.config_id,
-        categorias_selecionadas: [],
+        categorias_selecionadas: prospectToEdit.categorias || [],
         horario_inicio: prospectToEdit.horario_inicio || '',
         horario_fim: prospectToEdit.horario_fim || '',
+        notification_number: prospectToEdit.notification_number || '',
+        notification_instance_id: prospectToEdit.notification_instance_id || null,
+        whatsapp_instance_ids: prospectToEdit.whatsapp_instance_ids || [],
       });
 
       if (prospectToEdit.followup_interval_minutes > 0) {
@@ -68,15 +81,6 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
       } else {
         setFollowupEnabled(false);
       }
-
-      const initialSeconds = prospectToEdit.initial_message_interval_seconds;
-      if (initialSeconds >= 60 && initialSeconds % 60 === 0) {
-        setInitialIntervalValue(initialSeconds / 60);
-        setInitialIntervalUnit('minutes');
-      } else {
-        setInitialIntervalValue(initialSeconds);
-        setInitialIntervalUnit('seconds');
-      }
     }
   }, [isEditMode, prospectToEdit]);
 
@@ -84,13 +88,15 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
     const fetchData = async () => {
       try {
         setIsLoading(true);
-        const [categoriesRes, configsRes] = await Promise.all([
+        const [categoriesRes, configsRes, instancesRes] = await Promise.all([
           api.get('/contacts/categories'),
-          api.get('/configs/')
+          api.get('/configs/'),
+          api.get('/whatsapp/')
         ]);
         
         setCategories(categoriesRes.data);
         setConfigs(configsRes.data);
+        setWhatsappInstances(instancesRes.data);
 
         if (!isEditMode && configsRes.data.length > 0) {
           setFormData(prev => ({ ...prev, config_id: configsRes.data[0].id }));
@@ -104,6 +110,25 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
     };
     fetchData();
   }, [isEditMode]);
+
+  useEffect(() => {
+    const loadDestinations = async () => {
+      let instanceId = null;
+      if (formData.whatsapp_instance_ids && formData.whatsapp_instance_ids.length > 0) {
+        instanceId = formData.whatsapp_instance_ids[0];
+      } else if (whatsappInstances.length > 0) {
+        instanceId = whatsappInstances[0].id;
+      }
+
+      if (instanceId) {
+        setCurrentNotificationInstanceId(instanceId);
+        api.get(`/prospecting/whatsapp/destinations/${instanceId}`)
+           .then(res => setNotificationDestinations(res.data))
+           .catch(console.error);
+      }
+    };
+    loadDestinations();
+  }, [whatsappInstances, formData.whatsapp_instance_ids]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -119,6 +144,28 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
         return { ...prev, categorias_selecionadas: [...currentSelection, category] };
       }
     });
+  };
+
+  const handleInstanceChange = (instanceId) => {
+    setFormData(prev => {
+      const currentSelection = prev.whatsapp_instance_ids || [];
+      if (currentSelection.includes(instanceId)) {
+        return { ...prev, whatsapp_instance_ids: currentSelection.filter(id => id !== instanceId) };
+      } else {
+        return { ...prev, whatsapp_instance_ids: [...currentSelection, instanceId] };
+      }
+    });
+  };
+
+  const getInstanceButtonText = () => {
+    const count = (formData.whatsapp_instance_ids || []).length;
+    if (count === 0) return "Selecione as instâncias...";
+    if (count === 1) {
+        const id = formData.whatsapp_instance_ids[0];
+        const inst = whatsappInstances.find(i => i.id === id);
+        return inst ? inst.name : "1 instância selecionada";
+    }
+    return `${count} instâncias selecionadas`;
   };
 
   const handleSubmit = async (e) => {
@@ -169,23 +216,18 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
         else if (followupUnit === 'days') followup_interval_minutes = value * 60 * 24;
       }
       
-      let initial_message_interval_seconds = 0;
-      const intervalValue = parseInt(initialIntervalValue, 10);
-      if(initialIntervalUnit === 'seconds') {
-        initial_message_interval_seconds = intervalValue;
-      } else if (initialIntervalUnit === 'minutes') {
-        initial_message_interval_seconds = intervalValue * 60;
-      }
-      
       if (isEditMode) {
         const updatePayload = {
           nome_prospeccao: formData.nome_prospeccao,
           config_id: parseInt(formData.config_id, 10),
           followup_interval_minutes,
-          initial_message_interval_seconds,
           contact_ids_to_add: contact_ids_to_process,
           horario_inicio: formData.horario_inicio || null,
           horario_fim: formData.horario_fim || null,
+          notification_number: formData.notification_number || null,
+          notification_instance_id: formData.notification_instance_id,
+          whatsapp_instance_ids: formData.whatsapp_instance_ids,
+          categorias: formData.categorias_selecionadas,
         };
         const response = await api.put(`/prospecting/${prospectToEdit.id}`, updatePayload);
         onSuccess(response.data);
@@ -195,9 +237,12 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
           config_id: parseInt(formData.config_id, 10),
           contact_ids: contact_ids_to_process,
           followup_interval_minutes,
-          initial_message_interval_seconds,
           horario_inicio: formData.horario_inicio || null,
           horario_fim: formData.horario_fim || null,
+          notification_number: formData.notification_number || null,
+          notification_instance_id: formData.notification_instance_id,
+          whatsapp_instance_ids: formData.whatsapp_instance_ids,
+          categorias: formData.categorias_selecionadas,
         };
         const response = await api.post('/prospecting/', createPayload);
         onSuccess(response.data);
@@ -220,6 +265,13 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
     return `${count} categorias selecionadas`;
   };
 
+  const filteredDestinations = notificationDestinations.filter(dest => 
+    dest.name?.toLowerCase().includes(notificationSearch.toLowerCase()) || 
+    dest.id?.toLowerCase().includes(notificationSearch.toLowerCase())
+  );
+
+  const selectedDestinationName = notificationDestinations.find(d => d.id === formData.notification_number)?.name || formData.notification_number;
+
   return (
     <Modal onClose={onClose}>
       <form onSubmit={handleSubmit}>
@@ -238,6 +290,7 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
               <input type="text" name="nome_prospeccao" value={formData.nome_prospeccao} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green" placeholder='Prospecção de Clientes'/>
             </div>
             
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-600 mb-1">
                 {isEditMode ? 'Adicionar Contatos de Novas Categorias' : 'Categorias dos Contatos'}
@@ -282,7 +335,92 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
                 {configs.map(conf => <option key={conf.id} value={conf.id}>{conf.nome_config}</option>)}
               </select>
             </div>
+            </div>
             
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-600 mb-1">
+                Instâncias de Envio (WhatsApp)
+              </label>
+              <div className="relative" ref={instanceDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsInstanceDropdownOpen(!isInstanceDropdownOpen)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-left flex justify-between items-center focus:outline-none focus:ring-2 focus:ring-brand-green"
+                >
+                  <span className="text-gray-700 truncate">{getInstanceButtonText()}</span>
+                  <ChevronDown size={20} className={`text-gray-400 transition-transform ${isInstanceDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {isInstanceDropdownOpen && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                    {whatsappInstances.length > 0 ? (
+                      <div className="p-2 space-y-1">
+                        {whatsappInstances.map(inst => (
+                          <label key={inst.id} className="flex items-center space-x-3 cursor-pointer p-2 rounded-md hover:bg-gray-100">
+                            <input
+                              type="checkbox"
+                              checked={(formData.whatsapp_instance_ids || []).includes(inst.id)}
+                              onChange={() => handleInstanceChange(inst.id)}
+                              className="h-4 w-4 rounded border-gray-300 text-brand-green focus:ring-brand-green"
+                            />
+                            <span className="text-gray-700">{inst.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="p-4 text-sm text-gray-500">Nenhuma instância conectada.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Selecione quais números enviarão as mensagens desta campanha.</p>
+            </div>
+
+            <div>
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-600 mb-1">
+                    <Bell size={14}/> Notificar Atualizações (Leads/Atendentes)
+                </label>
+                <div className="relative">
+                    <button
+                        type="button"
+                        onClick={() => setIsNotificationDropdownOpen(!isNotificationDropdownOpen)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-left flex justify-between items-center focus:outline-none focus:ring-2 focus:ring-brand-green"
+                    >
+                        <span className="text-gray-700 truncate">{selectedDestinationName || "Selecione um número ou grupo..."}</span>
+                        <ChevronDown size={20} className="text-gray-400" />
+                    </button>
+                    
+                    {isNotificationDropdownOpen && (
+                        <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                            <div className="p-2 sticky top-0 bg-white border-b">
+                                <input 
+                                    type="text" 
+                                    placeholder="Buscar..." 
+                                    className="w-full px-2 py-1 border rounded text-sm"
+                                    value={notificationSearch}
+                                    onChange={(e) => setNotificationSearch(e.target.value)}
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="p-1">
+                                <div className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-gray-500 italic" onClick={() => { setFormData(prev => ({...prev, notification_number: '', notification_instance_id: null})); setIsNotificationDropdownOpen(false); }}>
+                                    Nenhuma notificação
+                                </div>
+                                {filteredDestinations.map(dest => (
+                                    <div key={dest.id} className="px-3 py-2 hover:bg-gray-100 cursor-pointer flex justify-between items-center" onClick={() => { setFormData(prev => ({...prev, notification_number: dest.id, notification_instance_id: currentNotificationInstanceId})); setIsNotificationDropdownOpen(false); }}>
+                                        <span className="text-gray-800">{dest.name}</span>
+                                        <span className="text-xs text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">{dest.type === 'group' ? 'Grupo' : 'Contato'}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Enviaremos um aviso quando um lead for qualificado ou solicitar atendente.</p>
+            </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label htmlFor="horario_inicio" className="flex items-center gap-2 text-sm font-medium text-gray-600 mb-1">
@@ -300,34 +438,6 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
             <p className="text-xs text-gray-500 -mt-4">
                 O agente só enviará mensagens iniciais e follow-ups dentro do expediente. Deixe em branco para operar 24h.
             </p>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-2">Intervalo entre Novas Conversas</label>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <input 
-                    type="number"
-                    id="initial_interval_value"
-                    value={initialIntervalValue}
-                    onChange={(e) => setInitialIntervalValue(e.target.value)}
-                    min="1"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green"
-                  />
-                </div>
-                <div>
-                  <select 
-                    id="initial_interval_unit"
-                    value={initialIntervalUnit}
-                    onChange={(e) => setInitialIntervalUnit(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green"
-                  >
-                    <option value="seconds">Segundos</option>
-                    <option value="minutes">Minutos</option>
-                  </select>
-                </div>
-              </div>
-              <p className="text-xs text-gray-500 mt-1">Define o tempo mínimo de espera antes de iniciar a próxima conversa.</p>
-            </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-600 mb-2">Configuração de Follow-up</label>

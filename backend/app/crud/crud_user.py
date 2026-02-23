@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.db import models
-from app.db.schemas import UserCreate, UserUpdate
+from app.db.schemas import UserCreate, UserUpdate, WhatsappInstanceCreate, WhatsappInstanceUpdate
 from app.services.security import get_password_hash
 import logging
 
@@ -17,11 +17,6 @@ async def get_user_by_email(db: AsyncSession, email: str) -> models.User | None:
     result = await db.execute(select(models.User).filter(models.User.email == email))
     return result.scalars().first()
 
-async def get_user_by_instance_name(db: AsyncSession, instance_name: str) -> models.User | None:
-    """Busca um usuário pelo nome da instância do WhatsApp."""
-    result = await db.execute(select(models.User).filter(models.User.instance_name == instance_name))
-    return result.scalars().first()
-
 async def get_user(db: AsyncSession, user_id: int) -> models.User | None:
     """Busca um usuário pelo seu ID."""
     result = await db.execute(select(models.User).filter(models.User.id == user_id))
@@ -33,7 +28,6 @@ async def create_user(db: AsyncSession, user: UserCreate) -> models.User:
     db_user = models.User(
         email=user.email,
         hashed_password=hashed_password,
-        instance_name=user.instance_name,
         tokens=user.tokens,
         spreadsheet_id=user.spreadsheet_id
     )
@@ -73,7 +67,44 @@ async def decrement_user_tokens(db: AsyncSession, *, db_user: models.User, amoun
     else:
         logger.warning(f"Usuário {db_user.id} não possui tokens suficientes para deduzir {amount} token(s).")
 
-async def get_user_by_instance(db: AsyncSession, instance_name: str) -> models.User | None:
-    """Busca um usuário pelo nome da sua instância do WhatsApp."""
-    result = await db.execute(select(models.User).where(models.User.instance_name == instance_name))
+# --- Whatsapp Instances CRUD ---
+
+async def get_whatsapp_instances(db: AsyncSession, user_id: int) -> list[models.WhatsappInstance]:
+    result = await db.execute(select(models.WhatsappInstance).where(models.WhatsappInstance.user_id == user_id))
+    return result.scalars().all()
+
+async def get_whatsapp_instance(db: AsyncSession, instance_id: int, user_id: int) -> models.WhatsappInstance | None:
+    result = await db.execute(select(models.WhatsappInstance).where(models.WhatsappInstance.id == instance_id, models.WhatsappInstance.user_id == user_id))
     return result.scalars().first()
+
+async def get_whatsapp_instance_by_name(db: AsyncSession, instance_name: str) -> models.WhatsappInstance | None:
+    result = await db.execute(select(models.WhatsappInstance).where(models.WhatsappInstance.instance_name == instance_name))
+    return result.scalars().first()
+
+async def create_whatsapp_instance(db: AsyncSession, instance: WhatsappInstanceCreate, user_id: int) -> models.WhatsappInstance:
+    db_instance = models.WhatsappInstance(
+        **instance.model_dump(),
+        user_id=user_id
+    )
+    db.add(db_instance)
+    await db.commit()
+    await db.refresh(db_instance)
+    return db_instance
+
+async def update_whatsapp_instance(db: AsyncSession, db_instance: models.WhatsappInstance, instance_in: WhatsappInstanceUpdate) -> models.WhatsappInstance:
+    update_data = instance_in.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_instance, key, value)
+    
+    await db.commit()
+    await db.refresh(db_instance)
+    return db_instance
+
+async def delete_whatsapp_instance(db: AsyncSession, db_instance: models.WhatsappInstance):
+    await db.delete(db_instance)
+    await db.commit()
+
+async def update_whatsapp_instance_credentials(db: AsyncSession, db_instance: models.WhatsappInstance, credentials: dict | None):
+    db_instance.google_credentials = credentials
+    await db.commit()
+    await db.refresh(db_instance)

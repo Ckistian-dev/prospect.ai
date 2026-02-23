@@ -50,6 +50,30 @@ class Config(ConfigBase):
     class Config:
         from_attributes = True
 
+# --- Schemas de WhatsappInstance ---
+class WhatsappInstanceBase(BaseModel):
+    name: str
+    instance_name: str
+    interval_seconds: Optional[int] = 60
+    is_active: Optional[bool] = True
+
+class WhatsappInstanceCreate(WhatsappInstanceBase):
+    pass
+
+class WhatsappInstanceUpdate(BaseModel):
+    name: Optional[str] = None
+    interval_seconds: Optional[int] = None
+    is_active: Optional[bool] = None
+
+class WhatsappInstance(WhatsappInstanceBase):
+    id: int
+    user_id: int
+    instance_id: Optional[str] = None
+    number: Optional[str] = None
+    is_google_connected: bool = False
+
+    class Config:
+        from_attributes = True
 
 # --- Schema para a Tabela de Ligação ---
 class ProspectContact(BaseModel):
@@ -63,6 +87,7 @@ class ProspectContact(BaseModel):
     token_usage: Optional[int] = 0
     lead_score: Optional[int] = 0
     updated_at: Optional[datetime] = None
+    whatsapp_instance_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -81,9 +106,14 @@ class ProspectBase(BaseModel):
     initial_message_interval_seconds: int = 90
     horario_inicio: Optional[time] = None
     horario_fim: Optional[time] = None
+    notification_number: Optional[str] = None
+    notification_instance_id: Optional[int] = None
+    whatsapp_instance_ids: Optional[List[int]] = None
+    categorias: Optional[List[str]] = None
 
 class ProspectCreate(ProspectBase):
     contact_ids: List[int]
+    whatsapp_instance_ids: List[int]
 
 class ProspectUpdate(BaseModel):
     nome_prospeccao: Optional[str] = None
@@ -94,6 +124,10 @@ class ProspectUpdate(BaseModel):
     contact_ids_to_add: Optional[List[int]] = None
     horario_inicio: Optional[time] = None
     horario_fim: Optional[time] = None
+    notification_number: Optional[str] = None
+    notification_instance_id: Optional[int] = None
+    whatsapp_instance_ids: Optional[List[int]] = None
+    categorias: Optional[List[str]] = None
 
 class Prospect(ProspectBase):
     id: int
@@ -130,29 +164,18 @@ class UserCreate(UserBase):
 
 class UserCreateByAdmin(UserBase):
     password: str
-    instance_name: Optional[str] = None
     tokens: Optional[int] = 0
     spreadsheet_id: Optional[str] = None
 
 class UserUpdate(BaseModel):
-    instance_name: Optional[str] = None
-    instance_id: Optional[str] = None
     tokens: Optional[int] = None
-    google_credentials: Optional[Dict[str, Any]] = None
     spreadsheet_id: Optional[str] = None
 
 class User(UserBase):
     id: int
-    instance_name: Optional[str] = None
-    instance_id: Optional[str] = None
     tokens: int
-    google_credentials: Optional[Dict[str, Any]] = None
     is_admin: bool = False
 
-    @computed_field
-    @property
-    def is_google_connected(self) -> bool:
-        return self.google_credentials is not None
     spreadsheet_id: Optional[str] = None
 
     class Config:

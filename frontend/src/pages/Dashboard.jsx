@@ -401,7 +401,6 @@ const Dashboard = () => {
             const response = await api.get('/dashboard/', { params });
             setData(response.data);
         } catch (err) {
-            console.error("Erro ao carregar dados do dashboard:", err);
             setError('Não foi possível carregar os dados do dashboard. Tente novamente mais tarde.');
         } finally {
             setIsLoading(false);
@@ -429,7 +428,6 @@ const Dashboard = () => {
             });
             setAnalysisResult(response.data.analysis);
         } catch (err) {
-            console.error("Erro na análise da IA:", err);
             setAnalysisError(err.response?.data?.detail || 'Falha ao se comunicar com o serviço de análise.');
         } finally {
             setIsAnalyzing(false);

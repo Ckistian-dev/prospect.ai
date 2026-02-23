@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -20,38 +21,41 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('accessToken'));
 
   return (
-    <Routes>
-      {/* --- ROTA PÚBLICA PRINCIPAL (HOMEPAGE) --- */}
-      {/* Agora o Google vai ver a Landing Page com os links no rodapé ao acessar a raiz */}
-      <Route path="/" element={<LandingPage />} />
+    <>
+      <Toaster position="top-right" reverseOrder={false} />
+      <Routes>
+        {/* --- ROTA PÚBLICA PRINCIPAL (HOMEPAGE) --- */}
+        {/* Agora o Google vai ver a Landing Page com os links no rodapé ao acessar a raiz */}
+        <Route path="/" element={<LandingPage />} />
 
-      {/* Outras Rotas Públicas */}
-      <Route path="/login" element={<Login setIsAuthenticated={setIsAuthenticated} />} />
-      <Route path="/politicies" element={<PrivacyPolicy />} />
-      <Route path="/services-terms" element={<TermsOfService />} />
+        {/* Outras Rotas Públicas */}
+        <Route path="/login" element={<Login setIsAuthenticated={setIsAuthenticated} />} />
+        <Route path="/politicies" element={<PrivacyPolicy />} />
+        <Route path="/services-terms" element={<TermsOfService />} />
 
-      {/* --- ROTAS PROTEGIDAS (SISTEMA INTERNO) --- */}
-      {/* Mudei o path pai para "/app" ou mantive protegido, mas a raiz "/" agora é livre */}
-      <Route path="/" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
-        <Route path="dashboard" element={<Dashboard />} />
-        <Route path="contacts" element={<Contacts />} />
-        <Route path="prospects" element={<Prospects />} />
-        <Route path="configs" element={<Configs />} />
-        <Route path="admin" element={<Admin />} />
-        <Route path="whatsapp" element={<Whatsapp />} />
-        <Route path="prospecting" element={<MainProspecting />} />
-        
-        {/* Se alguém entrar em /app sem nada, vai pro dashboard */}
-        <Route index element={<Navigate to="/dashboard" />} />
-      </Route>
+        {/* --- ROTAS PROTEGIDAS (SISTEMA INTERNO) --- */}
+        {/* Mudei o path pai para "/app" ou mantive protegido, mas a raiz "/" agora é livre */}
+        <Route path="/" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
+          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="contacts" element={<Contacts />} />
+          <Route path="prospects" element={<Prospects />} />
+          <Route path="configs" element={<Configs />} />
+          <Route path="admin" element={<Admin />} />
+          <Route path="whatsapp" element={<Whatsapp />} />
+          <Route path="prospecting" element={<MainProspecting />} />
+          
+          {/* Se alguém entrar em /app sem nada, vai pro dashboard */}
+          <Route index element={<Navigate to="/dashboard" />} />
+        </Route>
 
-      {/* Redirecionamentos Inteligentes */}
-      {/* Se tentar acessar /dashboard direto (link antigo), redireciona para a nova estrutura /app/dashboard se estiver logado */}
-      <Route path="/dashboard" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
+        {/* Redirecionamentos Inteligentes */}
+        {/* Se tentar acessar /dashboard direto (link antigo), redireciona para a nova estrutura /app/dashboard se estiver logado */}
+        <Route path="/dashboard" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
 
-      {/* Catch-all: Qualquer rota desconhecida vai para a Home ou Login */}
-      <Route path="*" element={<Navigate to="/" />} />
-    </Routes>
+        {/* Catch-all: Qualquer rota desconhecida vai para a Home ou Login */}
+        <Route path="*" element={<Navigate to="/" />} />
+      </Routes>
+    </>
   );
 }
 
