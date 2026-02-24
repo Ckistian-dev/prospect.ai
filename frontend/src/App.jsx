@@ -10,6 +10,7 @@ import Configs from './pages/Configs';
 import Whatsapp from './pages/Whatsapp';
 import MainProspecting from './pages/MainProspecting'; 
 import PrivacyPolicy from './pages/PrivacyPolicy'; 
+import Mensagens from './pages/Mensagens';
 import TermsOfService from './pages/TermsOfService';
 import LandingPage from './pages/LandingPage';
 import Admin from './pages/Admin';
@@ -43,6 +44,7 @@ function App() {
           <Route path="admin" element={<Admin />} />
           <Route path="whatsapp" element={<Whatsapp />} />
           <Route path="prospecting" element={<MainProspecting />} />
+          <Route path="mensagens" element={<Mensagens />} />
           
           {/* Se alguém entrar em /app sem nada, vai pro dashboard */}
           <Route index element={<Navigate to="/dashboard" />} />

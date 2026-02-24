@@ -1,6 +1,6 @@
 import logging
 import random
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, and_
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import models
@@ -166,6 +166,73 @@ async def get_prospects_para_processar(db: AsyncSession, prospect: models.Prospe
         return next_contact
 
     return None
+
+async def get_all_prospect_contacts(
+    db: AsyncSession, 
+    user_id: int, 
+    search: Optional[str] = None, 
+    status: Optional[List[str]] = None,
+    limit: int = 20,
+    time_start: Optional[datetime] = None,
+    time_end: Optional[datetime] = None,
+    tags: Optional[str] = None
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Busca todos os contatos de prospecção de um usuário com filtros para a tela de mensagens."""
+    query = select(
+        models.ProspectContact, 
+        models.Contact.nome.label("nome_contato"), 
+        models.Contact.whatsapp, 
+        models.Contact.categoria,
+        models.Prospect.nome_prospeccao
+    ).join(
+        models.Contact, models.ProspectContact.contact_id == models.Contact.id
+    ).join(
+        models.Prospect, models.ProspectContact.prospect_id == models.Prospect.id
+    ).where(models.Prospect.user_id == user_id)
+
+    if search:
+        query = query.where(or_(
+            models.Contact.nome.ilike(f"%{search}%"),
+            models.Contact.whatsapp.ilike(f"%{search}%")
+        ))
+    
+    if status:
+        query = query.where(models.ProspectContact.situacao.in_(status))
+        
+    if tags:
+        query = query.where(models.Contact.categoria.any(tags))
+
+    if time_start:
+        query = query.where(models.ProspectContact.updated_at >= time_start)
+    if time_end:
+        query = query.where(models.ProspectContact.updated_at <= time_end)
+
+    total_query = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(total_query)).scalar() or 0
+
+    query = query.order_by(models.ProspectContact.updated_at.desc()).limit(limit)
+    
+    result = await db.execute(query)
+    items = []
+    for row in result.all():
+        pc, nome_contato, whatsapp, categoria, nome_prospeccao = row
+        item = {
+            "id": pc.id,
+            "prospect_id": pc.prospect_id,
+            "contact_id": pc.contact_id,
+            "status": pc.situacao,
+            "observacoes": pc.observacoes,
+            "conversa": pc.conversa,
+            "updated_at": pc.updated_at,
+            "nome_contato": nome_contato,
+            "whatsapp": whatsapp,
+            "nome_prospeccao": nome_prospeccao,
+            "token_usage": pc.token_usage,
+            "tags": [{"name": cat, "color": "#4b5563"} for cat in (categoria or [])]
+        }
+        items.append(item)
+        
+    return items, total
 
 async def get_active_campaigns(db: AsyncSession) -> List[models.Prospect]:
     """

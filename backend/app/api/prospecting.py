@@ -3,13 +3,14 @@ import json
 import logging
 import re
 import csv
+import base64
 import io
 from typing import Dict, List, Any, Optional, Tuple
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, File, UploadFile, Form, Query, Body, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
-
+from sqlalchemy import or_
 from app.api import dependencies
 from app.db.database import get_db
 from app.db import models, schemas
@@ -56,12 +57,12 @@ async def _process_raw_message(
                 if waid_match:
                     content += f", WhatsApp: {waid_match.group(1)}"
 
-        elif msg_content.get("audioMessage") or msg_content.get("imageMessage") or msg_content.get("documentMessage"):
+        elif msg_content.get("audioMessage") or msg_content.get("imageMessage") or msg_content.get("documentMessage") or msg_content.get("stickerMessage"):
             media_data = await whatsapp_service.get_media_and_convert(instance_name, raw_msg)
             if media_data:
                 # Passa o histórico apenas para análise de mídia, não para transcrição de áudio.
                 if 'image' in media_data['mime_type']:
-                    media_meta["mediaType"] = "image"
+                    media_meta["mediaType"] = "sticker" if "stickerMessage" in msg_content else "image"
                     media_meta["mimeType"] = media_data['mime_type']
 
                 history_for_analysis = history_list_for_context if 'audio' not in media_data['mime_type'] else None
@@ -88,7 +89,12 @@ async def _process_raw_message(
                 logger.warning(f"Could not parse timestamp: {timestamp_unix}")
 
         if content and content.strip():
-            processed_msg = {"id": msg_id, "role": role, "content": content}
+            processed_msg = {
+                "id": msg_id, 
+                "role": role, 
+                "content": content,
+                "senderName": raw_msg.get("pushName")
+            }
             if timestamp_iso:
                 processed_msg["timestamp"] = timestamp_iso
             if media_meta:
@@ -343,22 +349,165 @@ async def list_whatsapp_destinations(
 @router.get("/messages/{message_id}/media/{instance_id}", summary="Obter mídia de uma mensagem")
 async def get_message_media(
     message_id: str,
-    instance_id: int,
+    instance_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(dependencies.get_current_active_user)
 ):
     whatsapp = get_whatsapp_service()
     
-    instance = await crud_user.get_whatsapp_instance(db, instance_id, current_user.id)
+    # Tenta extrair o ID numérico se vier no formato "ID-JID" (ex: 4-5545...)
+    try:
+        if "-" in instance_id:
+            actual_id = int(instance_id.split("-")[0])
+        else:
+            actual_id = int(instance_id)
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="ID da instância inválido")
+
+    instance = await crud_user.get_whatsapp_instance(db, actual_id, current_user.id)
     if not instance:
         raise HTTPException(status_code=404, detail="Instância não encontrada.")
     if not instance.instance_name:
         raise HTTPException(status_code=400, detail="Instância sem nome configurado.")
     
-    base64_data = await whatsapp.get_media_by_message_id(instance.instance_name, message_id)
-    if not base64_data:
+    media_data = await whatsapp.get_media_by_message_id(instance.instance_name, message_id)
+    if not media_data or not media_data.get("base64"):
         raise HTTPException(status_code=404, detail="Mídia não encontrada ou expirada.")
-    return {"base64": base64_data}
+    
+    try:
+        media_bytes = base64.b64decode(media_data["base64"])
+        return Response(content=media_bytes, media_type=media_data.get("mimetype", "application/octet-stream"))
+    except Exception as e:
+        logger.error(f"Erro ao decodificar base64: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao processar mídia")
+
+@router.get("/contacts/", response_model=schemas.ProspectContactList, summary="Listar todos os contatos de prospecção")
+async def list_all_prospect_contacts(
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+    search: Optional[str] = Query(None),
+    status: Optional[List[str]] = Query(None),
+    limit: int = Query(20),
+    time_start: Optional[str] = Query(None),
+    time_end: Optional[str] = Query(None),
+    tags: Optional[str] = Query(None)
+):
+    start_date = datetime.fromisoformat(time_start) if time_start else None
+    end_date = datetime.fromisoformat(time_end) if time_end else None
+    
+    items, total = await crud_prospect.get_all_prospect_contacts(
+        db, current_user.id, search, status, limit, start_date, end_date, tags
+    )
+    return {"items": items, "total": total}
+
+@router.get("/contacts/{pc_id}/media/{message_id}")
+async def get_contact_media_by_pc(
+    pc_id: int,
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service)
+):
+    pc = await crud_prospect.get_prospect_contact_by_id(db, pc_id)
+    if not pc: raise HTTPException(status_code=404, detail="Contato não encontrado")
+    
+    prospect = await db.get(models.Prospect, pc.prospect_id)
+    if prospect.user_id != current_user.id: raise HTTPException(status_code=403, detail="Acesso negado")
+
+    instance_id = pc.whatsapp_instance_id or (prospect.whatsapp_instance_ids[0] if prospect.whatsapp_instance_ids else None)
+    if not instance_id: raise HTTPException(status_code=400, detail="Instância não encontrada")
+    
+    instance = await db.get(models.WhatsappInstance, instance_id)
+    media_data = await whatsapp_service.get_media_by_message_id(instance.instance_name, message_id)
+    
+    if not media_data or not media_data.get("base64"): 
+        raise HTTPException(status_code=404, detail="Mídia não encontrada")
+    
+    media_bytes = base64.b64decode(media_data["base64"])
+    return Response(content=media_bytes, media_type=media_data.get("mimetype", "application/octet-stream"))
+
+@router.post("/contacts/{pc_id}/send_message")
+async def send_manual_message(
+    pc_id: int,
+    payload: Dict[str, str] = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service)
+):
+    text = payload.get("text")
+    if not text: raise HTTPException(status_code=400, detail="Texto é obrigatório")
+
+    pc = await crud_prospect.get_prospect_contact_by_id(db, pc_id)
+    if not pc: raise HTTPException(status_code=404, detail="Contato não encontrado")
+    
+    prospect = await db.get(models.Prospect, pc.prospect_id)
+    if prospect.user_id != current_user.id: raise HTTPException(status_code=403, detail="Acesso negado")
+
+    instance_id = pc.whatsapp_instance_id or (prospect.whatsapp_instance_ids[0] if prospect.whatsapp_instance_ids else None)
+    instance = await db.get(models.WhatsappInstance, instance_id)
+    contact = await db.get(models.Contact, pc.contact_id)
+    
+    await whatsapp_service.send_text_message(instance.instance_name, contact.whatsapp, text)
+    
+    history = json.loads(pc.conversa) if pc.conversa else []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    history.append({"id": f"manual_{now_iso}", "role": "assistant", "content": text, "timestamp": now_iso})
+    
+    pc.conversa = json.dumps(history)
+    pc.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(pc)
+    
+    items, _ = await crud_prospect.get_all_prospect_contacts(db, current_user.id, search=contact.whatsapp)
+    return items[0] if items else {}
+
+@router.post("/contacts/{pc_id}/send_media")
+async def send_manual_media(
+    pc_id: int,
+    file: UploadFile = File(...),
+    type: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service)
+):
+    pc = await crud_prospect.get_prospect_contact_by_id(db, pc_id)
+    if not pc: raise HTTPException(status_code=404, detail="Contato não encontrado")
+    
+    prospect = await db.get(models.Prospect, pc.prospect_id)
+    if prospect.user_id != current_user.id: raise HTTPException(status_code=403, detail="Acesso negado")
+
+    instance_id = pc.whatsapp_instance_id or (prospect.whatsapp_instance_ids[0] if prospect.whatsapp_instance_ids else None)
+    instance = await db.get(models.WhatsappInstance, instance_id)
+    contact = await db.get(models.Contact, pc.contact_id)
+
+    contents = await file.read()
+    base64_data = base64.b64encode(contents).decode('utf-8')
+    mime_type = file.content_type
+    
+    media_type = 'document'
+    if 'image' in mime_type: media_type = 'image'
+    elif 'video' in mime_type: media_type = 'video'
+    elif 'audio' in mime_type: media_type = 'audio'
+
+    await whatsapp_service.send_media_message(
+        instance.instance_name, contact.whatsapp, base64_data, media_type, mime_type, file_name=file.filename
+    )
+    
+    history = json.loads(pc.conversa) if pc.conversa else []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    history.append({
+        "id": f"manual_media_{now_iso}", "role": "assistant", 
+        "content": f"[{media_type.capitalize()} enviado: {file.filename}]", 
+        "timestamp": now_iso, "type": media_type, "filename": file.filename
+    })
+    
+    pc.conversa = json.dumps(history)
+    pc.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(pc)
+    
+    items, _ = await crud_prospect.get_all_prospect_contacts(db, current_user.id, search=contact.whatsapp)
+    return items[0] if items else {}
 
 @router.get("/", response_model=List[Prospect], summary="Listar prospecções do usuário")
 async def get_prospects(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(dependencies.get_current_active_user)):

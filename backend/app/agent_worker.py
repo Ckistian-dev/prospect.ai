@@ -200,6 +200,28 @@ async def process_active_prospects():
                         whatsapp_instance=selected_instance
                     )
 
+                    # --- MARCAR COMO LIDO (NOVO) ---
+                    try:
+                        # Filtra apenas mensagens que vieram do contato (role='user') e que possuem ID real (não temporário)
+                        user_msg_ids = [
+                            msg['id'] for msg in full_history 
+                            if msg.get('role') == 'user' and 'id' in msg and not str(msg['id']).startswith(('sent_', 'internal_'))
+                        ]
+                        
+                        if user_msg_ids:
+                            # Tenta obter o JID correto (priorizando o que está salvo no contato)
+                            target_jid = None
+                            if pc.jid_options:
+                                jids = [j.strip() for j in pc.jid_options.split(',') if j.strip()]
+                                if jids: target_jid = jids[0]
+                            
+                            if not target_jid:
+                                target_jid = f"{whatsapp_service._normalize_number(contact.whatsapp)}@s.whatsapp.net"
+                            
+                            await whatsapp_service.mark_messages_as_read(selected_instance.instance_name, target_jid, user_msg_ids)
+                    except Exception as e:
+                        logger.warning(f"Erro ao tentar marcar mensagens como lidas para {contact.nome}: {e}")
+
                     if mode == 'reply' and (not full_history or full_history[-1]['role'] != 'user'):
                         logger.warning(f"AGENTE WORKER: Contato {pc.id} em modo 'reply' mas a última mensagem não é do usuário. Ignorando e voltando para 'Aguardando Resposta'.")
                         await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao="Aguardando Resposta")

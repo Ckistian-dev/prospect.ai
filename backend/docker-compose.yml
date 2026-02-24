@@ -160,7 +160,8 @@ services:
       -o 'ConnectTimeout 10' 
       -o 'ExitOnForwardFailure yes' 
       -o 'StrictHostKeyChecking=no' 
-      -R ${SERVEO_SUBDOMAIN}:80:api:8000 serveo.net"
+      -R ${SERVEO_SUBDOMAIN}:80:api:8000 
+      -R ${EVOLUTION_SUBDOMAIN}:80:evolution_api:8080 serveo.net"
     depends_on:
       - api
     networks:

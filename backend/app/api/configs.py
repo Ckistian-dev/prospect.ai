@@ -109,6 +109,23 @@ async def delete_config(
         raise HTTPException(status_code=404, detail="Configuração não encontrada")
     return
 
+@router.get("/situations", summary="Listar situações possíveis para contatos")
+async def get_situations(
+    current_user: models.User = Depends(get_current_active_user)
+):
+    """Retorna a lista de situações possíveis para um contato de prospecção."""
+    return [
+        {"nome": "Aguardando Início", "cor": "#9ca3af"},
+        {"nome": "Processando", "cor": "#3b82f6"},
+        {"nome": "Aguardando Resposta", "cor": "#eab308"},
+        {"nome": "Resposta Recebida", "cor": "#2563eb"},
+        {"nome": "Lead Qualificado", "cor": "#16a34a"},
+        {"nome": "Não Interessado", "cor": "#dc2626"},
+        {"nome": "Atendente Chamado", "cor": "#f97316"},
+        {"nome": "Concluído", "cor": "#059669"},
+        {"nome": "Falha no Envio", "cor": "#7f1d1d"}
+    ]
+
 @router.post("/sync_sheet", summary="Sincronizar planilha do Google Sheets com uma Configuração")
 async def sync_google_sheet(
     payload: Dict[str, Any] = Body(...),

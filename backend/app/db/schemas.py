@@ -97,6 +97,23 @@ class ProspectContactUpdate(BaseModel):
     observacoes: Optional[str] = None
     jid_options: Optional[str] = None
 
+class ProspectContactRead(BaseModel):
+    id: int
+    prospect_id: int
+    contact_id: int
+    status: str  # Mapeado de situacao para compatibilidade com o frontend
+    observacoes: Optional[str] = None
+    conversa: str
+    updated_at: datetime
+    nome_contato: str
+    whatsapp: str
+    nome_prospeccao: str
+    token_usage: int
+    tags: List[Dict[str, str]] = []  # Mapeado de categoria
+
+class ProspectContactList(BaseModel):
+    items: List[ProspectContactRead]
+    total: int
 
 # --- Schemas de Prospecção ---
 class ProspectBase(BaseModel):

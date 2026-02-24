@@ -2,7 +2,7 @@ import csv
 import io
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
 from starlette.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -13,6 +13,7 @@ from app.db.schemas import Contact, ContactCreate, ContactUpdate
 from app.crud import crud_contact
 from datetime import datetime
 from fastapi.responses import Response
+from fastapi import Query
 
 router = APIRouter()
 
@@ -20,9 +21,11 @@ router = APIRouter()
 async def read_contacts(
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(dependencies.get_current_active_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000)
 ):
     """Obtém uma lista de todos os contatos do usuário logado."""
-    return await crud_contact.get_contacts_by_user(db, user_id=current_user.id)
+    return await crud_contact.get_contacts_by_user(db, user_id=current_user.id, skip=skip, limit=limit)
 
 @router.get("/categories", response_model=List[str], summary="Listar todas as categorias de contatos")
 async def get_contact_categories(

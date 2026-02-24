@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional
 import base64
 import asyncio
 import asyncpg
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import models
 
@@ -200,8 +201,12 @@ class WhatsAppService:
             logger.error(f"Falha CRÍTICA ao enviar mensagem para {normalized_number}. Erro: {e}")
             raise MessageSendError(f"Falha no envio: {e}") from e
 
-    async def send_media_message(self, instance_name: str, number: str, media: str, media_type: str, mime_type: str, caption: str = "", file_name: str = "arquivo"):
-        normalized_number = self._normalize_number(number)
+    async def send_media_message(self, instance_name: str, number: str, media: str, media_type: str, mime_type: str, caption: str = "", file_name: str = "arquivo", delay: int = 0):
+        if "@" in number:
+            normalized_number = number
+        else:
+            normalized_number = self._normalize_number(number)
+            
         # Rota da Evolution API para enviar mídia
         url = f"{self.api_url}/message/sendMedia/{instance_name}"
         
@@ -211,16 +216,40 @@ class WhatsAppService:
             "mediatype": media_type, # image, video, document
             "mimetype": mime_type,
             "fileName": file_name,
-            "caption": caption
+            "caption": caption,
+            "delay": delay
         }
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(url, headers=self.headers, json=payload, timeout=120.0)
                 response.raise_for_status()
                 logger.info(f"Mídia enviada com sucesso para {normalized_number}.")
+                return response.json()
         except Exception as e:
             logger.error(f"Falha ao enviar mídia para {normalized_number}. Erro: {e}")
             raise MessageSendError(f"Falha no envio de mídia: {e}") from e
+
+    async def send_whatsapp_audio(self, instance_name: str, number: str, audio_base64: str, delay: int = 0):
+        if "@" in number:
+            normalized_number = number
+        else:
+            normalized_number = self._normalize_number(number)
+            
+        url = f"{self.api_url}/message/sendWhatsAppAudio/{instance_name}"
+        payload = {
+            "number": normalized_number,
+            "audio": audio_base64,
+            "delay": delay
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=self.headers, json=payload, timeout=60.0)
+                response.raise_for_status()
+                logger.info(f"Áudio enviado com sucesso para {normalized_number}.")
+                return response.json()
+        except Exception as e:
+            logger.error(f"Falha ao enviar áudio para {normalized_number}. Erro: {e}")
+            raise MessageSendError(f"Falha no envio de áudio: {e}") from e
 
     async def get_media_and_convert(self, instance_name: str, message: dict) -> Optional[Dict[str, Any]]:
         """
@@ -237,7 +266,7 @@ class WhatsAppService:
 
         message_id = message_key["id"]
 
-        media_types = ["audioMessage", "imageMessage", "videoMessage", "documentMessage"]
+        media_types = ["audioMessage", "imageMessage", "videoMessage", "documentMessage", "stickerMessage"]
         media_info = None
         media_type_key = None
         for media_type in media_types:
@@ -258,7 +287,11 @@ class WhatsAppService:
         # 2. Montar o payload para a API
         url = f"{self.api_url}/chat/getBase64FromMediaMessage/{instance_name}"
         payload = {
-            "message": message,
+            "message": {
+                "key": {
+                    "id": message_id
+                }
+            },
             "convertToMp4": True if media_type_key == "videoMessage" else False
         }
 
@@ -270,6 +303,7 @@ class WhatsAppService:
                 
                 response_data = response.json()
                 media_base64 = response_data.get("base64")
+                api_mime_type = response_data.get("mimetype") or mime_type
 
                 if not media_base64:
                     logger.error(f"A API retornou sucesso mas não incluiu o 'base64' da mídia para a mensagem {message_id}.")
@@ -277,7 +311,7 @@ class WhatsAppService:
                 
                 # 4. Retornar os dados no formato esperado pelo GeminiService
                 # O GeminiService já sabe como lidar com base64 string.
-                return {"mime_type": mime_type, "data": media_base64}
+                return {"mime_type": api_mime_type, "data": media_base64}
 
         except httpx.HTTPStatusError as e:
             logger.error(f"Falha de status HTTP ao buscar mídia em base64 para msg {message_id}: {e.response.status_code} - {e.response.text}", exc_info=True)
@@ -286,23 +320,210 @@ class WhatsAppService:
             logger.error(f"Falha ao buscar mídia em base64 para msg {message_id}: {e}", exc_info=True)
             return None
 
-    async def get_media_by_message_id(self, instance_name: str, message_id: str) -> Optional[str]:
+    async def get_media_by_message_id(self, instance_name: str, message_id: str) -> Optional[Dict[str, Any]]:
         """
         Busca o base64 da mídia apenas pelo ID da mensagem.
         """
         url = f"{self.api_url}/chat/getBase64FromMediaMessage/{instance_name}"
         payload = {
             "message": { "key": { "id": message_id } },
-            "convertToMp4": False
+            "convertToMp4": True
         }
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(url, headers=self.headers, json=payload, timeout=60.0)
                 response.raise_for_status()
-                return response.json().get("base64")
+                data = response.json()
+                return {
+                    "base64": data.get("base64"),
+                    "mimetype": data.get("mimetype")
+                }
         except Exception as e:
             logger.error(f"Falha ao buscar mídia por ID {message_id}: {e}")
             return None
+
+    async def fetch_chats(self, evolution_instance_id: str, limit: int = 100, db: Optional[AsyncSession] = None, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Busca a lista de conversas únicas (última mensagem de cada JID) 
+        diretamente no banco de dados da Evolution API.
+
+        Esta função realiza uma consulta otimizada no banco de dados da Evolution API para recuperar
+        as conversas mais recentes de uma instância específica. Se uma sessão de banco de dados (db)
+        e um ID de usuário (user_id) forem fornecidos, a função também tentará correlacionar os JIDs
+        encontrados com os contatos de prospecção existentes no banco de dados local do ProspectAI,
+        enriquecendo os dados com informações de campanha e situação atual.
+
+        Args:
+            evolution_instance_id (str): O UUID da instância dentro da Evolution API.
+            limit (int, optional): O número máximo de conversas a serem retornadas. Padrão é 100.
+            db (AsyncSession, optional): Sessão assíncrona do SQLAlchemy para consulta local.
+            user_id (int, optional): ID do usuário proprietário das prospecções para correlação.
+
+        Returns:
+            List[Dict[str, Any]]: Uma lista de dicionários, onde cada dicionário representa uma conversa
+            contendo campos como remoteJid, name, lastMessage, timestamp, status, e campos de correlação
+            (situacao, campanha, prospect_contact_id) se aplicável.
+        """
+        # 1. Verifica se a URL do banco de dados da Evolution está configurada nas variáveis de ambiente
+        if not self.db_url:
+            logger.error("EVOLUTION_DATABASE_URL não configurada.")
+            return []
+
+        try:
+            # 2. Prepara a URL de conexão para o driver asyncpg (remove o prefixo do SQLAlchemy se necessário)
+            db_url = self.db_url.replace("postgresql+asyncpg://", "postgresql://")
+            conn = await asyncpg.connect(db_url)
+            try:
+                # 3. Define a query SQL otimizada para buscar a última mensagem de cada chat
+                # Otimização: Busca as mensagens mais recentes primeiro usando DISTINCT ON e depois associa aos contatos.
+                # Isso evita o LATERAL join que é extremamente pesado em bases grandes.
+                query = """
+                    WITH LatestMessages AS (
+                        -- Seleciona apenas a mensagem mais recente de cada chat (JID)
+                        -- O DISTINCT ON garante uma única linha por identificador de chat
+                        SELECT DISTINCT ON (COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid'))
+                            -- Prioriza remoteJidAlt (LID) sobre remoteJid para evitar duplicidade de chats vinculados
+                            COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid') as "remoteJid",
+                            "message",
+                            "key",
+                            "status",
+                            "messageTimestamp",
+                            "instanceId",
+                            "pushName"
+                        FROM "Message"
+                        WHERE "instanceId" = $1
+                        -- Ordenação necessária para o DISTINCT ON: agrupa por JID e pega o timestamp mais recente (DESC)
+                        ORDER BY COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid'), "messageTimestamp" DESC
+                    )
+                    SELECT 
+                        lm."remoteJid",
+                        lm."pushName" as last_message_sender,
+                        c."pushName" as display_name,
+                        c."profilePicUrl",
+                        c."updatedAt",
+                        lm.message,
+                        lm.key,
+                        lm.status,
+                        lm."messageTimestamp"
+                    FROM LatestMessages lm
+                    -- Enriquece os dados da mensagem com informações do contato (nome, foto)
+                    LEFT JOIN "Contact" c ON c."remoteJid" = lm."remoteJid" AND c."instanceId" = lm."instanceId"
+                    -- Filtra apenas chats válidos: individuais (@s.whatsapp.net), grupos (@g.us) ou identidades vinculadas (@lid)
+                    WHERE (lm."remoteJid" LIKE '%@s.whatsapp.net' OR lm."remoteJid" LIKE '%@g.us' OR lm."remoteJid" LIKE '%@lid')
+                    -- Ordena a lista final para que os chats mais recentes apareçam primeiro (estilo Inbox)
+                    ORDER BY lm."messageTimestamp" DESC NULLS LAST
+                    LIMIT $2
+                """
+                # 4. Executa a query no banco de dados da Evolution
+                rows = await conn.fetch(query, evolution_instance_id, limit)
+                
+                # 5. Processa as linhas retornadas para o formato de dicionário esperado pelo frontend
+                chats = []
+                for row in rows:
+                    msg_obj = json.loads(row["message"]) if isinstance(row["message"], str) else row["message"]
+                    key_obj = json.loads(row["key"]) if isinstance(row["key"], str) else row["key"]
+                    remote_jid = row["remoteJid"]
+                    
+                    # Extrai o conteúdo textual ou um marcador de mídia para exibição na lista
+                    content = ""
+                    if msg_obj:
+                        content = msg_obj.get("conversation") or msg_obj.get("extendedTextMessage", {}).get("text", "")
+                        if not content:
+                            if "imageMessage" in msg_obj: content = "[Imagem]"
+                            elif "videoMessage" in msg_obj: content = "[Vídeo]"
+                            elif "audioMessage" in msg_obj: content = "[Áudio]"
+                            elif "documentMessage" in msg_obj: content = "[Documento]"
+                            elif "stickerMessage" in msg_obj: content = "[Figurinha]"
+                            else: content = "[Mídia]"
+
+                    chats.append({
+                        "id": remote_jid,
+                        "remoteJid": remote_jid,
+                        "name": row["display_name"] or remote_jid.split("@")[0],
+                        "profilePicUrl": row["profilePicUrl"],
+                        "isGroup": "@g.us" in remote_jid,
+                        "lastMessage": content,
+                        "timestamp": row["messageTimestamp"] or int(row["updatedAt"].timestamp()),
+                        "status": row["status"],
+                        "fromMe": key_obj.get("fromMe", False) if key_obj else False,
+                        "lastMessageSender": row["last_message_sender"]
+                    })
+
+                # 6. Correlaciona com o banco do ProspectAI se db e user_id forem fornecidos.
+                # Isso permite exibir o status da campanha e a situação do lead diretamente na lista de chats.
+                if db and user_id:
+                    # Busca em TODAS as prospecções do usuário para aumentar a chance de match
+                    stmt = (
+                        select(models.ProspectContact, models.Prospect.nome_prospeccao, models.Contact.whatsapp)
+                        .join(models.Prospect, models.ProspectContact.prospect_id == models.Prospect.id)
+                        .join(models.Contact, models.ProspectContact.contact_id == models.Contact.id)
+                        .where(models.Prospect.user_id == user_id)
+                        .order_by(models.ProspectContact.updated_at.desc())
+                    )
+                    result = await db.execute(stmt)
+                    prospect_contacts = result.all()
+
+                    # Cria um mapa de JID para dados de prospecção para busca rápida (O(1))
+                    jid_map = {}
+                    for pc, campaign_name, whatsapp in prospect_contacts:
+                        correlation_data = {
+                            "situacao": pc.situacao,
+                            "campanha": campaign_name,
+                            "prospect_contact_id": pc.id
+                        }
+                        # 1. Mapeia pelo número de telefone (formato JID padrão)
+                        normalized = self._normalize_number(whatsapp)
+                        standard_jid = f"{normalized}@s.whatsapp.net"
+                        if standard_jid not in jid_map:
+                            jid_map[standard_jid] = correlation_data
+                        
+                        # 2. Mapeia pelos JIDs salvos em jid_options (incluindo LIDs e variações)
+                        if pc.jid_options:
+                            jids = [j.strip() for j in pc.jid_options.split(',') if j.strip()]
+                            for jid in jids:
+                                if jid not in jid_map: jid_map[jid] = correlation_data
+
+                    # Aplica a correlação nos chats encontrados
+                    for chat in chats:
+                        match = jid_map.get(chat["remoteJid"])
+                        chat["situacao"] = match["situacao"] if match else None
+                        chat["campanha"] = match["campanha"] if match else None
+                        chat["prospect_contact_id"] = match["prospect_contact_id"] if match else None
+
+                return chats
+            finally:
+                # 7. Garante o fechamento da conexão com o banco de dados da Evolution
+                await conn.close()
+        except Exception as e:
+            logger.error(f"Erro ao buscar chats no banco de dados da Evolution: {e}", exc_info=True)
+            return []
+
+    def format_evolution_message(self, raw_msg: Dict[str, Any]) -> Dict[str, Any]:
+        """Converte o formato da Evolution para o formato interno do chat."""
+        key = raw_msg.get("key", {})
+        msg_content = raw_msg.get("message", {})
+        
+        content = ""
+        msg_type = "text"
+        if msg_content:
+            content = msg_content.get("conversation") or msg_content.get("extendedTextMessage", {}).get("text", "")
+            if "imageMessage" in msg_content: msg_type = "image"
+            elif "videoMessage" in msg_content: msg_type = "video"
+            elif "audioMessage" in msg_content: msg_type = "audio"
+            elif "stickerMessage" in msg_content: msg_type = "sticker"
+            elif "documentMessage" in msg_content: msg_type = "document"
+            if not content and msg_type != "text":
+                content = msg_content.get(f"{msg_type}Message", {}).get("caption", "")
+
+        return {
+            "id": key.get("id"),
+            "role": "assistant" if key.get("fromMe") else "user",
+            "senderName": raw_msg.get("pushName"),
+            "content": content,
+            "type": msg_type,
+            "timestamp": raw_msg.get("messageTimestamp"),
+            "status": raw_msg.get("status")
+        }
 
     async def fetch_chat_history(self, instance_name: str, number: str, count: int = 999, mode: str = None, jids: List[str] = None, evolution_instance_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -333,9 +554,33 @@ class WhatsAppService:
                     logger.warning(f"Fetch History: Instância '{instance_name}' NÃO ENCONTRADA no banco da Evolution.")
                     return []
 
-                # 2. Query otimizada usando o ID da instância
-                like_pattern = None
+                # Lógica: Contact -> IsOnWhatsapp -> Message
+                all_target_jids = []
+                
+                # Se não temos JIDs mas temos número, tentamos achar o JID no Contact
+                if not jids and number:
+                    clean_number = "".join(filter(str.isdigit, str(number)))
+                    # Busca JID na tabela Contact
+                    contact_jid = await conn.fetchval(
+                        'SELECT "remoteJid" FROM "Contact" WHERE "instanceId" = $1 AND "remoteJid" LIKE $2 LIMIT 1',
+                        instance_id, f"%{clean_number}%"
+                    )
+                    if contact_jid:
+                        jids = [contact_jid]
+
                 if jids:
+                    for jid in jids:
+                        # Busca correlações na tabela IsOnWhatsapp
+                        jid_options_str = await conn.fetchval('SELECT "jidOptions" FROM "IsOnWhatsapp" WHERE "remoteJid" = $1', jid)
+                        if jid_options_str:
+                            options = [j.strip() for j in jid_options_str.split(',') if j.strip()]
+                            all_target_jids.extend(options)
+                        else:
+                            all_target_jids.append(jid)
+                    
+                    all_target_jids = list(set(all_target_jids))
+
+                if all_target_jids:
                     query = """
                         SELECT "key", "message", "messageTimestamp", "pushName", "status"
                         FROM "Message"
@@ -347,7 +592,7 @@ class WhatsAppService:
                         ORDER BY "messageTimestamp" DESC
                         LIMIT $3
                     """
-                    rows = await conn.fetch(query, instance_id, jids, count)
+                    rows = await conn.fetch(query, instance_id, all_target_jids, count)
                 else:
                     # 1. Limpeza básica
                     clean_number = "".join(filter(str.isdigit, str(number)))
@@ -509,6 +754,40 @@ class WhatsAppService:
         except Exception as e:
             logger.error(f"Falha ao deletar mensagem {message_id} em {remote_jid}: {e}")
 
+    async def mark_messages_as_read(self, instance_name: str, remote_jid: str, message_ids: List[str]):
+        """
+        Marca mensagens como lidas na Evolution API.
+        """
+        if not message_ids:
+            return None
+
+        url = f"{self.api_url}/chat/markMessageAsRead/{instance_name}"
+        
+        # Se não for um grupo e não tiver @, normaliza para o formato do WhatsApp
+        if "@" not in remote_jid:
+            normalized = self._normalize_number(remote_jid)
+            remote_jid = f"{normalized}@s.whatsapp.net"
+
+        read_messages = [
+            {
+                "remoteJid": remote_jid,
+                "fromMe": False, # Marcamos como lidas as mensagens que RECEBEMOS do contato
+                "id": msg_id
+            }
+            for msg_id in message_ids
+        ]
+
+        payload = {"readMessages": read_messages}
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=self.headers, json=payload, timeout=10.0)
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.error(f"Falha ao marcar mensagens como lidas para {remote_jid}: {e}")
+            return None
+
     async def get_jid_options_from_db(self, instance_name: str, remote_jid: str) -> Optional[List[Dict[str, Any]]]:
         """
         Busca as opções de JID (jidOptions) na tabela IsOnWhatsapp do banco da Evolution.
@@ -541,6 +820,36 @@ class WhatsAppService:
             logger.error(f"Erro ao buscar jidOptions no DB da Evolution: {e}")
             return None
 
+    async def get_all_jids_for_contact(self, remote_jid: str) -> List[str]:
+        """
+        Busca todos os JIDs relacionados a um contato na tabela IsOnWhatsapp do banco da Evolution.
+        Retorna uma lista contendo o JID original e quaisquer variações encontradas (jidOptions).
+        """
+        if not self.db_url:
+            return [remote_jid]
+
+        try:
+            db_url = self.db_url.replace("postgresql+asyncpg://", "postgresql://")
+            conn = await asyncpg.connect(db_url)
+            try:
+                # Busca na tabela IsOnWhatsapp
+                query = 'SELECT "jidOptions" FROM "IsOnWhatsapp" WHERE "remoteJid" = $1'
+                jid_options_str = await conn.fetchval(query, remote_jid)
+                
+                jids = {remote_jid}
+                if jid_options_str:
+                    # Trata o formato CSV conforme exemplo fornecido pelo usuário
+                    # Ex: "5545999924229@s.whatsapp.net,55459924229@s.whatsapp.net"
+                    parts = [j.strip() for j in jid_options_str.split(',') if j.strip()]
+                    jids.update(parts)
+                
+                return list(jids)
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.error(f"Erro ao buscar JIDs relacionados para {remote_jid}: {e}")
+            return [remote_jid]
+
     async def check_whatsapp_numbers(self, instance_name: str, numbers: List[str]) -> Optional[List[Dict[str, Any]]]:
         results = []
         # Rota correta da Evolution API para verificar números
@@ -566,19 +875,19 @@ class WhatsAppService:
         normalized_number = self._normalize_number(number)
         url = f"{self.api_url}/chat/sendPresence/{instance_name}"
         
-        # Payload conforme documentação oficial da Evolution API
+        # Payload para Evolution API v2
         payload = {
             "number": normalized_number,
-            "options": {
-                "delay": int(delay),
-                "presence": presence,
-                "number": normalized_number
-            }
+            "presence": presence,
+            "delay": int(delay)
         }
 
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(url, headers=self.headers, json=payload, timeout=5.0)
+                # Ignora erro 404 (Group not found / Number not found) conforme solicitado
+                if response.status_code == 404:
+                    return
                 response.raise_for_status()
         except Exception as e:
             logger.warning(f"Falha ao enviar status '{presence}' para {normalized_number}: {e}")

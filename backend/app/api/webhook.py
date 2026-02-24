@@ -50,7 +50,7 @@ async def process_webhook_message(data: dict):
             
             _contact, prospect_contact, prospect = prospect_info
 
-            situacoes_de_parada = ["Não Interessado", "Concluído", "Falha no Envio", "Conversa Manual", "Fechado", "Atendente Chamado"]
+            situacoes_de_parada = ["Conversa Manual", "Fechado", "Atendente Chamado"]
             if prospect_contact.situacao in situacoes_de_parada:
                 logger.info(f"Webhook: Contato {contact_number} encontrado, mas em situação terminal ({prospect_contact.situacao}). Ignorando.")
                 return

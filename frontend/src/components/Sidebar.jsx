@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, MessageSquareQuote, Bot, Settings, GitBranch, LogOut, Rocket, BluetoothConnectedIcon, Phone, Link } from 'lucide-react';
+import { LayoutDashboard, Users, MessageSquareQuote, Bot, Settings, GitBranch, LogOut, Rocket, BluetoothConnectedIcon, Phone, Link, MessageSquareText } from 'lucide-react';
 
 const Sidebar = ({ isSuperUser }) => {
     const [isExpanded, setIsExpanded] = useState(false);
@@ -17,6 +17,7 @@ const Sidebar = ({ isSuperUser }) => {
         { icon: GitBranch, name: 'Prospecções', path: '/prospects' },
         { icon: Bot, name: 'Contexto', path: '/configs' },
         { icon: Link, name: 'Conexão', path: '/whatsapp' },
+        { icon: MessageSquareText, name: 'Mensagens', path: '/mensagens' },
         { icon: Rocket, name: 'Principal', path: '/prospecting' },
     ];
 

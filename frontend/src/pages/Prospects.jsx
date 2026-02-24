@@ -95,6 +95,11 @@ export const ConversationModal = ({ onClose, conversation, contactIdentifier }) 
                         return (
                             <div key={index} className={`flex items-end gap-2 w-full ${isAssistant ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-xs md:max-w-md p-3 rounded-2xl shadow-sm break-words ${isAssistant ? 'bg-[#005c4b] text-white rounded-br-none' : 'bg-white text-gray-800 rounded-bl-none'}`}>
+                                    {!isAssistant && msg.senderName && (
+                                        <div className="text-[11px] font-bold text-brand-green mb-1 opacity-80">
+                                            {msg.senderName}
+                                        </div>
+                                    )}
                                     {isImage ? (
                                         <ImageMessage messageId={msg.id} mimeType={msg.mimeType} fallbackContent={msg.content} />
                                     ) : (

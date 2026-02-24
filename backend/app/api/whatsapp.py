@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks, Path
+from fastapi import APIRouter, Depends, HTTPException, Body, BackgroundTasks, Path, Response, Query, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import Dict, Any, List
 import logging
+import base64
 
 from app.api import dependencies
 from app.db.database import get_db, SessionLocal
@@ -169,3 +171,140 @@ async def delete_instance(
     
     await crud_user.delete_whatsapp_instance(db, instance)
     return {"status": "deleted"}
+
+@router.get("/{instance_id}/chats", summary="Listar conversas da instância (Evolution DB)")
+async def list_instance_chats(
+    instance_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
+    limit: int = Query(100, description="Limite de conversas a retornar"),
+):
+    instance = await crud_user.get_whatsapp_instance(db, instance_id, current_user.id)
+    if not instance or not instance.instance_id:
+        raise HTTPException(status_code=404, detail="Instância não encontrada ou não inicializada.")
+    
+    # Agora o fetch_chats cuida de toda a lógica de correlação e enriquecimento
+    return await whatsapp_service.fetch_chats(
+        instance.instance_id, 
+        limit=limit, 
+        db=db, 
+        user_id=current_user.id
+    )
+
+@router.get("/{instance_id}/messages/{remote_jid}", summary="Obter histórico de mensagens de um JID (Evolution DB)")
+async def get_chat_messages(
+    instance_id: int,
+    remote_jid: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
+):
+    instance = await crud_user.get_whatsapp_instance(db, instance_id, current_user.id)
+    if not instance or not instance.instance_id:
+        raise HTTPException(status_code=404, detail="Instância não encontrada.")
+    
+    # Busca JIDs relacionados (jidOptions) antes de buscar o histórico
+    all_jids = await whatsapp_service.get_all_jids_for_contact(remote_jid)
+    
+    raw_messages = await whatsapp_service.fetch_chat_history(
+        instance_name=instance.instance_name,
+        number="",
+        jids=all_jids,
+        evolution_instance_id=instance.instance_id
+    )
+    
+    return [whatsapp_service.format_evolution_message(m) for m in reversed(raw_messages)]
+
+@router.post("/{instance_id}/send", summary="Enviar mensagem manual (Evolution API)")
+async def send_message(
+    instance_id: int,
+    payload: Dict[str, Any] = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
+):
+    instance = await crud_user.get_whatsapp_instance(db, instance_id, current_user.id)
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instância não encontrada.")
+    
+    remote_jid = payload.get("remoteJid")
+    text = payload.get("text")
+    
+    if not remote_jid or not text:
+        raise HTTPException(status_code=400, detail="remoteJid e text são obrigatórios.")
+    
+    result = await whatsapp_service.send_text_message(instance.instance_name, remote_jid, text)
+    return result
+
+@router.get("/{instance_id}/media/{message_id}", summary="Obter mídia de uma mensagem (Evolution API)")
+async def get_whatsapp_media(
+    instance_id: str,
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service)
+):
+    # Tenta extrair o ID numérico se vier no formato "ID-JID" (ex: 4-5545...)
+    try:
+        if "-" in instance_id:
+            actual_id = int(instance_id.split("-")[0])
+        else:
+            actual_id = int(instance_id)
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="ID da instância inválido")
+
+    instance = await crud_user.get_whatsapp_instance(db, actual_id, current_user.id)
+    if not instance: raise HTTPException(status_code=404, detail="Instância não encontrada")
+    
+    media_data = await whatsapp_service.get_media_by_message_id(instance.instance_name, message_id)
+    if not media_data or not media_data.get("base64"): 
+        raise HTTPException(status_code=404, detail="Mídia não encontrada")
+    
+    try:
+        media_bytes = base64.b64decode(media_data["base64"])
+        return Response(content=media_bytes, media_type=media_data.get("mimetype", "application/octet-stream"))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Erro ao processar mídia")
+
+@router.post("/{instance_id}/send-media", summary="Enviar mídia (Evolution API)")
+async def send_whatsapp_media(
+    instance_id: int,
+    file: UploadFile = File(...),
+    remoteJid: str = Form(...),
+    mediaType: str = Form(...),
+    caption: str = Form(""),
+    delay: int = Form(0),
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
+):
+    instance = await crud_user.get_whatsapp_instance(db, instance_id, current_user.id)
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instância não encontrada.")
+    
+    file_content = await file.read()
+    base64_content = base64.b64encode(file_content).decode("utf-8")
+    
+    if mediaType == "audio":
+        # Usa o endpoint específico para áudio (PTT) conforme documentação
+        result = await whatsapp_service.send_whatsapp_audio(
+            instance.instance_name, 
+            remoteJid, 
+            base64_content,
+            delay=delay
+        )
+    else:
+        # Usa o endpoint genérico de mídia
+        result = await whatsapp_service.send_media_message(
+            instance.instance_name,
+            remoteJid,
+            base64_content,
+            mediaType,
+            file.content_type,
+            file_name=file.filename,
+            caption=caption,
+            delay=delay
+        )
+    
+    return result

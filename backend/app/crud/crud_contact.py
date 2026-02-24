@@ -25,10 +25,13 @@ async def get_contact(db: AsyncSession, contact_id: int, user_id: int) -> Option
     )
     return result.scalars().first()
 
-async def get_contacts_by_user(db: AsyncSession, user_id: int) -> List[models.Contact]:
+async def get_contacts_by_user(db: AsyncSession, user_id: int, skip: int = 0, limit: int = 100) -> List[models.Contact]:
     """Busca todos os contatos de um usuário, ordenados por nome."""
     result = await db.execute(
-        select(models.Contact).where(models.Contact.user_id == user_id).order_by(models.Contact.nome)
+        select(models.Contact)
+        .where(models.Contact.user_id == user_id)
+        .order_by(models.Contact.nome)
+        .offset(skip).limit(limit)
     )
     return result.scalars().all()
 
