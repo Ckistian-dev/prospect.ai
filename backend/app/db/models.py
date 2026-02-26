@@ -19,6 +19,7 @@ class User(Base):
 
     tokens: Mapped[int] = mapped_column(Integer, default=0)
     spreadsheet_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Relacionamentos
     configs: Mapped[List["Config"]] = relationship(back_populates="owner")
@@ -70,6 +71,10 @@ class Config(Base):
     spreadsheet_rag_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="ID da Planilha de Conhecimento (RAG)")
     drive_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="ID da pasta do Google Drive")
     prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Contexto fixo gerado a partir das abas de sistema")
+    
+    google_calendar_credentials: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    available_hours: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, comment="Horários disponíveis para agendamento")
+    is_calendar_active: Mapped[bool] = mapped_column(Boolean, default=False)
     
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 

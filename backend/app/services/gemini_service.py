@@ -5,7 +5,7 @@ from google.genai import types
 from collections.abc import Set
 import logging
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import base64
 from typing import Optional, List, Dict, Any
 import asyncio
@@ -285,33 +285,54 @@ class GeminiService:
             logger.warning(f"RAG: Falha ao gerar embedding para a query: '{query_text[:50]}...'")
             return ""
 
-        # Busca principal: Top 10 mais relevantes
-        stmt = select(models.KnowledgeVector).where(
+        # Busca as origens únicas (abas/drive) para garantir a recuperação por categoria
+        origins_stmt = select(models.KnowledgeVector.origin).where(
             models.KnowledgeVector.config_id == config_id
-        ).order_by(
-            models.KnowledgeVector.embedding.cosine_distance(query_embedding)
-        ).limit(10)
+        ).distinct()
+        origins_result = await db.execute(origins_stmt)
+        origins = origins_result.scalars().all()
         
-        result = await db.execute(stmt)
-        vectors = result.scalars().all()
-        
-        if not vectors:
-            # Debug: Verifica se existem vetores para esta configuração
-            count_stmt = select(func.count()).select_from(models.KnowledgeVector).where(models.KnowledgeVector.config_id == config_id)
-            count = (await db.execute(count_stmt)).scalar()
-            if count == 0:
-                logger.warning(f"RAG: Nenhum vetor encontrado no banco para config_id {config_id}. A base de conhecimento pode estar vazia.")
-            else:
-                logger.info(f"RAG: Vetores existem ({count}), mas nenhum foi retornado pela busca de similaridade.")
+        if not origins:
             return ""
 
-        # Prioriza Drive se não houver na lista (opcional, baseado no AtendAI)
-        # Aqui simplificamos pegando os chunks únicos
-        chunks = [v.content for v in vectors]
-        unique_chunks = list(dict.fromkeys(chunks))
+        all_formatted_sections = []
         
-        context = "\n".join(unique_chunks)
-        logger.info(f"RAG: Contexto recuperado com sucesso. {len(vectors)} vetores encontrados.")
+        for origin in origins:
+            # Recupera os 10 itens mais relevantes para cada aba/origem
+            stmt = select(models.KnowledgeVector).where(
+                models.KnowledgeVector.config_id == config_id,
+                models.KnowledgeVector.origin == origin
+            ).order_by(
+                models.KnowledgeVector.embedding.cosine_distance(query_embedding)
+            ).limit(10)
+            
+            res = await db.execute(stmt)
+            vectors = res.scalars().all()
+            
+            if not vectors:
+                continue
+                
+            # Agrupa as linhas sob um único cabeçalho para formar a tabela
+            header = ""
+            rows = []
+            for v in vectors:
+                # O conteúdo está no formato: "# Nome\nHeader|Header\nValue|Value"
+                lines = v.content.split('\n')
+                if len(lines) >= 3:
+                    header = lines[1]
+                    rows.append(lines[2])
+            
+            if header:
+                # Formata a seção conforme o exemplo solicitado
+                section_name = origin.upper() if origin.lower() == "drive" else origin
+                section_text = f"# {section_name}\n{header}\n" + "\n".join(rows)
+                all_formatted_sections.append(section_text)
+
+        if not all_formatted_sections:
+            return ""
+
+        context = "\n\n".join(all_formatted_sections)
+        logger.info(f"RAG: Contexto recuperado e formatado em tabelas por seção.")
         return context
 
     def _format_history_for_prompt(self, db_history: List[dict]) -> str:
@@ -342,6 +363,18 @@ class GeminiService:
             return "Nenhuma mensagem no histórico."
             
         return "\n".join(history_lines)
+
+    def _get_time_context(self) -> str:
+        """Retorna uma string formatada com a data, hora e dia da semana atual (Brasília)."""
+        now_utc = datetime.now(timezone.utc)
+        # Ajuste para o fuso horário de Brasília (UTC-3) para as personas brasileiras
+        now_br = now_utc.astimezone(timezone(timedelta(hours=-3)))
+        dias_semana = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
+        return (
+            f"# CONTEXTO TEMPORAL\n"
+            f"Data e Hora Atual: {now_br.strftime('%d/%m/%Y %H:%M:%S')}\n"
+            f"Dia da Semana: {dias_semana[now_br.weekday()]}\n"
+        )
 
     # --- ASSINATURA ATUALIZADA PARA PASSAR DB E USER ---
     async def transcribe_and_analyze_media(
@@ -444,8 +477,11 @@ class GeminiService:
             # A função agora retorna uma string formatada, não mais um JSON.
             historico_conversa_str = self._format_history_for_prompt(db_history or [])
             
+            time_context = self._get_time_context()
+
             analysis_prompt_text = (
                 f"# CONTEXTO (RAG)\n{rag_context}\n\n"
+                f"{time_context}\n"
                 f"# HISTÓRICO DA CONVERSA\n{historico_conversa_str}\n\n"
                 f"# TAREFA ATUAL: Extração de Dados de Mídia\n"
                 f"Analise o arquivo enviado (imagem ou documento) e extraia as informações relevantes para a prospecção.\n\n"
@@ -503,6 +539,16 @@ class GeminiService:
         
         # System Instruction (Prompt Fixo)
         system_instruction = config.prompt or "Você é um assistente de prospecção."
+        
+        # --- TIME CONTEXT ---
+        time_context = self._get_time_context()
+
+        # --- CALENDAR CONTEXT ---
+        calendar_context = ""
+        if config.is_calendar_active and config.google_calendar_credentials and config.available_hours:
+            calendar_context = f"\n# DISPONIBILIDADE DE AGENDA\nOs horários disponíveis para agendamento são: {json.dumps(config.available_hours, ensure_ascii=False)}.\n"
+            calendar_context += "Se o cliente demonstrar interesse em agendar, verifique a disponibilidade e proponha um horário. Se confirmado, use a ação 'agendar_reuniao'."
+            # Nota: Em uma implementação real, aqui injetaríamos os eventos já ocupados do Google Calendar.
 
         # Montagem do Prompt Texto (Estilo AtendAI)
         prompt_text = (
@@ -510,7 +556,9 @@ class GeminiService:
             f"# HISTÓRICO\n{formatted_history}\n\n"
             f"# DADOS DO CONTATO\n"
             f"Nome: {contact.nome}\n"
-            f"Observações: {contact.observacoes}\n\n"
+            f"Observações: {contact.observacoes}\n"
+            f"{time_context}"
+            f"{calendar_context}\n"
             f"# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)\n"
             f"- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.\n"
             f"- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.\n"
@@ -545,7 +593,7 @@ class GeminiService:
             f"3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.\n"
             f"4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.\n"
             f"5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.\n"
-            f"6. **Novos Contatos:** Se o cliente indicar outra pessoa para contato (ex: 'Fale com meu sócio Fulano no 99999-9999'), extraia os dados para o campo `novos_contatos`.\n"
+            f"6. **Agendamento:** Se o cliente confirmar um horário, retorne 'agendar_reuniao' em `acao_agenda` e a data/hora ISO em `data_agendamento`.\n"
             f"# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)\n"
             f"Retorne APENAS um JSON válido, sem blocos de código.\n"
             f"{{\n"
@@ -554,7 +602,9 @@ class GeminiService:
             f'  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),\n'
             f'  "observacoes": "Resumo curto da conversa",\n'
             f'  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],\n'
-            f'  "novos_contatos": [{{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}}]\n'
+            f'  "novos_contatos": [{{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}}],\n'
+            f'  "acao_agenda": "agendar_reuniao" | null,\n'
+            f'  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null\n'
             f"}}"
         )
 
@@ -639,7 +689,8 @@ class GeminiService:
             "pergunta_usuario": question,
             "dados_contexto": {
                 "resumo_usuario": {"id": user.id, "email": user.email},
-                "prospeccoes_no_periodo": simplified_prospects
+                "prospeccoes_no_periodo": simplified_prospects,
+                "contexto_temporal": self._get_time_context().strip()
             },
             "formato_resposta_obrigatorio": {
                 "descricao": "Sua resposta DEVE ser um único objeto JSON válido. Siga a estrutura sugerida.",

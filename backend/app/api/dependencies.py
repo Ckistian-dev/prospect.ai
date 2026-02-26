@@ -20,7 +20,7 @@ async def get_current_active_user(
     admin_email = getattr(settings, "ADMIN_EMAIL", None)
     if admin_email and token_data.email == admin_email:
         # Retorna um objeto User "falso" para o admin, já que ele não está no banco
-        return models.User(id=0, email=admin_email, instance_name="admin", tokens=999999)
+        return models.User(id=0, email=admin_email, tokens=999999, hashed_password="")
 
     user = await crud_user.get_user_by_email(db, email=token_data.email)
     if not user:

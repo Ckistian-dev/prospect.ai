@@ -3,11 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import JSONResponse
 
 from app.api import dependencies
-from app.crud import crud_user, crud_contact
+from app.crud import crud_user, crud_contact, crud_config
 from app.db import models
 from app.db.database import get_db
 from app.db.schemas import UserUpdate
 from app.services.google_contacts_service import GoogleContactsService
+from app.services.google_calendar_service import GoogleCalendarService
 
 router = APIRouter()
 
@@ -97,3 +98,51 @@ async def sync_all_contacts(
         "message": "Sincronização manual concluída.",
         "details": result
     })
+
+# --- Rotas para Google Calendar (Vinculadas a Config) ---
+
+@router.get("/calendar/auth/url", summary="Obter URL de autorização do Google Calendar")
+def get_calendar_auth_url(
+    redirect_uri: str = Query(..., description="A URL de callback do frontend."),
+    current_user: models.User = Depends(dependencies.get_current_active_user)
+):
+    """Gera a URL para autorizar acesso ao Google Calendar."""
+    service = GoogleCalendarService()
+    auth_url = service.get_authorization_url(redirect_uri=redirect_uri)
+    return {"authorization_url": auth_url}
+
+@router.post("/calendar/auth/callback", summary="Callback de autorização do Google Calendar")
+async def calendar_auth_callback(
+    code: str = Query(...),
+    redirect_uri: str = Query(...),
+    config_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+):
+    """Troca o código pelo token e salva na Configuração."""
+    config = await crud_config.get_config(db, config_id, current_user.id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Configuração não encontrada.")
+
+    service = GoogleCalendarService(config=config)
+    try:
+        credentials_dict = service.fetch_token(code=code, redirect_uri=redirect_uri)
+        config.google_calendar_credentials = credentials_dict
+        await db.commit()
+        return {"status": "success", "message": "Google Agenda conectado com sucesso."}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Falha ao conectar Google Agenda: {e}")
+
+@router.post("/calendar/{config_id}/disconnect", summary="Desconectar do Google Calendar")
+async def disconnect_calendar_account(
+    config_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+):
+    config = await crud_config.get_config(db, config_id, current_user.id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Configuração não encontrada.")
+    
+    config.google_calendar_credentials = None
+    await db.commit()
+    return {"status": "disconnected", "message": "Google Agenda desconectado."}

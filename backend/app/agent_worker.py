@@ -13,6 +13,8 @@ from app.crud import crud_prospect, crud_user, crud_config, crud_contact
 from app.services.whatsapp_service import get_whatsapp_service, MessageSendError, WhatsAppService
 from app.services.gemini_service import get_gemini_service
 from app.services.google_drive_service import get_drive_service
+from app.services.google_calendar_service import get_google_calendar_service
+from googleapiclient.errors import HttpError
 from app.api.prospecting import _synchronize_and_process_history
 
 # Configuração do logging
@@ -239,6 +241,8 @@ async def process_active_prospects():
                     files_to_send = ia_response.get("arquivos_anexos", [])
                     novos_contatos = ia_response.get("novos_contatos", [])
                     ia_tokens_used = ia_response.get("token_usage", 0)
+                    acao_agenda = ia_response.get("acao_agenda")
+                    data_agendamento = ia_response.get("data_agendamento")
                     new_notification_id = None
                     
                     history_after_response = full_history.copy()
@@ -389,6 +393,52 @@ async def process_active_prospects():
                                             logger.info(f"AGENTE WORKER: Contato {nc_nome} adicionado à campanha {campaign.id}.")
                             except Exception as e:
                                 logger.error(f"AGENTE WORKER: Erro ao processar novo contato da IA: {e}", exc_info=True)
+
+                    # --- PROCESSAMENTO DE AGENDAMENTO ---
+                    if acao_agenda == "agendar_reuniao" and data_agendamento:
+                        try:
+                            logger.info(f"AGENTE WORKER: Agendando reunião para {data_agendamento} com {contact.nome}...")
+                            
+                            if not persona_config.google_calendar_credentials:
+                                raise Exception("Credenciais do Google Calendar não configuradas.")
+
+                            calendar_service = get_google_calendar_service(persona_config)
+                            service = calendar_service.get_service()
+
+                            dt_start = datetime.fromisoformat(data_agendamento)
+                            dt_end = dt_start + timedelta(hours=1)
+
+                            event_body = {
+                                'summary': f'Reunião com {contact.nome}',
+                                'description': f'Agendado via ProspectAI.\nContato: {contact.nome}\nWhatsApp: {contact.whatsapp}\nObs: {new_observation}',
+                                'start': {'dateTime': dt_start.isoformat(), 'timeZone': 'America/Sao_Paulo'},
+                                'end': {'dateTime': dt_end.isoformat(), 'timeZone': 'America/Sao_Paulo'},
+                            }
+
+                            loop = asyncio.get_running_loop()
+                            event = await loop.run_in_executor(
+                                None,
+                                lambda: service.events().insert(calendarId='primary', body=event_body).execute()
+                            )
+                            new_observation += f" [Reunião agendada: {event.get('htmlLink')}]"
+                        except HttpError as e:
+                            logger.error(f"AGENTE WORKER: Erro HTTP do Google Calendar: {e}")
+                            error_message = f"Erro da API do Google ({e.resp.status})"
+                            try:
+                                error_content = json.loads(e.content)
+                                errors = error_content.get('error', {}).get('errors', [])
+                                if errors and errors[0].get('reason') == 'accessNotConfigured':
+                                    error_message = "Falha no agendamento: A API do Google Calendar não está ativada. Por favor, ative-a no Google Cloud Console."
+                                elif errors:
+                                    error_message = f"Falha no agendamento: {errors[0].get('message', e.reason)}"
+                                else:
+                                    error_message = f"Falha no agendamento: {e.reason}"
+                            except (json.JSONDecodeError, IndexError, KeyError):
+                                error_message = f"Falha no agendamento: {e.reason or 'Erro desconhecido na API do Google.'}"
+                            new_observation += f" [{error_message}]"
+                        except Exception as e:
+                            logger.error(f"AGENTE WORKER: Erro ao agendar reunião: {e}")
+                            new_observation += f" [Falha no agendamento: {str(e)}]"
 
                     if not sent_any_message:
                         logger.info(f"AGENTE WORKER: IA decidiu não enviar mensagem para {contact.whatsapp} (Modo: {mode}).")

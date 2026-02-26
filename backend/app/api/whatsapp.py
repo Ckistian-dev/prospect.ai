@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Dict, Any, List
 import logging
+import asyncio
 import base64
 
 from app.api import dependencies
@@ -16,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 async def run_check_messages(user_id: int, instance_id: int):
     """Função auxiliar para rodar a verificação em background com sessão própria."""
+    # Aguarda 5 minutos conforme solicitado antes de iniciar a varredura
+    await asyncio.sleep(300)
+    
     from app.services.whatsapp_service import get_whatsapp_service
     
     whatsapp_service = get_whatsapp_service()
@@ -23,7 +27,7 @@ async def run_check_messages(user_id: int, instance_id: int):
     async with SessionLocal() as db:
         instance = await crud_user.get_whatsapp_instance(db, instance_id, user_id)
         if instance:
-            await whatsapp_service.check_prospect_messages(db, instance.owner)
+            await whatsapp_service.check_prospect_messages(db, instance.owner, instance_id=instance.id)
 
 @router.get("/", summary="Listar instâncias do WhatsApp", response_model=List[schemas.WhatsappInstance])
 async def list_instances(

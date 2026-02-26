@@ -57,6 +57,16 @@ async def _process_raw_message(
                 if waid_match:
                     content += f", WhatsApp: {waid_match.group(1)}"
 
+        elif msg_content.get("locationMessage"):
+            loc_msg = msg_content["locationMessage"]
+            lat = loc_msg.get("degreesLatitude")
+            long = loc_msg.get("degreesLongitude")
+            content = f"[Localização] https://maps.google.com/?q={lat},{long}"
+            media_meta["type"] = "location"
+            media_meta["latitude"] = lat
+            media_meta["longitude"] = long
+            media_meta["thumbnail"] = loc_msg.get("jpegThumbnail")
+
         elif msg_content.get("audioMessage") or msg_content.get("imageMessage") or msg_content.get("documentMessage") or msg_content.get("stickerMessage"):
             media_data = await whatsapp_service.get_media_and_convert(instance_name, raw_msg)
             if media_data:

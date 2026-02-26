@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 
@@ -66,13 +67,16 @@ async def process_webhook_message(data: dict):
 
 async def process_connection_open(instance_name: str):
     """Processa evento de conexão aberta para verificar mensagens perdidas."""
+    # Aguarda 5 minutos conforme solicitado antes de iniciar a varredura
+    await asyncio.sleep(300)
+    
     from app.services.whatsapp_service import get_whatsapp_service
     
     async with SessionLocal() as db:
         instance = await crud_user.get_whatsapp_instance_by_name(db, instance_name)
         if instance:
             whatsapp_service = get_whatsapp_service()
-            await whatsapp_service.check_prospect_messages(db, instance.owner)
+            await whatsapp_service.check_prospect_messages(db, instance.owner, instance_id=instance.id)
 
 @router.post("", summary="Receber eventos de webhook da Evolution API")
 async def receive_evolution_webhook(request: Request, background_tasks: BackgroundTasks):

@@ -12,6 +12,7 @@ from app.api import admin as admin_router
 from app.api import whatsapp as whatsapp_router
 from app.api import prospecting as prospecting_router
 from app.api import webhook as webhook_router
+from app.api import integracao_atendai as atendai_router
 from app.api import dashboard as dashboard_router
 from app.api import google as google_contacts_router
 
@@ -38,6 +39,12 @@ async def create_db_and_tables():
         # Em um ambiente de produção, você provavelmente usaria Alembic para migrações.
         # Mas para desenvolvimento, isso é suficiente.
         await conn.run_sync(models.Base.metadata.create_all)
+
+    # Inicializa a instância do AtendAI automaticamente
+    try:
+        await atendai_router.ensure_atendai_instance()
+    except Exception as e:
+        logger.error(f"Erro ao iniciar instância AtendAI: {e}")
     logger.info("Tabelas do banco de dados verificadas/criadas.")    
 
 
@@ -89,6 +96,7 @@ app.include_router(admin_router.router, prefix=f"{API_PREFIX}/admin", tags=["Adm
 app.include_router(whatsapp_router.router, prefix=f"{API_PREFIX}/whatsapp", tags=["WhatsApp"])
 app.include_router(prospecting_router.router, prefix=f"{API_PREFIX}/prospecting", tags=["Prospecção"])
 app.include_router(webhook_router.router, prefix=f"{API_PREFIX}/webhook", tags=["Webhook"])
+app.include_router(atendai_router.router, prefix=f"{API_PREFIX}/integracao-atendai", tags=["Integração AtendAI"])
 app.include_router(dashboard_router.router, prefix=f"{API_PREFIX}/dashboard", tags=["Dashboard"])
 app.include_router(google_contacts_router.router, prefix=f"{API_PREFIX}/google-contacts", tags=["Google Contacts"])
 

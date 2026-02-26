@@ -18,22 +18,40 @@ router = APIRouter()
 
 # --- Funções Auxiliares de Engenharia de Dados ---
 
-def format_row_dense(sheet_name: str, row: Dict[str, Any]) -> str:
+def format_sheet_to_csv_system(sheet_name: str, rows: List[Dict[str, Any]]) -> str:
     """
-    Converte uma linha de dados em string densa 'Pipe & Header'.
-    Regra: Ignora chaves com valores nulos/vazios para economizar tokens.
+    Converte uma aba inteira em formato CSV para o System Prompt.
     """
-    parts = []
-    for key, val in row.items():
-        if val is not None:
-            val_str = str(val).strip()
-            if val_str:
-                parts.append(f"{key}: {val_str}")
-    
-    if not parts:
+    if not rows:
         return ""
     
-    return f"[{sheet_name.upper()}] " + " | ".join(parts)
+    headers = list(rows[0].keys())
+    lines = [f"# {sheet_name}", "|".join(headers)]
+    
+    for row in rows:
+        values = [str(row.get(h, "") or "").strip().replace("\n", "\\n").replace("\r", "") for h in headers]
+        lines.append("|".join(values))
+        
+    return "\n".join(lines)
+
+def format_row_to_csv_rag(sheet_name: str, row: Dict[str, Any]) -> str:
+    """
+    Converte uma linha em formato CSV com cabeçalho para o RAG.
+    """
+    headers = []
+    values = []
+    
+    for key, val in row.items():
+        if val is not None:
+            val_str = str(val).strip().replace("\n", "\\n").replace("\r", "")
+            if val_str:
+                headers.append(key)
+                values.append(val_str)
+    
+    if not headers:
+        return ""
+    
+    return f"# {sheet_name}\n" + "|".join(headers) + "\n" + "|".join(values)
 
 def flatten_drive_tree(node: Dict[str, Any], path: str = "") -> List[str]:
     """Recursivamente achata a árvore de arquivos em linhas de texto estruturado."""
@@ -43,24 +61,26 @@ def flatten_drive_tree(node: Dict[str, Any], path: str = "") -> List[str]:
     # Constrói caminho visual (ex: Marketing > Campanhas)
     current_path = f"{path} > {current_name}" if path else current_name
     
-    # Define Categoria e Subcategoria baseado na estrutura de pastas
-    path_parts = current_path.split(" > ")
-    categoria = path_parts[0] if len(path_parts) > 0 else "Geral"
-    subcategoria = path_parts[1] if len(path_parts) > 1 else ""
-    
     for f in node.get("arquivos", []):
-        # Formato denso e rico para RAG
-        parts = []
-        parts.append(f"Categoria: {categoria}")
-        if subcategoria: parts.append(f"Subcategoria: {subcategoria}")
+        # Formato CSV estilo Sheets RAG
+        row_data = {
+            "Categorias": current_path,
+            "Arquivo": f.get('nome'),
+            "Tipo": f.get('tipo'),
+            "ID": f.get('id')
+        }
         
-        if f.get('nome'): parts.append(f"Arquivo: {f.get('nome')}")
-        if f.get('tipo'): parts.append(f"Tipo: {f.get('tipo')}")
-        if f.get('id'): parts.append(f"ID: {f.get('id')}") # ID é crucial para o envio
-        if f.get('link'): parts.append(f"Link: {f.get('link')}")
-        parts.append(f"Pasta: {current_path}")
+        headers = []
+        values = []
         
-        lines.append(f"[DRIVE] " + " | ".join(parts))
+        for key, val in row_data.items():
+            if val:
+                val_str = str(val).strip().replace("\n", "\\n").replace("\r", "")
+                headers.append(key)
+                values.append(val_str)
+        
+        if headers:
+            lines.append(f"# DRIVE\n" + "|".join(headers) + "\n" + "|".join(values))
         
     for sub in node.get("subpastas", []):
         lines.extend(flatten_drive_tree(sub, current_path))
@@ -164,49 +184,49 @@ async def sync_google_sheet(
         
         prompt_buffer = []
         contextos_buffer = []
-        all_rag_lines = [] # Lista temporária para acumular linhas para embedding em lote
 
         # --- Lógica Separada por Tipo ---
         if sync_type == "system":
-            # MODO SYSTEM: Todas as abas viram Prompt Fixo
+            # MODO SYSTEM: Todas as abas viram Prompt Fixo (CSV)
             for sheet_name, rows in sheet_data_json.items():
-                formatted_lines = [line for row in rows if (line := format_row_dense(sheet_name, row))]
-                if formatted_lines:
-                    section = f"## {sheet_name}\n" + "\n".join(formatted_lines)
-                    prompt_buffer.append(section)
+                csv_section = format_sheet_to_csv_system(sheet_name, rows)
+                if csv_section:
+                    prompt_buffer.append(csv_section)
             
             # Atualiza System Prompt
             db_config.prompt = "\n\n".join(prompt_buffer)
 
         elif sync_type == "rag":
-            # MODO RAG: Todas as abas viram Vetores
+            # MODO RAG: Gera embeddings
+            rag_items = []
             for sheet_name, rows in sheet_data_json.items():
-                formatted_lines = [line for row in rows if (line := format_row_dense(sheet_name, row))]
-                if formatted_lines:
-                    all_rag_lines.extend(formatted_lines)
+                for row in rows:
+                    csv_content = format_row_to_csv_rag(sheet_name, row)
+                    if csv_content:
+                        rag_items.append({"content": csv_content, "origin": sheet_name})
             
-            # Processamento em Lote dos Embeddings
-            if all_rag_lines:
-                embeddings = await gemini_service.generate_embeddings_batch(all_rag_lines)
+            if rag_items:
+                lines_to_embed = [item["content"] for item in rag_items]
+                embeddings = await gemini_service.generate_embeddings_batch(lines_to_embed)
                 
                 # --- PROTEÇÃO CONTRA PERDA DE DADOS ---
                 valid_embeddings = [e for e in embeddings if e]
-                if not valid_embeddings and len(all_rag_lines) > 0:
+                if not valid_embeddings and len(lines_to_embed) > 0:
                     raise HTTPException(status_code=500, detail="Falha crítica na geração de embeddings. A sincronização foi abortada para evitar perda de dados.")
                 
-                for line, embedding in zip(all_rag_lines, embeddings):
+                for item, embedding in zip(rag_items, embeddings):
                     if embedding:
                         contextos_buffer.append(models.KnowledgeVector(
                             config_id=db_config.id,
-                            content=line,
-                            origin="sheet", # Mantemos 'sheet' para identificar origem planilha
+                            content=item["content"],
+                            origin=item["origin"],
                             embedding=embedding
                         ))
             
-            # Limpa vetores anteriores desta origem e insere novos
+            # Limpa vetores anteriores que NÃO sejam do Drive
             await db.execute(delete(models.KnowledgeVector).where(
                 models.KnowledgeVector.config_id == db_config.id,
-                models.KnowledgeVector.origin == "sheet"
+                models.KnowledgeVector.origin != "drive"
             ))
             if contextos_buffer:
                 db.add_all(contextos_buffer)

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import toast from 'react-hot-toast';
-import { Edit, Trash2, Loader2, UserPlus, Save, CheckCircle, XCircle, Settings, Shield, Search, AlertTriangle } from 'lucide-react';
+import { Edit, Trash2, Loader2, UserPlus, Save, CheckCircle, XCircle, Settings, Search, AlertTriangle, Smartphone, Cloud, Target, User as UserIcon, ChevronDown, ChevronUp } from 'lucide-react';
 
 // Modal Genérico
 const Modal = ({ onClose, children }) => (
@@ -35,7 +35,6 @@ const UserModal = ({ user, onSave, onClose, isCreating = false }) => {
         email: user?.email || '',
         password: '',
         tokens: user?.tokens ?? 0,
-        instance_name: user?.instance_name || '',
     });
     
     const [isSaving, setIsSaving] = useState(false);
@@ -85,15 +84,9 @@ const UserModal = ({ user, onSave, onClose, isCreating = false }) => {
                             </label>
                             <input type="password" name="password" value={formData.password} onChange={handleChange} required={isCreating} placeholder={isCreating ? "Defina uma senha" : "Deixe em branco para manter a atual"} className="block w-full px-4 py-2.5 text-sm rounded-lg border border-gray-300 shadow-sm focus:border-brand-green focus:ring-brand-green" />
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Tokens</label>
-                                <input type="number" name="tokens" value={formData.tokens} onChange={handleChange} className="block w-full px-4 py-2.5 text-sm rounded-lg border border-gray-300 shadow-sm focus:border-brand-green focus:ring-brand-green" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Instância WhatsApp</label>
-                                <input type="text" name="instance_name" value={formData.instance_name} onChange={handleChange} className="block w-full px-4 py-2.5 text-sm rounded-lg border border-gray-300 shadow-sm focus:border-brand-green focus:ring-brand-green" />
-                            </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Tokens</label>
+                            <input type="number" name="tokens" value={formData.tokens} onChange={handleChange} className="block w-full px-4 py-2.5 text-sm rounded-lg border border-gray-300 shadow-sm focus:border-brand-green focus:ring-brand-green" />
                         </div>
                     </div>
                 </div>
@@ -107,6 +100,74 @@ const UserModal = ({ user, onSave, onClose, isCreating = false }) => {
                 </div>
             </div>
         </Modal>
+    );
+};
+
+const UserRow = ({ user, onEdit, onDelete }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+
+    return (
+        <>
+            <tr className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${isExpanded ? 'bg-gray-50' : ''}`}>
+                <td className="p-4">
+                    <button onClick={() => setIsExpanded(!isExpanded)} className="p-1 hover:bg-gray-200 rounded transition-colors">
+                        {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    </button>
+                </td>
+                <td className="p-4 font-semibold text-gray-800">
+                    {user.email}
+                </td>
+                <td className="p-4 text-gray-600">{user.tokens.toLocaleString('pt-BR')}</td>
+                <td className="p-4">
+                    <div className="flex justify-center items-center gap-2">
+                        <button onClick={() => onEdit(user)} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors" title="Editar Usuário"><Edit size={18} /></button>
+                        <button onClick={() => onDelete(user.id)} className="p-2 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded-full transition-colors" title="Apagar Usuário"><Trash2 size={18} /></button>
+                    </div>
+                </td>
+            </tr>
+            {isExpanded && (
+                <tr className="bg-gray-50/50 border-b border-gray-100">
+                    <td colSpan="4" className="p-6">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="space-y-3">
+                                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2"><Smartphone size={14}/> Instâncias</h4>
+                                <div className="space-y-2">
+                                    {user.whatsapp_instances?.map(inst => (
+                                        <div key={inst.id} className="flex items-center justify-between bg-white p-2 rounded border border-gray-200 text-sm">
+                                            <span className="font-medium text-gray-700">{inst.name}</span>
+                                            <div className="flex gap-2">
+                                                <Smartphone size={14} className={inst.instance_id ? "text-green-500" : "text-gray-300"} title="WhatsApp" />
+                                                <Cloud size={14} className={inst.google_credentials ? "text-blue-500" : "text-gray-300"} title="Google" />
+                                            </div>
+                                        </div>
+                                    )) || <p className="text-xs text-gray-400 italic">Nenhuma instância</p>}
+                                </div>
+                            </div>
+                            <div className="space-y-3">
+                                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2"><Target size={14}/> Campanhas</h4>
+                                <div className="flex flex-wrap gap-2">
+                                    {user.prospects?.map(p => (
+                                        <span key={p.id} className={`px-2 py-1 rounded text-xs font-medium border ${p.status === 'Em Andamento' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                                            {p.nome_prospeccao}
+                                        </span>
+                                    )) || <p className="text-xs text-gray-400 italic">Nenhuma campanha</p>}
+                                </div>
+                            </div>
+                            <div className="space-y-3">
+                                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2"><Settings size={14}/> Configurações</h4>
+                                <div className="flex flex-wrap gap-2">
+                                    {user.configs?.map(c => (
+                                        <span key={c.id} className="px-2 py-1 bg-white border border-gray-200 rounded text-xs text-gray-700 shadow-sm">
+                                            {c.nome_config}
+                                        </span>
+                                    )) || <p className="text-xs text-gray-400 italic">Nenhuma configuração</p>}
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            )}
+        </>
     );
 };
 
@@ -221,30 +282,15 @@ function Admin() {
                     <table className="w-full text-left min-w-[1000px]">
                         <thead className="border-b-2 border-gray-200">
                             <tr>
+                                <th className="p-4 w-10"></th>
                                 <th className="p-4 text-sm font-semibold text-gray-600">Email</th>
                                 <th className="p-4 text-sm font-semibold text-gray-600">Tokens</th>
-                                <th className="p-4 text-sm font-semibold text-gray-600">Instância</th>
                                 <th className="p-4 text-sm font-semibold text-gray-600 text-center">Ações</th>
                             </tr>
                         </thead>
                         <tbody>
                             {filteredUsers.map(user => (
-                                <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                                    <td className="p-4 font-semibold text-gray-800">
-                                        {user.email}
-                                        {user.is_superuser && (
-                                            <Shield size={14} className="inline-block ml-1 text-purple-600" title="Superusuário" />
-                                        )}
-                                    </td>
-                                    <td className="p-4 text-gray-600">{user.tokens.toLocaleString('pt-BR')}</td>
-                                    <td className="p-4 text-sm text-gray-600">{user.instance_name || '-'}</td>
-                                    <td className="p-4">
-                                        <div className="flex justify-center items-center gap-2">
-                                            <button onClick={() => setModalState({ type: 'edit', data: user })} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors" title="Editar Usuário"><Edit size={18} /></button>
-                                            <button onClick={() => handleDeleteClick(user.id)} className="p-2 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded-full transition-colors" title="Apagar Usuário"><Trash2 size={18} /></button>
-                                        </div>
-                                    </td>
-                                </tr>
+                                <UserRow key={user.id} user={user} onEdit={(u) => setModalState({ type: 'edit', data: u })} onDelete={handleDeleteClick} />
                             ))}
                         </tbody>
                     </table>

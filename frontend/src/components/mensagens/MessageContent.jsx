@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, Download, Loader2, FileText } from 'lucide-react';
+import { AlertTriangle, Download, Loader2, FileText, MapPin } from 'lucide-react';
 import AudioPlayer from './AudioPlayer';
 import ImageDisplayer from './ImageDisplayer';
 import VideoDisplayer from './VideoDisplayer';
@@ -25,10 +25,10 @@ const MessageContent = ({ msg, pcId, onViewMedia, onDownloadDocument, isDownload
     }
 
     const type = msg.type || 'text';
-    const hasMedia = msg.id && ['image', 'audio', 'document', 'video'].includes(type);
+    const hasMedia = msg.id && ['image', 'audio', 'document', 'video', 'location'].includes(type);
     let displayText = msg.content || (hasMedia ? `[${type.toUpperCase()}]` : '');
 
-    if (['image', 'video'].includes(type)) displayText = null;
+    if (['image', 'video', 'location'].includes(type)) displayText = null;
 
     switch (type) {
         case 'audio':
@@ -75,6 +75,29 @@ const MessageContent = ({ msg, pcId, onViewMedia, onDownloadDocument, isDownload
                                 {isDownloading ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />}
                             </button>
                         )}
+                    </div>
+                </div>
+            );
+        case 'location':
+            return (
+                <div className="flex flex-col gap-2 p-2 bg-gray-50 border border-gray-200 rounded-lg max-w-sm">
+                    {msg.thumbnail && (
+                        <img 
+                            src={`data:image/jpeg;base64,${msg.thumbnail}`} 
+                            alt="Localização" 
+                            className="w-full h-32 object-cover rounded-md"
+                        />
+                    )}
+                    <div className="flex items-center gap-2">
+                        <div className="bg-green-100 p-2 rounded-full text-green-600 flex-shrink-0">
+                            <MapPin size={20} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-900">Localização</p>
+                            <a href={`https://www.google.com/maps/search/?api=1&query=${msg.latitude},${msg.longitude}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate block">
+                                Ver no Google Maps
+                            </a>
+                        </div>
                     </div>
                 </div>
             );

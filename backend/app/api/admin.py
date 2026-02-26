@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from typing import List
 
 from app.db.database import get_db
@@ -11,7 +12,7 @@ from app.services.security import get_password_hash
 
 router = APIRouter()
 
-@router.get("/users", response_model=List[schemas.User])
+@router.get("/users", response_model=List[schemas.UserAdminDetail])
 async def read_users(
     db: AsyncSession = Depends(get_db),
     skip: int = 0,
@@ -21,7 +22,17 @@ async def read_users(
     """
     Retrieve all users. Only for superusers.
     """
-    users = await crud_user.get_users(db, skip=skip, limit=limit)
+    result = await db.execute(
+        select(models.User)
+        .options(
+            selectinload(models.User.whatsapp_instances),
+            selectinload(models.User.prospects),
+            selectinload(models.User.configs)
+        )
+        .offset(skip)
+        .limit(limit)
+    )
+    users = result.scalars().all()
     return users
 
 @router.post("/users", response_model=schemas.User, status_code=status.HTTP_201_CREATED)
@@ -82,6 +93,9 @@ async def update_user_by_admin(
         password = update_data.pop("password")
         if password:
             user_to_update.hashed_password = get_password_hash(password)
+
+    if "is_admin" in update_data:
+        user_to_update.is_admin = update_data["is_admin"]
 
     for field, value in update_data.items():
         if hasattr(user_to_update, field):

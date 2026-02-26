@@ -32,6 +32,8 @@ class ConfigBase(BaseModel):
     spreadsheet_rag_id: Optional[str] = None
     drive_id: Optional[str] = None
     prompt: Optional[str] = None
+    available_hours: Optional[Dict[str, Any]] = None
+    is_calendar_active: Optional[bool] = False
 
 class ConfigCreate(ConfigBase):
     pass
@@ -42,10 +44,16 @@ class ConfigUpdate(BaseModel):
     spreadsheet_rag_id: Optional[str] = None
     drive_id: Optional[str] = None
     prompt: Optional[str] = None
+    available_hours: Optional[Dict[str, Any]] = None
+    google_calendar_credentials: Optional[Dict[str, Any]] = None
+    is_calendar_active: Optional[bool] = None
 
 class Config(ConfigBase):
     id: int
     user_id: int
+    available_hours: Optional[Dict[str, Any]] = None
+    google_calendar_credentials: Optional[Dict[str, Any]] = None
+    is_calendar_active: bool = False
 
     class Config:
         from_attributes = True
@@ -183,10 +191,13 @@ class UserCreateByAdmin(UserBase):
     password: str
     tokens: Optional[int] = 0
     spreadsheet_id: Optional[str] = None
+    is_admin: Optional[bool] = False
 
 class UserUpdate(BaseModel):
     tokens: Optional[int] = None
     spreadsheet_id: Optional[str] = None
+    is_admin: Optional[bool] = None
+    password: Optional[str] = None
 
 class User(UserBase):
     id: int
@@ -197,6 +208,18 @@ class User(UserBase):
 
     class Config:
         from_attributes = True
+
+class ProspectSimple(BaseModel):
+    id: int
+    nome_prospeccao: str
+    status: str
+    class Config:
+        from_attributes = True
+
+class UserAdminDetail(User):
+    whatsapp_instances: List[WhatsappInstance] = []
+    prospects: List[ProspectSimple] = []
+    configs: List[Config] = []
 
 # --- Schemas de Token ---
 class Token(BaseModel):

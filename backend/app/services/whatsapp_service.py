@@ -505,6 +505,8 @@ class WhatsAppService:
         
         content = ""
         msg_type = "text"
+        extra_data = {}
+
         if msg_content:
             content = msg_content.get("conversation") or msg_content.get("extendedTextMessage", {}).get("text", "")
             if "imageMessage" in msg_content: msg_type = "image"
@@ -512,10 +514,16 @@ class WhatsAppService:
             elif "audioMessage" in msg_content: msg_type = "audio"
             elif "stickerMessage" in msg_content: msg_type = "sticker"
             elif "documentMessage" in msg_content: msg_type = "document"
-            if not content and msg_type != "text":
+            elif "locationMessage" in msg_content: 
+                msg_type = "location"
+                loc_msg = msg_content["locationMessage"]
+                extra_data["latitude"] = loc_msg.get("degreesLatitude")
+                extra_data["longitude"] = loc_msg.get("degreesLongitude")
+                extra_data["thumbnail"] = loc_msg.get("jpegThumbnail")
+            if not content and msg_type != "text" and msg_type != "location":
                 content = msg_content.get(f"{msg_type}Message", {}).get("caption", "")
 
-        return {
+        result = {
             "id": key.get("id"),
             "role": "assistant" if key.get("fromMe") else "user",
             "senderName": raw_msg.get("pushName"),
@@ -524,6 +532,8 @@ class WhatsAppService:
             "timestamp": raw_msg.get("messageTimestamp"),
             "status": raw_msg.get("status")
         }
+        result.update(extra_data)
+        return result
 
     async def fetch_chat_history(self, instance_name: str, number: str, count: int = 999, mode: str = None, jids: List[str] = None, evolution_instance_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -892,15 +902,16 @@ class WhatsAppService:
         except Exception as e:
             logger.warning(f"Falha ao enviar status '{presence}' para {normalized_number}: {e}")
 
-    async def check_prospect_messages(self, db: AsyncSession, user: models.User):
+    async def check_prospect_messages(self, db: AsyncSession, user: models.User, instance_id: Optional[int] = None):
         """
         Verifica se há novas mensagens de contatos em prospecção e atualiza o status.
+        Se instance_id for fornecido, filtra apenas contatos vinculados a essa instância.
         """
         from app.crud import crud_prospect, crud_config
         from app.services.gemini_service import get_gemini_service
         from app.api.prospecting import _synchronize_and_process_history
         
-        logger.info(f"Verificando mensagens de prospecção para o usuário {user.id}...")
+        logger.info(f"Verificando mensagens de prospecção para o usuário {user.id} (Instância: {instance_id or 'Todas'})...")
         
         gemini_service = get_gemini_service()
         prospects = await crud_prospect.get_prospects_by_user(db, user.id)
@@ -934,7 +945,7 @@ class WhatsAppService:
                         persona_config=persona_config,
                         whatsapp_service=self,
                         gemini_service=gemini_service,
-                        whatsapp_instance=pc.whatsapp_instance
+                        whatsapp_instance=current_instance
                     )
                     
                     if history:
