@@ -22,7 +22,7 @@ async def read_contacts(
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(dependencies.get_current_active_user),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000)
+    limit: int = Query(1000000, ge=1, le=1000000)
 ):
     """Obtém uma lista de todos os contatos do usuário logado."""
     return await crud_contact.get_contacts_by_user(db, user_id=current_user.id, skip=skip, limit=limit)

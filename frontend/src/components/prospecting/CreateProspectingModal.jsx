@@ -188,7 +188,8 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
     try {
       let contact_ids_to_process = [];
       if (formData.categorias_selecionadas.length > 0) {
-          const allContactsResponse = await api.get('/contacts/');
+          // Busca todos os contatos com um limite muito alto para garantir a filtragem correta de toda a base
+          const allContactsResponse = await api.get('/contacts/?limit=1000000');
           
           const filteredContacts = allContactsResponse.data.filter(contact => 
               Array.isArray(contact.categoria) && 

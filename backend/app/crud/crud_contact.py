@@ -37,7 +37,7 @@ async def get_contact(db: AsyncSession, contact_id: int, user_id: int) -> Option
     )
     return result.scalars().first()
 
-async def get_contacts_by_user(db: AsyncSession, user_id: int, skip: int = 0, limit: int = 100) -> List[models.Contact]:
+async def get_contacts_by_user(db: AsyncSession, user_id: int, skip: int = 0, limit: int = 1000000) -> List[models.Contact]:
     """Busca todos os contatos de um usuário, ordenados por nome."""
     result = await db.execute(
         select(models.Contact)
@@ -103,7 +103,8 @@ async def delete_contact(db: AsyncSession, contact_id: int, user_id: int) -> Opt
 
 async def get_all_contact_categories(db: AsyncSession, user_id: int) -> List[str]:
     """Busca todas as categorias únicas de contatos para um usuário."""
-    contacts = await get_contacts_by_user(db, user_id=user_id)
+    # Busca um número alto para garantir que pegamos todas as categorias da base (até 1M contatos)
+    contacts = await get_contacts_by_user(db, user_id=user_id, limit=1000000)
     all_categories: Set[str] = set()
     for contact in contacts:
         if contact.categoria:
@@ -122,7 +123,8 @@ async def export_contacts_to_csv_string(db: AsyncSession, user_id: int) -> str:
     """
     Busca todos os contatos de um usuário no banco e gera uma string em formato CSV.
     """
-    contacts = await get_contacts_by_user(db, user_id=user_id)
+    # Garante a exportação de toda a base (até 1M contatos)
+    contacts = await get_contacts_by_user(db, user_id=user_id, limit=1000000)
     
     stream = io.StringIO()
     writer = csv.writer(stream)

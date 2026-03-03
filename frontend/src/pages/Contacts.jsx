@@ -363,9 +363,12 @@ function Contacts() {
           </div>
         )}
 
-        {totalPages > 1 && (
-          <div className="flex justify-between items-center mt-6">
-            <span className="text-sm text-gray-500">Página {currentPage} de {totalPages}</span>
+        <div className="flex justify-between items-center mt-6">
+          <span className="text-sm text-gray-500">
+            Página {currentPage} de {totalPages || 1} ({filteredContacts.length} {filteredContacts.length === 1 ? 'contato' : 'contatos'} 
+            {searchTerm && ` de ${contacts.length}`})
+          </span>
+          {totalPages > 1 && (
             <div className="flex items-center gap-2">
               <button onClick={() => paginate(1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsLeft size={16} /></button>
               <button onClick={() => paginate(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronLeft size={16} /></button>
@@ -373,8 +376,8 @@ function Contacts() {
               <button onClick={() => paginate(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronRight size={16} /></button>
               <button onClick={() => paginate(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsRight size={16} /></button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {isFormModalOpen && (
