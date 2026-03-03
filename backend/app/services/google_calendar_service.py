@@ -1,6 +1,8 @@
 import logging
 import os
-from typing import Optional, Dict, Any
+import asyncio
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Dict, Any, List
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -78,6 +80,41 @@ class GoogleCalendarService:
         if not credentials:
             raise Exception("Configuração não autenticada com o Google Calendar.")
         return build('calendar', 'v3', credentials=credentials)
+
+    async def get_upcoming_events(self, days: int = 7) -> List[Dict[str, Any]]:
+        """Busca eventos agendados para os próximos X dias."""
+        try:
+            service = self.get_service()
+            now = datetime.now(timezone.utc).isoformat()
+            end_time = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+            
+            # Executa em um executor pois a biblioteca do Google é síncrona
+            loop = asyncio.get_running_loop()
+            events_result = await loop.run_in_executor(
+                None,
+                lambda: service.events().list(
+                    calendarId='primary',
+                    timeMin=now,
+                    timeMax=end_time,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+            )
+            events = events_result.get('items', [])
+            
+            formatted_events = []
+            for event in events:
+                start = event['start'].get('dateTime', event['start'].get('date'))
+                end = event['end'].get('dateTime', event['end'].get('date'))
+                formatted_events.append({
+                    "summary": event.get("summary"),
+                    "start": start,
+                    "end": end
+                })
+            return formatted_events
+        except Exception as e:
+            logger.error(f"Erro ao buscar eventos do Google Calendar: {e}")
+            return []
 
 def get_google_calendar_service(config: models.Config) -> GoogleCalendarService:
     return GoogleCalendarService(config=config)

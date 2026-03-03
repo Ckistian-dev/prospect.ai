@@ -216,7 +216,25 @@ function Contacts() {
       const response = await api.post('/contacts/import/csv', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      toast.success(response.data.message);
+      
+      const { imported, duplicates, invalid } = response.data;
+      
+      if (imported > 0) {
+        toast.success(`${imported} contatos importados com sucesso!`);
+      }
+      
+      if (duplicates > 0) {
+        toast.error(`${duplicates} números duplicados foram ignorados.`, { duration: 5000 });
+      }
+      
+      if (invalid > 0) {
+        toast.error(`${invalid} linhas inválidas (sem nome ou telefone) foram ignoradas.`, { duration: 5000 });
+      }
+      
+      if (imported === 0 && duplicates === 0 && invalid === 0) {
+        toast.error("O arquivo parece estar vazio ou com formato incorreto.");
+      }
+
       fetchContacts();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Falha ao importar contatos.');

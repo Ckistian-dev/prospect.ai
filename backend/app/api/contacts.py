@@ -92,7 +92,7 @@ async def import_contacts_csv(
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Tipo de arquivo inválido. Por favor, envie um arquivo .csv")
     
-    imported_count = await crud_contact.import_contacts_from_csv_file(
+    stats = await crud_contact.import_contacts_from_csv_file(
         file=file, db=db, user_id=current_user.id
     )
-    return {"message": f"{imported_count} contatos importados com sucesso!"}
+    return stats

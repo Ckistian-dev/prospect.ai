@@ -16,6 +16,7 @@ import numpy as np
 from app.core.config import settings
 from app.db import models
 from app.crud import crud_user # Import necessário para a função de débito
+from app.services.google_calendar_service import get_google_calendar_service
 
 logger = logging.getLogger(__name__)
 
@@ -546,9 +547,28 @@ class GeminiService:
         # --- CALENDAR CONTEXT ---
         calendar_context = ""
         if config.is_calendar_active and config.google_calendar_credentials and config.available_hours:
-            calendar_context = f"\n# DISPONIBILIDADE DE AGENDA\nOs horários disponíveis para agendamento são: {json.dumps(config.available_hours, ensure_ascii=False)}.\n"
-            calendar_context += "Se o cliente demonstrar interesse em agendar, verifique a disponibilidade e proponha um horário. Se confirmado, use a ação 'agendar_reuniao'."
-            # Nota: Em uma implementação real, aqui injetaríamos os eventos já ocupados do Google Calendar.
+            # Busca eventos ocupados para os próximos 7 dias
+            busy_slots_text = "Nenhum compromisso agendado nos próximos dias."
+            try:
+                calendar_service = get_google_calendar_service(config)
+                events = await calendar_service.get_upcoming_events(days=7)
+                if events:
+                    busy_slots_text = "Compromissos já agendados (HORÁRIOS OCUPADOS):\n"
+                    for ev in events:
+                        busy_slots_text += f"- {ev['summary']}: {ev['start']} até {ev['end']}\n"
+            except Exception as e:
+                logger.error(f"Erro ao buscar agenda para prompt: {e}")
+                busy_slots_text = "Erro ao carregar compromissos existentes."
+
+            calendar_context = (
+                f"\n# DISPONIBILIDADE DE AGENDA\n"
+                f"Seu padrão de horários disponíveis: {json.dumps(config.available_hours, ensure_ascii=False)}.\n"
+                f"{busy_slots_text}\n"
+                f"REGRAS DE AGENDAMENTO:\n"
+                f"1. Verifique se o horário proposto pelo cliente não conflita com os compromissos listados acima.\n"
+                f"2. Proponha apenas horários dentro do seu padrão de disponibilidade.\n"
+                f"3. Se o cliente confirmar, use a ação 'agendar_reuniao' com a data/hora no formato ISO.\n"
+            )
 
         # Montagem do Prompt Texto (Estilo AtendAI)
         prompt_text = (

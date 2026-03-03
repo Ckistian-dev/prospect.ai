@@ -12,11 +12,23 @@ from typing import List, Set, Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-def _clean_whatsapp_number(number: str) -> str:
-    """Helper para remover todos os caracteres não numéricos de um número de telefone."""
-    if not isinstance(number, str):
+def _normalize_whatsapp(number: str) -> str:
+    """Normaliza o número para o padrão internacional (DDI 55) e remove o 9º dígito se necessário."""
+    clean = "".join(filter(str.isdigit, str(number)))
+    if not clean:
         return ""
-    return "".join(filter(str.isdigit, number))
+    
+    # Se não começa com 55 e tem 10 ou 11 dígitos, assume Brasil e adiciona 55
+    if not clean.startswith("55") and len(clean) in [10, 11]:
+        clean = "55" + clean
+            
+    # Trata o nono dígito para números brasileiros (55 + DDD + 9 + 8 dígitos)
+    # A Evolution API e o WhatsApp costumam usar o formato sem o 9º dígito para JIDs
+    if len(clean) == 13 and clean.startswith("55"):
+        if clean[4] == '9':
+            clean = clean[:4] + clean[5:]
+            
+    return clean
 
 async def get_contact(db: AsyncSession, contact_id: int, user_id: int) -> Optional[models.Contact]:
     """Busca um único contato pelo seu ID e pelo ID do usuário."""
@@ -37,14 +49,15 @@ async def get_contacts_by_user(db: AsyncSession, user_id: int, skip: int = 0, li
 
 async def get_contact_by_whatsapp(db: AsyncSession, whatsapp: str, user_id: int) -> Optional[models.Contact]:
     """Busca um contato específico pelo número de WhatsApp para um usuário."""
+    normalized = _normalize_whatsapp(whatsapp)
     result = await db.execute(
-        select(models.Contact).where(models.Contact.whatsapp == whatsapp, models.Contact.user_id == user_id)
+        select(models.Contact).where(models.Contact.whatsapp == normalized, models.Contact.user_id == user_id)
     )
     return result.scalars().first()
 
 async def create_contact(db: AsyncSession, contact: ContactCreate, user_id: int) -> models.Contact:
-    """Cria um novo contato, garantindo que o número de WhatsApp seja limpo."""
-    cleaned_whatsapp = _clean_whatsapp_number(contact.whatsapp)
+    """Cria um novo contato, garantindo que o número de WhatsApp seja normalizado."""
+    cleaned_whatsapp = _normalize_whatsapp(contact.whatsapp)
     db_contact = models.Contact(
         nome=contact.nome,
         whatsapp=cleaned_whatsapp,
@@ -73,7 +86,7 @@ async def update_contact(db: AsyncSession, db_contact: models.Contact, contact_i
     update_data = contact_in.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         if key == "whatsapp":
-            value = _clean_whatsapp_number(value)
+            value = _normalize_whatsapp(value)
         setattr(db_contact, key, value)
     db.add(db_contact)
     await db.commit()
@@ -139,44 +152,111 @@ async def _create_contacts_in_db(db: AsyncSession, contacts_to_create: List[mode
     #     await db.refresh(contact)
     return contacts_to_create
 
-async def import_contacts_from_csv_file(file: UploadFile, db: AsyncSession, user_id: int) -> int:
+async def import_contacts_from_csv_file(file: UploadFile, db: AsyncSession, user_id: int) -> Dict[str, int]:
     """
     Processa um UploadFile CSV, valida as linhas e cria os contatos em lote.
     A sincronização com o Google Contacts é feita em paralelo para otimização.
     """
+    stats = {"imported": 0, "duplicates": 0, "invalid": 0}
     try:
         contents = await file.read()
+        # Tenta decodificar com utf-8-sig para lidar com BOM (Byte Order Mark) comum em arquivos Excel
         try:
-            decoded_content = contents.decode('utf-8')
+            decoded_content = contents.decode('utf-8-sig')
         except UnicodeDecodeError:
             try:
-                decoded_content = contents.decode('latin-1')
+                decoded_content = contents.decode('utf-16')
             except UnicodeDecodeError:
-                raise HTTPException(status_code=400, detail="Não foi possível decodificar o arquivo. Tente salvá-lo como UTF-8.")
+                try:
+                    decoded_content = contents.decode('latin-1')
+                except UnicodeDecodeError:
+                    raise HTTPException(status_code=400, detail="Não foi possível decodificar o arquivo. Tente salvá-lo como UTF-8.")
 
         stream = io.StringIO(decoded_content)
-        reader = csv.DictReader(stream)
+        
+        # Detectar o delimitador (vírgula ou ponto e vírgula) automaticamente
+        sample = stream.read(2048)
+        stream.seek(0)
+        delimiter = ','
+        if sample:
+            try:
+                dialect = csv.Sniffer().sniff(sample, delimiters=',;')
+                delimiter = dialect.delimiter
+            except Exception:
+                # Fallback simples se o Sniffer falhar: verifica qual separador aparece mais na primeira linha
+                first_line = sample.splitlines()[0] if sample.splitlines() else ""
+                if first_line.count(';') > first_line.count(','):
+                    delimiter = ';'
+
+        reader = csv.DictReader(stream, delimiter=delimiter)
+
+        # 1. Buscar números já existentes no banco para este usuário para evitar duplicatas
+        stmt = select(models.Contact.whatsapp).where(models.Contact.user_id == user_id)
+        result = await db.execute(stmt)
+        existing_numbers = set(result.scalars().all())
+        
+        # 2. Conjunto para rastrear duplicatas dentro do próprio CSV
+        seen_in_file = set()
+
+        # Mapeamento de nomes de colunas comuns para facilitar a importação
+        header_map = {
+            'nome': 'nome', 'name': 'nome', 'contato': 'nome', 'cliente': 'nome', 'nome completo': 'nome', 'full name': 'nome',
+            'whatsapp': 'whatsapp', 'telefone': 'whatsapp', 'phone': 'whatsapp', 'celular': 'whatsapp', 'numero': 'whatsapp', 'tel': 'whatsapp', 'mobile': 'whatsapp', 'phone number': 'whatsapp', 'número': 'whatsapp',
+            'categoria': 'categoria', 'categorias': 'categoria', 'tags': 'categoria', 'category': 'categoria', 'grupo': 'categoria',
+            'observacoes': 'observacoes', 'obs': 'observacoes', 'notas': 'observacoes', 'notes': 'observacoes', 'comentario': 'observacoes', 'descrição': 'observacoes'
+        }
 
         contacts_to_create = []
         for row in reader:
-            if not row.get('nome') or not row.get('whatsapp'):
+            # Pula linhas completamente vazias
+            if not any(row.values()):
+                continue
+
+            # Normaliza as chaves e mapeia para os campos internos usando o header_map
+            clean_row = {}
+            for k, v in row.items():
+                if k is not None:
+                    key = str(k).strip().lower()
+                    mapped_key = header_map.get(key, key)
+                    clean_row[mapped_key] = v
+            
+            nome = clean_row.get('nome')
+            whatsapp = clean_row.get('whatsapp')
+
+            if not nome or not whatsapp:
+                stats["invalid"] += 1
                 continue
             
-            clean_whatsapp = "".join(filter(str.isdigit, row['whatsapp']))
-            categories = [cat.strip() for cat in row.get('categoria', '').split(',') if cat.strip()]
-            observacoes = row.get('observacoes', None)
+            clean_whatsapp = _normalize_whatsapp(whatsapp)
+            if not clean_whatsapp:
+                stats["invalid"] += 1
+                continue
+
+            # --- VALIDAÇÃO DE DUPLICATAS ---
+            if clean_whatsapp in existing_numbers or clean_whatsapp in seen_in_file:
+                logger.info(f"Pulo contato duplicado ou já existente: {nome} ({clean_whatsapp})")
+                stats["duplicates"] += 1
+                continue
+            
+            seen_in_file.add(clean_whatsapp)
+            # -------------------------------
+
+            categories_raw = clean_row.get('categoria', '') or ''
+            categories = [cat.strip() for cat in str(categories_raw).split(',') if cat.strip()]
+            observacoes = clean_row.get('observacoes')
             
             contact_obj = models.Contact(
-                nome=row['nome'],
+                nome=str(nome).strip(),
                 whatsapp=clean_whatsapp,
                 categoria=categories,
-                observacoes=observacoes,
+                observacoes=str(observacoes).strip() if observacoes else None,
                 user_id=user_id,
             )
             contacts_to_create.append(contact_obj)
+            stats["imported"] += 1
 
         if not contacts_to_create:
-            return 0
+            return stats
 
         # Insere os contatos no banco de dados em uma única transação
         created_contacts = await _create_contacts_in_db(db, contacts_to_create)
@@ -190,7 +270,7 @@ async def import_contacts_from_csv_file(file: UploadFile, db: AsyncSession, user
                 # Usa o novo método de criação em lote para uma única requisição à API do Google
                 await google_service.batch_create_contacts(created_contacts)
 
-        return len(created_contacts)
+        return stats
 
     except Exception as e:
         logger.error(f"Erro detalhado ao processar CSV: {e}")
