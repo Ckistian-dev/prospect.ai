@@ -51,7 +51,11 @@ class GoogleContactsService:
         authorization_url, _ = self.flow.authorization_url(
             access_type='offline',
             prompt='consent',
-            include_granted_scopes='true'
+            include_granted_scopes='true',
+            # Desabilita PKCE explicitamente para evitar o erro "Missing code verifier"
+            # em ambientes stateless onde o flow não é persistido entre as requisições.
+            code_challenge=None,
+            code_challenge_method=None
         )
         return authorization_url
 
