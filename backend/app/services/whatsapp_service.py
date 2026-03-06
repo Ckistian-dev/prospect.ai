@@ -469,7 +469,8 @@ class WhatsAppService:
                         correlation_data = {
                             "situacao": pc.situacao,
                             "campanha": campaign_name,
-                            "prospect_contact_id": pc.id
+                            "prospect_contact_id": pc.id,
+                            "observacoes": pc.observacoes
                         }
                         # 1. Mapeia pelo número de telefone (formato JID padrão)
                         normalized = self._normalize_number(whatsapp)
@@ -489,6 +490,7 @@ class WhatsAppService:
                         chat["situacao"] = match["situacao"] if match else None
                         chat["campanha"] = match["campanha"] if match else None
                         chat["prospect_contact_id"] = match["prospect_contact_id"] if match else None
+                        chat["observacoes"] = match["observacoes"] if match else None
 
                 return chats
             finally:

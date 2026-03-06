@@ -20548,3 +20548,1116 @@ Retorne APENAS um JSON válido, sem blocos de código.
   "acao_agenda": null,
   "data_agendamento": null
 }
+
+
+==================== LOG ENTRY: 2026-03-06T17:30:02.983253+00:00 ====================
+
+=== PROMPT CONTENTS ===
+# CONTEXTO (RAG)
+
+
+# CONTEXTO TEMPORAL
+Data e Hora Atual: 06/03/2026 14:30:02
+Dia da Semana: sexta-feira
+
+# HISTÓRICO DA CONVERSA
+IA: Oi
+
+# TAREFA ATUAL: Extração de Dados de Mídia
+Analise o arquivo enviado (imagem ou documento) e extraia as informações relevantes para a prospecção.
+
+# REGRAS DE EXECUÇÃO
+1. **Foco na Extração:** Identifique dados importantes (produtos, dúvidas, intenções) citados no arquivo.
+2. **Tom Neutro:** Atue como um extrator de dados, não use a persona do assistente.
+3. **Contexto:** Use o histórico e o RAG para entender o que é prioritário extrair.
+
+# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)
+Retorne APENAS um JSON válido.
+{
+  "analise": "Texto da extração/análise aqui"
+}
+[Part Mídia: image/jpeg]
+
+=== GEMINI RESPONSE ===
+{
+  "analise": "A imagem contém um logotipo estilizado com as letras 'L' e 'F' em tom dourado metálico, apresentando um efeito 3D. O fundo é de cor azul escuro. As letras parecem estar interligadas, formando um único emblema."
+}
+
+
+==================== LOG ENTRY: 2026-03-06T17:30:06.993899+00:00 ====================
+
+=== SYSTEM INSTRUCTION ===
+Você é um assistente de prospecção.
+
+=== PROMPT CONTENTS ===
+# CONTEXTO (RAG)
+
+
+# HISTÓRICO
+IA: Oi
+Contato: [Análise de Mídia]: A imagem contém um logotipo estilizado com as letras 'L' e 'F' em tom dourado metálico, apresentando um efeito 3D. O fundo é de cor azul escuro. As letras parecem estar interligadas, formando um único emblema.
+Contato: Transforme o atendimento e a captação de clientes da sua empresa com a Digital ForMe! 🚀 Oferecemos soluções inteligentes de automação e prospecção com Inteligência Artificial via WhatsApp. Reduza o tempo de espera, atraia novos leads 24 horas por dia e escale suas vendas. Fale com nossa equipe e saiba mais!
+
+# DADOS DO CONTATO
+Nome: Cristian Gabriel Kist
+Observações: 
+# CONTEXTO TEMPORAL
+Data e Hora Atual: 06/03/2026 14:30:06
+Dia da Semana: sexta-feira
+
+# DISPONIBILIDADE DE AGENDA
+Seu padrão de horários disponíveis: {"dom": ["09:00-18:00"], "qua": ["09:00-18:00"], "qui": ["09:00-18:00"], "sab": ["09:00-18:00"], "seg": ["09:00-18:00"], "sex": ["09:00-18:00"], "ter": ["09:00-18:00"]}.
+Compromissos já agendados (HORÁRIOS OCUPADOS):
+- Happy birthday!: 2026-03-09 até 2026-03-10
+- Reunião: Cristian: 2026-03-12T15:00:00-03:00 até 2026-03-12T16:00:00-03:00
+- Reunião: Cristian: 2026-03-13T10:00:00-03:00 até 2026-03-13T11:00:00-03:00
+
+REGRAS DE AGENDAMENTO:
+1. Verifique se o horário proposto pelo cliente não conflita com os compromissos listados acima.
+2. Proponha apenas horários dentro do seu padrão de disponibilidade.
+3. Se o cliente confirmar, use a ação 'agendar_reuniao' com a data/hora no formato ISO.
+
+# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)
+- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.
+- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.
+- **Continuidade Real:** Trate o histórico como uma conversa contínua de WhatsApp. Se já houver mensagens anteriores, JAMAIS use 'Olá' ou apresentações novamente.
+- **Zero Saudações Repetidas:** Se já houve um cumprimento no histórico recente, NÃO inicie a resposta com 'Olá', 'Oi', 'Bom dia', etc. Continue a conversa diretamente.
+- **Conexão Lógica:** Use conectivos de conversa real ('Então...', 'Nesse caso...', 'Ah, sobre isso...'). Evite listas com bullets se puder responder em uma frase corrida.
+- **Espelhamento de Tom:** Se a mensagem do cliente for curta (ex: 'qual o preço?'), seja direto ('Custa R$ 50,00'). Se ele for detalhista, explique mais.
+- **Formatação de Chat:** Evite listas com marcadores (bullets) ou negrito excessivo a menos que seja estritamente necessário. No WhatsApp, pessoas usam parágrafos curtos.
+- **Banalidade Controlada:** Em vez de 'Sinto muito pelo inconveniente causado', use algo mais leve como 'Poxa, entendo o problema' ou 'Que chato isso, vamos resolver'.
+- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, Cristian Gabriel Kist', 'Olá Cristian Gabriel Kist' ou similares. Fale direto.
+- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.
+- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.
+
+# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)
+- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica, pede para parar ou ignora perguntas.
+- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento. Faz perguntas genéricas sem demonstrar intenção real de avanço.
+- **6-8 (Interessado):** Engajado na conversa, responde a perguntas de qualificação, solicita informações específicas (preços, fotos, prazos) e mantém o diálogo fluido.
+- **9-10 (Quente):** Demonstra urgência, solicita visita técnica, reunião ou orçamento formal. Aceita prontamente os próximos passos propostos.
+
+# CRITÉRIOS PARA SITUAÇÃO 'Lead Qualificado'
+Mude a `nova_situacao` para 'Lead Qualificado' APENAS se:
+1. O contato demonstrou interesse real e ativo (Score >= 7).
+2. Houve uma troca de mensagens significativa (não apenas uma resposta isolada).
+3. O contato concordou com um próximo passo claro (visita, reunião, envio de projeto).
+Se o interesse for vago ou inicial, mantenha como 'Aguardando Resposta'.
+Se a pessoa demonstrar desinterece, hostilidade, mude para 'Não Interessado'.
+
+# TAREFA ATUAL: Gerar a primeira mensagem de prospecção para iniciar a conversa. Seja breve e direto.
+
+# REGRAS DE EXECUÇÃO
+1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).
+2. **Envio de Arquivos do Drive (IMPORTANTE):**
+   - Identifique arquivos no CONTEXTO (RAG) que começam com `[DRIVE]`. O ID está no formato `| ID: <ID_DO_ARQUIVO> |`.
+   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.
+   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.
+3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.
+4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.
+5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.
+6. **Agendamento:** Se o cliente confirmar um horário, retorne 'agendar_reuniao' em `acao_agenda` e a data/hora ISO em `data_agendamento`.
+# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)
+Retorne APENAS um JSON válido, sem blocos de código.
+{
+  "mensagem_para_enviar": "Texto da resposta (ou null)",
+  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",
+  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),
+  "observacoes": "Resumo curto da conversa",
+  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],
+  "novos_contatos": [{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}],
+  "acao_agenda": "agendar_reuniao" | null,
+  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null
+}
+=== GEMINI RESPONSE ===
+{
+  "mensagem_para_enviar": "Cristian, recebi sua mensagem sobre a Digital ForMe e as soluções de automação com IA via WhatsApp. É interessante. Pensando nisso, como vocês têm gerenciado a qualificação de leads e o acompanhamento dos clientes após a captação? Podemos conversar sobre algumas estratégias que podem complementar o trabalho de vocês.",
+  "nova_situacao": "Aguardando Resposta",
+  "lead_score": 5,
+  "observacoes": "Cristian enviou pitch de vendas. Respondi e tentei pivotar para prospecção, perguntando sobre gestão de leads e pós-venda.",
+  "arquivos_anexos": [],
+  "novos_contatos": [],
+  "acao_agenda": null,
+  "data_agendamento": null
+}
+
+
+==================== LOG ENTRY: 2026-03-06T17:31:41.925737+00:00 ====================
+
+=== SYSTEM INSTRUCTION ===
+Você é um assistente de prospecção.
+
+=== PROMPT CONTENTS ===
+# CONTEXTO (RAG)
+
+
+# HISTÓRICO
+IA: Oi
+Contato: [Análise de Mídia]: A imagem contém um logotipo estilizado com as letras 'L' e 'F' em tom dourado metálico, apresentando um efeito 3D. O fundo é de cor azul escuro. As letras parecem estar interligadas, formando um único emblema.
+Contato: Transforme o atendimento e a captação de clientes da sua empresa com a Digital ForMe! 🚀 Oferecemos soluções inteligentes de automação e prospecção com Inteligência Artificial via WhatsApp. Reduza o tempo de espera, atraia novos leads 24 horas por dia e escale suas vendas. Fale com nossa equipe e saiba mais!
+IA: Cristian, recebi sua mensagem sobre a Digital ForMe e as soluções de automação com IA via WhatsApp. É interessante. Pensando nisso, como vocês têm gerenciado a qualificação de leads e o acompanhamento dos clientes após a captação? Podemos conversar sobre algumas estratégias que podem complementar o trabalho de vocês.
+Contato: Quero uma reunião para hj
+
+# DADOS DO CONTATO
+Nome: Cristian Gabriel Kist
+Observações: 
+# CONTEXTO TEMPORAL
+Data e Hora Atual: 06/03/2026 14:31:41
+Dia da Semana: sexta-feira
+
+# DISPONIBILIDADE DE AGENDA
+Seu padrão de horários disponíveis: {"dom": ["09:00-18:00"], "qua": ["09:00-18:00"], "qui": ["09:00-18:00"], "sab": ["09:00-18:00"], "seg": ["09:00-18:00"], "sex": ["09:00-18:00"], "ter": ["09:00-18:00"]}.
+Compromissos já agendados (HORÁRIOS OCUPADOS):
+- Happy birthday!: 2026-03-09 até 2026-03-10
+- Reunião: Cristian: 2026-03-12T15:00:00-03:00 até 2026-03-12T16:00:00-03:00
+- Reunião: Cristian: 2026-03-13T10:00:00-03:00 até 2026-03-13T11:00:00-03:00
+
+REGRAS DE AGENDAMENTO:
+1. Verifique se o horário proposto pelo cliente não conflita com os compromissos listados acima.
+2. Proponha apenas horários dentro do seu padrão de disponibilidade.
+3. Se o cliente confirmar, use a ação 'agendar_reuniao' com a data/hora no formato ISO.
+
+# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)
+- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.
+- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.
+- **Continuidade Real:** Trate o histórico como uma conversa contínua de WhatsApp. Se já houver mensagens anteriores, JAMAIS use 'Olá' ou apresentações novamente.
+- **Zero Saudações Repetidas:** Se já houve um cumprimento no histórico recente, NÃO inicie a resposta com 'Olá', 'Oi', 'Bom dia', etc. Continue a conversa diretamente.
+- **Conexão Lógica:** Use conectivos de conversa real ('Então...', 'Nesse caso...', 'Ah, sobre isso...'). Evite listas com bullets se puder responder em uma frase corrida.
+- **Espelhamento de Tom:** Se a mensagem do cliente for curta (ex: 'qual o preço?'), seja direto ('Custa R$ 50,00'). Se ele for detalhista, explique mais.
+- **Formatação de Chat:** Evite listas com marcadores (bullets) ou negrito excessivo a menos que seja estritamente necessário. No WhatsApp, pessoas usam parágrafos curtos.
+- **Banalidade Controlada:** Em vez de 'Sinto muito pelo inconveniente causado', use algo mais leve como 'Poxa, entendo o problema' ou 'Que chato isso, vamos resolver'.
+- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, Cristian Gabriel Kist', 'Olá Cristian Gabriel Kist' ou similares. Fale direto.
+- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.
+- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.
+
+# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)
+- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica, pede para parar ou ignora perguntas.
+- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento. Faz perguntas genéricas sem demonstrar intenção real de avanço.
+- **6-8 (Interessado):** Engajado na conversa, responde a perguntas de qualificação, solicita informações específicas (preços, fotos, prazos) e mantém o diálogo fluido.
+- **9-10 (Quente):** Demonstra urgência, solicita visita técnica, reunião ou orçamento formal. Aceita prontamente os próximos passos propostos.
+
+# CRITÉRIOS PARA SITUAÇÃO 'Lead Qualificado'
+Mude a `nova_situacao` para 'Lead Qualificado' APENAS se:
+1. O contato demonstrou interesse real e ativo (Score >= 7).
+2. Houve uma troca de mensagens significativa (não apenas uma resposta isolada).
+3. O contato concordou com um próximo passo claro (visita, reunião, envio de projeto).
+Se o interesse for vago ou inicial, mantenha como 'Aguardando Resposta'.
+Se a pessoa demonstrar desinterece, hostilidade, mude para 'Não Interessado'.
+
+# TAREFA ATUAL: Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa, usando o contexto disponível.
+
+# REGRAS DE EXECUÇÃO
+1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).
+2. **Envio de Arquivos do Drive (IMPORTANTE):**
+   - Identifique arquivos no CONTEXTO (RAG) que começam com `[DRIVE]`. O ID está no formato `| ID: <ID_DO_ARQUIVO> |`.
+   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.
+   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.
+3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.
+4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.
+5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.
+6. **Agendamento:** Se o cliente confirmar um horário, retorne 'agendar_reuniao' em `acao_agenda` e a data/hora ISO em `data_agendamento`.
+# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)
+Retorne APENAS um JSON válido, sem blocos de código.
+{
+  "mensagem_para_enviar": "Texto da resposta (ou null)",
+  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",
+  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),
+  "observacoes": "Resumo curto da conversa",
+  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],
+  "novos_contatos": [{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}],
+  "acao_agenda": "agendar_reuniao" | null,
+  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null
+}
+=== GEMINI RESPONSE ===
+{
+  "mensagem_para_enviar": "Certo, podemos conversar hoje sim. Que tal às 16h?",
+  "nova_situacao": "Lead Qualificado",
+  "lead_score": 9,
+  "observacoes": "Cristian solicitou uma reunião para hoje e foi proposto um horário.",
+  "arquivos_anexos": [],
+  "novos_contatos": [],
+  "acao_agenda": null,
+  "data_agendamento": null
+}
+
+
+==================== LOG ENTRY: 2026-03-06T17:32:22.586832+00:00 ====================
+
+=== SYSTEM INSTRUCTION ===
+Você é um assistente de prospecção.
+
+=== PROMPT CONTENTS ===
+# CONTEXTO (RAG)
+
+
+# HISTÓRICO
+IA: Oi
+Contato: [Análise de Mídia]: A imagem contém um logotipo estilizado com as letras 'L' e 'F' em tom dourado metálico, apresentando um efeito 3D. O fundo é de cor azul escuro. As letras parecem estar interligadas, formando um único emblema.
+Contato: Transforme o atendimento e a captação de clientes da sua empresa com a Digital ForMe! 🚀 Oferecemos soluções inteligentes de automação e prospecção com Inteligência Artificial via WhatsApp. Reduza o tempo de espera, atraia novos leads 24 horas por dia e escale suas vendas. Fale com nossa equipe e saiba mais!
+IA: Cristian, recebi sua mensagem sobre a Digital ForMe e as soluções de automação com IA via WhatsApp. É interessante. Pensando nisso, como vocês têm gerenciado a qualificação de leads e o acompanhamento dos clientes após a captação? Podemos conversar sobre algumas estratégias que podem complementar o trabalho de vocês.
+Contato: Quero uma reunião para hj
+IA: Certo, podemos conversar hoje sim. Que tal às 16h?
+Contato: pode ser
+
+# DADOS DO CONTATO
+Nome: Cristian Gabriel Kist
+Observações: 
+# CONTEXTO TEMPORAL
+Data e Hora Atual: 06/03/2026 14:32:21
+Dia da Semana: sexta-feira
+
+# DISPONIBILIDADE DE AGENDA
+Seu padrão de horários disponíveis: {"dom": ["09:00-18:00"], "qua": ["09:00-18:00"], "qui": ["09:00-18:00"], "sab": ["09:00-18:00"], "seg": ["09:00-18:00"], "sex": ["09:00-18:00"], "ter": ["09:00-18:00"]}.
+Compromissos já agendados (HORÁRIOS OCUPADOS):
+- Happy birthday!: 2026-03-09 até 2026-03-10
+- Reunião: Cristian: 2026-03-12T15:00:00-03:00 até 2026-03-12T16:00:00-03:00
+- Reunião: Cristian: 2026-03-13T10:00:00-03:00 até 2026-03-13T11:00:00-03:00
+
+REGRAS DE AGENDAMENTO:
+1. Verifique se o horário proposto pelo cliente não conflita com os compromissos listados acima.
+2. Proponha apenas horários dentro do seu padrão de disponibilidade.
+3. Se o cliente confirmar, use a ação 'agendar_reuniao' com a data/hora no formato ISO.
+
+# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)
+- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.
+- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.
+- **Continuidade Real:** Trate o histórico como uma conversa contínua de WhatsApp. Se já houver mensagens anteriores, JAMAIS use 'Olá' ou apresentações novamente.
+- **Zero Saudações Repetidas:** Se já houve um cumprimento no histórico recente, NÃO inicie a resposta com 'Olá', 'Oi', 'Bom dia', etc. Continue a conversa diretamente.
+- **Conexão Lógica:** Use conectivos de conversa real ('Então...', 'Nesse caso...', 'Ah, sobre isso...'). Evite listas com bullets se puder responder em uma frase corrida.
+- **Espelhamento de Tom:** Se a mensagem do cliente for curta (ex: 'qual o preço?'), seja direto ('Custa R$ 50,00'). Se ele for detalhista, explique mais.
+- **Formatação de Chat:** Evite listas com marcadores (bullets) ou negrito excessivo a menos que seja estritamente necessário. No WhatsApp, pessoas usam parágrafos curtos.
+- **Banalidade Controlada:** Em vez de 'Sinto muito pelo inconveniente causado', use algo mais leve como 'Poxa, entendo o problema' ou 'Que chato isso, vamos resolver'.
+- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, Cristian Gabriel Kist', 'Olá Cristian Gabriel Kist' ou similares. Fale direto.
+- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.
+- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.
+
+# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)
+- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica, pede para parar ou ignora perguntas.
+- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento. Faz perguntas genéricas sem demonstrar intenção real de avanço.
+- **6-8 (Interessado):** Engajado na conversa, responde a perguntas de qualificação, solicita informações específicas (preços, fotos, prazos) e mantém o diálogo fluido.
+- **9-10 (Quente):** Demonstra urgência, solicita visita técnica, reunião ou orçamento formal. Aceita prontamente os próximos passos propostos.
+
+# CRITÉRIOS PARA SITUAÇÃO 'Lead Qualificado'
+Mude a `nova_situacao` para 'Lead Qualificado' APENAS se:
+1. O contato demonstrou interesse real e ativo (Score >= 7).
+2. Houve uma troca de mensagens significativa (não apenas uma resposta isolada).
+3. O contato concordou com um próximo passo claro (visita, reunião, envio de projeto).
+Se o interesse for vago ou inicial, mantenha como 'Aguardando Resposta'.
+Se a pessoa demonstrar desinterece, hostilidade, mude para 'Não Interessado'.
+
+# TAREFA ATUAL: Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa, usando o contexto disponível.
+
+# REGRAS DE EXECUÇÃO
+1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).
+2. **Envio de Arquivos do Drive (IMPORTANTE):**
+   - Identifique arquivos no CONTEXTO (RAG) que começam com `[DRIVE]`. O ID está no formato `| ID: <ID_DO_ARQUIVO> |`.
+   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.
+   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.
+3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.
+4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.
+5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.
+6. **Agendamento:** Se o cliente confirmar um horário, retorne 'agendar_reuniao' em `acao_agenda` e a data/hora ISO em `data_agendamento`.
+# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)
+Retorne APENAS um JSON válido, sem blocos de código.
+{
+  "mensagem_para_enviar": "Texto da resposta (ou null)",
+  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",
+  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),
+  "observacoes": "Resumo curto da conversa",
+  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],
+  "novos_contatos": [{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}],
+  "acao_agenda": "agendar_reuniao" | null,
+  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null
+}
+=== GEMINI RESPONSE ===
+{
+  "mensagem_para_enviar": "Combinado! Reunião agendada para hoje, sexta-feira, às 16h. Te vejo lá!",
+  "nova_situacao": "Lead Qualificado",
+  "lead_score": 9,
+  "observacoes": "Cristian solicitou e confirmou reunião para hoje às 16h.",
+  "arquivos_anexos": [],
+  "novos_contatos": [],
+  "acao_agenda": "agendar_reuniao",
+  "data_agendamento": "2026-03-06T16:00:00"
+}
+
+
+==================== LOG ENTRY: 2026-03-06T17:34:22.328378+00:00 ====================
+
+=== SYSTEM INSTRUCTION ===
+Você é um assistente de prospecção.
+
+=== PROMPT CONTENTS ===
+# CONTEXTO (RAG)
+
+
+# HISTÓRICO
+IA: Oi
+Contato: [Análise de Mídia]: A imagem contém um logotipo estilizado com as letras 'L' e 'F' em tom dourado metálico, apresentando um efeito 3D. O fundo é de cor azul escuro. As letras parecem estar interligadas, formando um único emblema.
+Contato: Transforme o atendimento e a captação de clientes da sua empresa com a Digital ForMe! 🚀 Oferecemos soluções inteligentes de automação e prospecção com Inteligência Artificial via WhatsApp. Reduza o tempo de espera, atraia novos leads 24 horas por dia e escale suas vendas. Fale com nossa equipe e saiba mais!
+IA: Cristian, recebi sua mensagem sobre a Digital ForMe e as soluções de automação com IA via WhatsApp. É interessante. Pensando nisso, como vocês têm gerenciado a qualificação de leads e o acompanhamento dos clientes após a captação? Podemos conversar sobre algumas estratégias que podem complementar o trabalho de vocês.
+Contato: Quero uma reunião para hj
+IA: Certo, podemos conversar hoje sim. Que tal às 16h?
+Contato: pode ser
+IA: Combinado! Reunião agendada para hoje, sexta-feira, às 16h. Te vejo lá!
+Contato: quero ela para amanhã nesse horário
+
+# DADOS DO CONTATO
+Nome: Cristian Gabriel Kist
+Observações: 
+# CONTEXTO TEMPORAL
+Data e Hora Atual: 06/03/2026 14:34:21
+Dia da Semana: sexta-feira
+
+# DISPONIBILIDADE DE AGENDA
+Seu padrão de horários disponíveis: {"dom": ["09:00-18:00"], "qua": ["09:00-18:00"], "qui": ["09:00-18:00"], "sab": ["09:00-18:00"], "seg": ["09:00-18:00"], "sex": ["09:00-18:00"], "ter": ["09:00-18:00"]}.
+Compromissos já agendados (HORÁRIOS OCUPADOS):
+- Reunião com Cristian Gabriel Kist: 2026-03-06T16:00:00-03:00 até 2026-03-06T17:00:00-03:00
+- Happy birthday!: 2026-03-09 até 2026-03-10
+- Reunião: Cristian: 2026-03-12T15:00:00-03:00 até 2026-03-12T16:00:00-03:00
+- Reunião: Cristian: 2026-03-13T10:00:00-03:00 até 2026-03-13T11:00:00-03:00
+
+REGRAS DE AGENDAMENTO:
+1. Verifique se o horário proposto pelo cliente não conflita com os compromissos listados acima.
+2. Proponha apenas horários dentro do seu padrão de disponibilidade.
+3. Se o cliente confirmar, solicite o e-mail. Com horário E e-mail, use a ação 'agendar_reuniao'.
+
+# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)
+- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.
+- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.
+- **Continuidade Real:** Trate o histórico como uma conversa contínua de WhatsApp. Se já houver mensagens anteriores, JAMAIS use 'Olá' ou apresentações novamente.
+- **Zero Saudações Repetidas:** Se já houve um cumprimento no histórico recente, NÃO inicie a resposta com 'Olá', 'Oi', 'Bom dia', etc. Continue a conversa diretamente.
+- **Conexão Lógica:** Use conectivos de conversa real ('Então...', 'Nesse caso...', 'Ah, sobre isso...'). Evite listas com bullets se puder responder em uma frase corrida.
+- **Espelhamento de Tom:** Se a mensagem do cliente for curta (ex: 'qual o preço?'), seja direto ('Custa R$ 50,00'). Se ele for detalhista, explique mais.
+- **Formatação de Chat:** Evite listas com marcadores (bullets) ou negrito excessivo a menos que seja estritamente necessário. No WhatsApp, pessoas usam parágrafos curtos.
+- **Banalidade Controlada:** Em vez de 'Sinto muito pelo inconveniente causado', use algo mais leve como 'Poxa, entendo o problema' ou 'Que chato isso, vamos resolver'.
+- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, Cristian Gabriel Kist', 'Olá Cristian Gabriel Kist' ou similares. Fale direto.
+- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.
+- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.
+
+# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)
+- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica, pede para parar ou ignora perguntas.
+- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento. Faz perguntas genéricas sem demonstrar intenção real de avanço.
+- **6-8 (Interessado):** Engajado na conversa, responde a perguntas de qualificação, solicita informações específicas (preços, fotos, prazos) e mantém o diálogo fluido.
+- **9-10 (Quente):** Demonstra urgência, solicita visita técnica, reunião ou orçamento formal. Aceita prontamente os próximos passos propostos.
+
+# CRITÉRIOS PARA SITUAÇÃO 'Lead Qualificado'
+Mude a `nova_situacao` para 'Lead Qualificado' APENAS se:
+1. O contato demonstrou interesse real e ativo (Score >= 7).
+2. Houve uma troca de mensagens significativa (não apenas uma resposta isolada).
+3. O contato concordou com um próximo passo claro (visita, reunião, envio de projeto).
+Se o interesse for vago ou inicial, mantenha como 'Aguardando Resposta'.
+Se a pessoa demonstrar desinterece, hostilidade, mude para 'Não Interessado'.
+
+# TAREFA ATUAL: Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa, usando o contexto disponível.
+
+# REGRAS DE EXECUÇÃO
+1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).
+2. **Envio de Arquivos do Drive (IMPORTANTE):**
+   - Identifique arquivos no CONTEXTO (RAG) que começam com `[DRIVE]`. O ID está no formato `| ID: <ID_DO_ARQUIVO> |`.
+   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.
+   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.
+3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.
+4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.
+5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.
+6. **Agendamento:** Se o cliente confirmar um horário, PEÇA O E-MAIL para o convite. Com horário E e-mail, retorne 'agendar_reuniao' em `acao_agenda`, a data/hora ISO em `data_agendamento` e o e-mail em `email_cliente`.
+# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)
+Retorne APENAS um JSON válido, sem blocos de código.
+{
+  "mensagem_para_enviar": "Texto da resposta (ou null)",
+  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",
+  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),
+  "observacoes": "Resumo curto da conversa",
+  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],
+  "novos_contatos": [{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}],
+  "acao_agenda": "agendar_reuniao" | null,
+  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null,
+  "email_cliente": "email@cliente.com" | null
+}
+=== GEMINI RESPONSE ===
+{
+  "mensagem_para_enviar": "Combinado! Podemos fazer amanhã, sábado, às 16h. Qual seu e-mail para eu te enviar o convite?",
+  "nova_situacao": "Lead Qualificado",
+  "lead_score": 9,
+  "observacoes": "Cliente solicitou reagendamento da reunião para sábado às 16h. Aguardando e-mail para envio do convite.",
+  "arquivos_anexos": [],
+  "novos_contatos": [],
+  "acao_agenda": null,
+  "data_agendamento": null,
+  "email_cliente": null
+}
+
+
+==================== LOG ENTRY: 2026-03-06T17:35:06.397436+00:00 ====================
+
+=== SYSTEM INSTRUCTION ===
+Você é um assistente de prospecção.
+
+=== PROMPT CONTENTS ===
+# CONTEXTO (RAG)
+
+
+# HISTÓRICO
+IA: Oi
+Contato: [Análise de Mídia]: A imagem contém um logotipo estilizado com as letras 'L' e 'F' em tom dourado metálico, apresentando um efeito 3D. O fundo é de cor azul escuro. As letras parecem estar interligadas, formando um único emblema.
+Contato: Transforme o atendimento e a captação de clientes da sua empresa com a Digital ForMe! 🚀 Oferecemos soluções inteligentes de automação e prospecção com Inteligência Artificial via WhatsApp. Reduza o tempo de espera, atraia novos leads 24 horas por dia e escale suas vendas. Fale com nossa equipe e saiba mais!
+IA: Cristian, recebi sua mensagem sobre a Digital ForMe e as soluções de automação com IA via WhatsApp. É interessante. Pensando nisso, como vocês têm gerenciado a qualificação de leads e o acompanhamento dos clientes após a captação? Podemos conversar sobre algumas estratégias que podem complementar o trabalho de vocês.
+Contato: Quero uma reunião para hj
+IA: Certo, podemos conversar hoje sim. Que tal às 16h?
+Contato: pode ser
+IA: Combinado! Reunião agendada para hoje, sexta-feira, às 16h. Te vejo lá!
+Contato: quero ela para amanhã nesse horário
+IA: Combinado! Podemos fazer amanhã, sábado, às 16h. Qual seu e-mail para eu te enviar o convite?
+Contato: crisgkist@gmail.com
+
+# DADOS DO CONTATO
+Nome: Cristian Gabriel Kist
+Observações: 
+# CONTEXTO TEMPORAL
+Data e Hora Atual: 06/03/2026 14:35:05
+Dia da Semana: sexta-feira
+
+# DISPONIBILIDADE DE AGENDA
+Seu padrão de horários disponíveis: {"dom": ["09:00-18:00"], "qua": ["09:00-18:00"], "qui": ["09:00-18:00"], "sab": ["09:00-18:00"], "seg": ["09:00-18:00"], "sex": ["09:00-18:00"], "ter": ["09:00-18:00"]}.
+Compromissos já agendados (HORÁRIOS OCUPADOS):
+- Reunião com Cristian Gabriel Kist: 2026-03-06T16:00:00-03:00 até 2026-03-06T17:00:00-03:00
+- Happy birthday!: 2026-03-09 até 2026-03-10
+- Reunião: Cristian: 2026-03-12T15:00:00-03:00 até 2026-03-12T16:00:00-03:00
+- Reunião: Cristian: 2026-03-13T10:00:00-03:00 até 2026-03-13T11:00:00-03:00
+
+REGRAS DE AGENDAMENTO:
+1. Verifique se o horário proposto pelo cliente não conflita com os compromissos listados acima.
+2. Proponha apenas horários dentro do seu padrão de disponibilidade.
+3. Se o cliente confirmar, solicite o e-mail. Com horário E e-mail, use a ação 'agendar_reuniao'.
+
+# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)
+- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.
+- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.
+- **Continuidade Real:** Trate o histórico como uma conversa contínua de WhatsApp. Se já houver mensagens anteriores, JAMAIS use 'Olá' ou apresentações novamente.
+- **Zero Saudações Repetidas:** Se já houve um cumprimento no histórico recente, NÃO inicie a resposta com 'Olá', 'Oi', 'Bom dia', etc. Continue a conversa diretamente.
+- **Conexão Lógica:** Use conectivos de conversa real ('Então...', 'Nesse caso...', 'Ah, sobre isso...'). Evite listas com bullets se puder responder em uma frase corrida.
+- **Espelhamento de Tom:** Se a mensagem do cliente for curta (ex: 'qual o preço?'), seja direto ('Custa R$ 50,00'). Se ele for detalhista, explique mais.
+- **Formatação de Chat:** Evite listas com marcadores (bullets) ou negrito excessivo a menos que seja estritamente necessário. No WhatsApp, pessoas usam parágrafos curtos.
+- **Banalidade Controlada:** Em vez de 'Sinto muito pelo inconveniente causado', use algo mais leve como 'Poxa, entendo o problema' ou 'Que chato isso, vamos resolver'.
+- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, Cristian Gabriel Kist', 'Olá Cristian Gabriel Kist' ou similares. Fale direto.
+- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.
+- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.
+
+# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)
+- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica, pede para parar ou ignora perguntas.
+- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento. Faz perguntas genéricas sem demonstrar intenção real de avanço.
+- **6-8 (Interessado):** Engajado na conversa, responde a perguntas de qualificação, solicita informações específicas (preços, fotos, prazos) e mantém o diálogo fluido.
+- **9-10 (Quente):** Demonstra urgência, solicita visita técnica, reunião ou orçamento formal. Aceita prontamente os próximos passos propostos.
+
+# CRITÉRIOS PARA SITUAÇÃO 'Lead Qualificado'
+Mude a `nova_situacao` para 'Lead Qualificado' APENAS se:
+1. O contato demonstrou interesse real e ativo (Score >= 7).
+2. Houve uma troca de mensagens significativa (não apenas uma resposta isolada).
+3. O contato concordou com um próximo passo claro (visita, reunião, envio de projeto).
+Se o interesse for vago ou inicial, mantenha como 'Aguardando Resposta'.
+Se a pessoa demonstrar desinterece, hostilidade, mude para 'Não Interessado'.
+
+# TAREFA ATUAL: Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa, usando o contexto disponível.
+
+# REGRAS DE EXECUÇÃO
+1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).
+2. **Envio de Arquivos do Drive (IMPORTANTE):**
+   - Identifique arquivos no CONTEXTO (RAG) que começam com `[DRIVE]`. O ID está no formato `| ID: <ID_DO_ARQUIVO> |`.
+   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.
+   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.
+3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.
+4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.
+5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.
+6. **Agendamento:** Se o cliente confirmar um horário, PEÇA O E-MAIL para o convite. Com horário E e-mail, retorne 'agendar_reuniao' em `acao_agenda`, a data/hora ISO em `data_agendamento` e o e-mail em `email_cliente`.
+# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)
+Retorne APENAS um JSON válido, sem blocos de código.
+{
+  "mensagem_para_enviar": "Texto da resposta (ou null)",
+  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",
+  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),
+  "observacoes": "Resumo curto da conversa",
+  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],
+  "novos_contatos": [{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}],
+  "acao_agenda": "agendar_reuniao" | null,
+  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null,
+  "email_cliente": "email@cliente.com" | null
+}
+=== GEMINI RESPONSE ===
+{
+  "mensagem_para_enviar": "Certo, vou enviar o convite para crisgkist@gmail.com para nossa reunião amanhã, sábado, às 16h.",
+  "nova_situacao": "Lead Qualificado",
+  "lead_score": 9,
+  "observacoes": "Reunião agendada para sábado, 07/03/2026, às 16h, com convite enviado para crisgkist@gmail.com.",
+  "arquivos_anexos": [],
+  "novos_contatos": [],
+  "acao_agenda": "agendar_reuniao",
+  "data_agendamento": "2026-03-07T16:00:00-03:00",
+  "email_cliente": "crisgkist@gmail.com"
+}
+
+
+==================== LOG ENTRY: 2026-03-06T17:38:42.629737+00:00 ====================
+
+=== SYSTEM INSTRUCTION ===
+Você é um assistente de prospecção.
+
+=== PROMPT CONTENTS ===
+# CONTEXTO (RAG)
+
+
+# HISTÓRICO
+IA: Oi
+Contato: [Análise de Mídia]: A imagem contém um logotipo estilizado com as letras 'L' e 'F' em tom dourado metálico, apresentando um efeito 3D. O fundo é de cor azul escuro. As letras parecem estar interligadas, formando um único emblema.
+Contato: Transforme o atendimento e a captação de clientes da sua empresa com a Digital ForMe! 🚀 Oferecemos soluções inteligentes de automação e prospecção com Inteligência Artificial via WhatsApp. Reduza o tempo de espera, atraia novos leads 24 horas por dia e escale suas vendas. Fale com nossa equipe e saiba mais!
+IA: Cristian, recebi sua mensagem sobre a Digital ForMe e as soluções de automação com IA via WhatsApp. É interessante. Pensando nisso, como vocês têm gerenciado a qualificação de leads e o acompanhamento dos clientes após a captação? Podemos conversar sobre algumas estratégias que podem complementar o trabalho de vocês.
+Contato: Quero uma reunião para hj
+IA: Certo, podemos conversar hoje sim. Que tal às 16h?
+Contato: pode ser
+IA: Combinado! Reunião agendada para hoje, sexta-feira, às 16h. Te vejo lá!
+Contato: quero ela para amanhã nesse horário
+IA: Combinado! Podemos fazer amanhã, sábado, às 16h. Qual seu e-mail para eu te enviar o convite?
+Contato: crisgkist@gmail.com
+IA: Certo, vou enviar o convite para crisgkist@gmail.com para nossa reunião amanhã, sábado, às 16h.
+Contato: Marca para segunda, mesmo horário
+
+# DADOS DO CONTATO
+Nome: Cristian Gabriel Kist
+Observações: 
+# CONTEXTO TEMPORAL
+Data e Hora Atual: 06/03/2026 14:38:41
+Dia da Semana: sexta-feira
+
+# DISPONIBILIDADE DE AGENDA
+Seu padrão de horários disponíveis: {"dom": ["09:00-18:00"], "qua": ["09:00-18:00"], "qui": ["09:00-18:00"], "sab": ["09:00-18:00"], "seg": ["09:00-18:00"], "sex": ["09:00-18:00"], "ter": ["09:00-18:00"]}.
+Compromissos já agendados (HORÁRIOS OCUPADOS):
+- Happy birthday!: 2026-03-09 até 2026-03-10
+- Reunião: Cristian: 2026-03-12T15:00:00-03:00 até 2026-03-12T16:00:00-03:00
+- Reunião: Cristian: 2026-03-13T10:00:00-03:00 até 2026-03-13T11:00:00-03:00
+
+REGRAS DE AGENDAMENTO:
+1. Verifique se o horário proposto pelo cliente não conflita com os compromissos listados acima.
+2. Proponha apenas horários dentro do seu padrão de disponibilidade.
+3. Se o cliente confirmar, solicite o e-mail. Com horário E e-mail, use a ação 'agendar_reuniao'.
+
+# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)
+- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.
+- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.
+- **Continuidade Real:** Trate o histórico como uma conversa contínua de WhatsApp. Se já houver mensagens anteriores, JAMAIS use 'Olá' ou apresentações novamente.
+- **Zero Saudações Repetidas:** Se já houve um cumprimento no histórico recente, NÃO inicie a resposta com 'Olá', 'Oi', 'Bom dia', etc. Continue a conversa diretamente.
+- **Conexão Lógica:** Use conectivos de conversa real ('Então...', 'Nesse caso...', 'Ah, sobre isso...'). Evite listas com bullets se puder responder em uma frase corrida.
+- **Espelhamento de Tom:** Se a mensagem do cliente for curta (ex: 'qual o preço?'), seja direto ('Custa R$ 50,00'). Se ele for detalhista, explique mais.
+- **Formatação de Chat:** Evite listas com marcadores (bullets) ou negrito excessivo a menos que seja estritamente necessário. No WhatsApp, pessoas usam parágrafos curtos.
+- **Banalidade Controlada:** Em vez de 'Sinto muito pelo inconveniente causado', use algo mais leve como 'Poxa, entendo o problema' ou 'Que chato isso, vamos resolver'.
+- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, Cristian Gabriel Kist', 'Olá Cristian Gabriel Kist' ou similares. Fale direto.
+- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.
+- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.
+
+# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)
+- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica, pede para parar ou ignora perguntas.
+- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento. Faz perguntas genéricas sem demonstrar intenção real de avanço.
+- **6-8 (Interessado):** Engajado na conversa, responde a perguntas de qualificação, solicita informações específicas (preços, fotos, prazos) e mantém o diálogo fluido.
+- **9-10 (Quente):** Demonstra urgência, solicita visita técnica, reunião ou orçamento formal. Aceita prontamente os próximos passos propostos.
+
+# CRITÉRIOS PARA SITUAÇÃO 'Lead Qualificado'
+Mude a `nova_situacao` para 'Lead Qualificado' APENAS se:
+1. O contato demonstrou interesse real e ativo (Score >= 7).
+2. Houve uma troca de mensagens significativa (não apenas uma resposta isolada).
+3. O contato concordou com um próximo passo claro (visita, reunião, envio de projeto).
+Se o interesse for vago ou inicial, mantenha como 'Aguardando Resposta'.
+Se a pessoa demonstrar desinterece, hostilidade, mude para 'Não Interessado'.
+
+# TAREFA ATUAL: Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa, usando o contexto disponível.
+
+# REGRAS DE EXECUÇÃO
+1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).
+2. **Envio de Arquivos do Drive (IMPORTANTE):**
+   - Identifique arquivos no CONTEXTO (RAG) que começam com `[DRIVE]`. O ID está no formato `| ID: <ID_DO_ARQUIVO> |`.
+   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.
+   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.
+3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.
+4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.
+5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.
+6. **Agendamento:** Se o cliente confirmar um horário, PEÇA O E-MAIL para o convite. Com horário E e-mail, retorne 'agendar_reuniao' em `acao_agenda`, a data/hora ISO em `data_agendamento` e o e-mail em `email_cliente`.
+# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)
+Retorne APENAS um JSON válido, sem blocos de código.
+{
+  "mensagem_para_enviar": "Texto da resposta (ou null)",
+  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",
+  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),
+  "observacoes": "Resumo curto da conversa",
+  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],
+  "novos_contatos": [{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}],
+  "acao_agenda": "agendar_reuniao" | null,
+  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null,
+  "email_cliente": "email@cliente.com" | null
+}
+=== GEMINI RESPONSE ===
+{
+  "mensagem_para_enviar": "Para segunda-feira, dia 9, às 16h, não consigo, tenho um compromisso. Podemos fazer na quarta, dia 11, às 16h, ou na sexta, dia 13, no mesmo horário?",
+  "nova_situacao": "Lead Qualificado",
+  "lead_score": 9,
+  "observacoes": "Cliente solicitou reagendamento para segunda-feira às 16h, mas o horário está indisponível. Propostas de reagendamento para quarta ou sexta, 16h.",
+  "arquivos_anexos": [],
+  "novos_contatos": [],
+  "acao_agenda": null,
+  "data_agendamento": null,
+  "email_cliente": null
+}
+
+
+==================== LOG ENTRY: 2026-03-06T17:39:48.812732+00:00 ====================
+
+=== SYSTEM INSTRUCTION ===
+Você é um assistente de prospecção.
+
+=== PROMPT CONTENTS ===
+# CONTEXTO (RAG)
+
+
+# HISTÓRICO
+IA: Oi
+Contato: [Análise de Mídia]: A imagem contém um logotipo estilizado com as letras 'L' e 'F' em tom dourado metálico, apresentando um efeito 3D. O fundo é de cor azul escuro. As letras parecem estar interligadas, formando um único emblema.
+Contato: Transforme o atendimento e a captação de clientes da sua empresa com a Digital ForMe! 🚀 Oferecemos soluções inteligentes de automação e prospecção com Inteligência Artificial via WhatsApp. Reduza o tempo de espera, atraia novos leads 24 horas por dia e escale suas vendas. Fale com nossa equipe e saiba mais!
+IA: Cristian, recebi sua mensagem sobre a Digital ForMe e as soluções de automação com IA via WhatsApp. É interessante. Pensando nisso, como vocês têm gerenciado a qualificação de leads e o acompanhamento dos clientes após a captação? Podemos conversar sobre algumas estratégias que podem complementar o trabalho de vocês.
+Contato: Quero uma reunião para hj
+IA: Certo, podemos conversar hoje sim. Que tal às 16h?
+Contato: pode ser
+IA: Combinado! Reunião agendada para hoje, sexta-feira, às 16h. Te vejo lá!
+Contato: quero ela para amanhã nesse horário
+IA: Combinado! Podemos fazer amanhã, sábado, às 16h. Qual seu e-mail para eu te enviar o convite?
+Contato: crisgkist@gmail.com
+IA: Certo, vou enviar o convite para crisgkist@gmail.com para nossa reunião amanhã, sábado, às 16h.
+Contato: Marca para segunda, mesmo horário
+IA: Para segunda-feira, dia 9, às 16h, não consigo, tenho um compromisso. Podemos fazer na quarta, dia 11, às 16h, ou na sexta, dia 13, no mesmo horário?
+Contato: Deixa para quarta
+
+# DADOS DO CONTATO
+Nome: Cristian Gabriel Kist
+Observações: 
+# CONTEXTO TEMPORAL
+Data e Hora Atual: 06/03/2026 14:39:48
+Dia da Semana: sexta-feira
+
+# DISPONIBILIDADE DE AGENDA
+Seu padrão de horários disponíveis: {"dom": ["09:00-18:00"], "qua": ["09:00-18:00"], "qui": ["09:00-18:00"], "sab": ["09:00-18:00"], "seg": ["09:00-18:00"], "sex": ["09:00-18:00"], "ter": ["09:00-18:00"]}.
+Compromissos já agendados (HORÁRIOS OCUPADOS):
+- Happy birthday!: 2026-03-09 até 2026-03-10
+- Reunião: Cristian: 2026-03-12T15:00:00-03:00 até 2026-03-12T16:00:00-03:00
+- Reunião: Cristian: 2026-03-13T10:00:00-03:00 até 2026-03-13T11:00:00-03:00
+
+REGRAS DE AGENDAMENTO:
+1. Verifique se o horário proposto pelo cliente não conflita com os compromissos listados acima.
+2. Proponha apenas horários dentro do seu padrão de disponibilidade.
+3. Se o cliente confirmar, solicite o e-mail. Com horário E e-mail, use a ação 'agendar_reuniao'.
+
+# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)
+- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.
+- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.
+- **Continuidade Real:** Trate o histórico como uma conversa contínua de WhatsApp. Se já houver mensagens anteriores, JAMAIS use 'Olá' ou apresentações novamente.
+- **Zero Saudações Repetidas:** Se já houve um cumprimento no histórico recente, NÃO inicie a resposta com 'Olá', 'Oi', 'Bom dia', etc. Continue a conversa diretamente.
+- **Conexão Lógica:** Use conectivos de conversa real ('Então...', 'Nesse caso...', 'Ah, sobre isso...'). Evite listas com bullets se puder responder em uma frase corrida.
+- **Espelhamento de Tom:** Se a mensagem do cliente for curta (ex: 'qual o preço?'), seja direto ('Custa R$ 50,00'). Se ele for detalhista, explique mais.
+- **Formatação de Chat:** Evite listas com marcadores (bullets) ou negrito excessivo a menos que seja estritamente necessário. No WhatsApp, pessoas usam parágrafos curtos.
+- **Banalidade Controlada:** Em vez de 'Sinto muito pelo inconveniente causado', use algo mais leve como 'Poxa, entendo o problema' ou 'Que chato isso, vamos resolver'.
+- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, Cristian Gabriel Kist', 'Olá Cristian Gabriel Kist' ou similares. Fale direto.
+- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.
+- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.
+
+# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)
+- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica, pede para parar ou ignora perguntas.
+- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento. Faz perguntas genéricas sem demonstrar intenção real de avanço.
+- **6-8 (Interessado):** Engajado na conversa, responde a perguntas de qualificação, solicita informações específicas (preços, fotos, prazos) e mantém o diálogo fluido.
+- **9-10 (Quente):** Demonstra urgência, solicita visita técnica, reunião ou orçamento formal. Aceita prontamente os próximos passos propostos.
+
+# CRITÉRIOS PARA SITUAÇÃO 'Lead Qualificado'
+Mude a `nova_situacao` para 'Lead Qualificado' APENAS se:
+1. O contato demonstrou interesse real e ativo (Score >= 7).
+2. Houve uma troca de mensagens significativa (não apenas uma resposta isolada).
+3. O contato concordou com um próximo passo claro (visita, reunião, envio de projeto).
+Se o interesse for vago ou inicial, mantenha como 'Aguardando Resposta'.
+Se a pessoa demonstrar desinterece, hostilidade, mude para 'Não Interessado'.
+
+# TAREFA ATUAL: Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa, usando o contexto disponível.
+
+# REGRAS DE EXECUÇÃO
+1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).
+2. **Envio de Arquivos do Drive (IMPORTANTE):**
+   - Identifique arquivos no CONTEXTO (RAG) que começam com `[DRIVE]`. O ID está no formato `| ID: <ID_DO_ARQUIVO> |`.
+   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.
+   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.
+3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.
+4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.
+5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.
+6. **Agendamento:** Se o cliente confirmar um horário, PEÇA O E-MAIL para o convite. Com horário E e-mail, retorne 'agendar_reuniao' em `acao_agenda`, a data/hora ISO em `data_agendamento` e o e-mail em `email_cliente`.
+# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)
+Retorne APENAS um JSON válido, sem blocos de código.
+{
+  "mensagem_para_enviar": "Texto da resposta (ou null)",
+  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",
+  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),
+  "observacoes": "Resumo curto da conversa",
+  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],
+  "novos_contatos": [{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}],
+  "acao_agenda": "agendar_reuniao" | null,
+  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null,
+  "email_cliente": "email@cliente.com" | null
+}
+=== GEMINI RESPONSE ===
+{
+  "mensagem_para_enviar": "Certo, então fica para quarta, dia 11, às 16h. Vou enviar o convite para crisgkist@gmail.com.",
+  "nova_situacao": "Lead Qualificado",
+  "lead_score": 9,
+  "observacoes": "Reunião agendada para quarta, dia 11, às 16h, com Cristian Gabriel Kist.",
+  "arquivos_anexos": [],
+  "novos_contatos": [],
+  "acao_agenda": "agendar_reuniao",
+  "data_agendamento": "2026-03-11T16:00:00",
+  "email_cliente": "crisgkist@gmail.com"
+}
+
+
+==================== LOG ENTRY: 2026-03-06T17:44:34.803857+00:00 ====================
+
+=== SYSTEM INSTRUCTION ===
+Você é um assistente de prospecção.
+
+=== PROMPT CONTENTS ===
+# CONTEXTO (RAG)
+
+
+# HISTÓRICO
+IA: Oi
+Contato: [Análise de Mídia]: A imagem contém um logotipo estilizado com as letras 'L' e 'F' em tom dourado metálico, apresentando um efeito 3D. O fundo é de cor azul escuro. As letras parecem estar interligadas, formando um único emblema.
+Contato: Transforme o atendimento e a captação de clientes da sua empresa com a Digital ForMe! 🚀 Oferecemos soluções inteligentes de automação e prospecção com Inteligência Artificial via WhatsApp. Reduza o tempo de espera, atraia novos leads 24 horas por dia e escale suas vendas. Fale com nossa equipe e saiba mais!
+IA: Cristian, recebi sua mensagem sobre a Digital ForMe e as soluções de automação com IA via WhatsApp. É interessante. Pensando nisso, como vocês têm gerenciado a qualificação de leads e o acompanhamento dos clientes após a captação? Podemos conversar sobre algumas estratégias que podem complementar o trabalho de vocês.
+Contato: Quero uma reunião para hj
+IA: Certo, podemos conversar hoje sim. Que tal às 16h?
+Contato: pode ser
+IA: Combinado! Reunião agendada para hoje, sexta-feira, às 16h. Te vejo lá!
+Contato: quero ela para amanhã nesse horário
+IA: Combinado! Podemos fazer amanhã, sábado, às 16h. Qual seu e-mail para eu te enviar o convite?
+Contato: crisgkist@gmail.com
+IA: Certo, vou enviar o convite para crisgkist@gmail.com para nossa reunião amanhã, sábado, às 16h.
+Contato: Marca para segunda, mesmo horário
+IA: Para segunda-feira, dia 9, às 16h, não consigo, tenho um compromisso. Podemos fazer na quarta, dia 11, às 16h, ou na sexta, dia 13, no mesmo horário?
+Contato: Deixa para quarta
+IA: Certo, então fica para quarta, dia 11, às 16h. Vou enviar o convite para crisgkist@gmail.com.
+Contato: Fechou!
+
+# DADOS DO CONTATO
+Nome: Cristian Gabriel Kist
+Observações: 
+# CONTEXTO TEMPORAL
+Data e Hora Atual: 06/03/2026 14:44:34
+Dia da Semana: sexta-feira
+
+# DISPONIBILIDADE DE AGENDA
+Seu padrão de horários disponíveis: {"dom": ["09:00-18:00"], "qua": ["09:00-18:00"], "qui": ["09:00-18:00"], "sab": ["09:00-18:00"], "seg": ["09:00-18:00"], "sex": ["09:00-18:00"], "ter": ["09:00-18:00"]}.
+Compromissos já agendados (HORÁRIOS OCUPADOS):
+- Happy birthday!: 2026-03-09 até 2026-03-10
+- Reunião com Cristian Gabriel Kist: 2026-03-11T16:00:00-03:00 até 2026-03-11T17:00:00-03:00
+- Reunião: Cristian: 2026-03-12T15:00:00-03:00 até 2026-03-12T16:00:00-03:00
+- Reunião: Cristian: 2026-03-13T10:00:00-03:00 até 2026-03-13T11:00:00-03:00
+
+REGRAS DE AGENDAMENTO:
+1. Verifique se o horário proposto pelo cliente não conflita com os compromissos listados acima.
+2. Proponha apenas horários dentro do seu padrão de disponibilidade.
+3. Se o cliente confirmar, solicite o e-mail. Com horário E e-mail, use a ação 'agendar_reuniao'.
+
+# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)
+- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.
+- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.
+- **Continuidade Real:** Trate o histórico como uma conversa contínua de WhatsApp. Se já houver mensagens anteriores, JAMAIS use 'Olá' ou apresentações novamente.
+- **Zero Saudações Repetidas:** Se já houve um cumprimento no histórico recente, NÃO inicie a resposta com 'Olá', 'Oi', 'Bom dia', etc. Continue a conversa diretamente.
+- **Conexão Lógica:** Use conectivos de conversa real ('Então...', 'Nesse caso...', 'Ah, sobre isso...'). Evite listas com bullets se puder responder em uma frase corrida.
+- **Espelhamento de Tom:** Se a mensagem do cliente for curta (ex: 'qual o preço?'), seja direto ('Custa R$ 50,00'). Se ele for detalhista, explique mais.
+- **Formatação de Chat:** Evite listas com marcadores (bullets) ou negrito excessivo a menos que seja estritamente necessário. No WhatsApp, pessoas usam parágrafos curtos.
+- **Banalidade Controlada:** Em vez de 'Sinto muito pelo inconveniente causado', use algo mais leve como 'Poxa, entendo o problema' ou 'Que chato isso, vamos resolver'.
+- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, Cristian Gabriel Kist', 'Olá Cristian Gabriel Kist' ou similares. Fale direto.
+- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.
+- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.
+
+# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)
+- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica, pede para parar ou ignora perguntas.
+- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento. Faz perguntas genéricas sem demonstrar intenção real de avanço.
+- **6-8 (Interessado):** Engajado na conversa, responde a perguntas de qualificação, solicita informações específicas (preços, fotos, prazos) e mantém o diálogo fluido.
+- **9-10 (Quente):** Demonstra urgência, solicita visita técnica, reunião ou orçamento formal. Aceita prontamente os próximos passos propostos.
+
+# CRITÉRIOS PARA SITUAÇÃO 'Lead Qualificado'
+Mude a `nova_situacao` para 'Lead Qualificado' APENAS se:
+1. O contato demonstrou interesse real e ativo (Score >= 7).
+2. Houve uma troca de mensagens significativa (não apenas uma resposta isolada).
+3. O contato concordou com um próximo passo claro (visita, reunião, envio de projeto).
+Se o interesse for vago ou inicial, mantenha como 'Aguardando Resposta'.
+Se a pessoa demonstrar desinterece, hostilidade, mude para 'Não Interessado'.
+
+# TAREFA ATUAL: Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa, usando o contexto disponível.
+
+# REGRAS DE EXECUÇÃO
+1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).
+2. **Envio de Arquivos do Drive (IMPORTANTE):**
+   - Identifique arquivos no CONTEXTO (RAG) que começam com `[DRIVE]`. O ID está no formato `| ID: <ID_DO_ARQUIVO> |`.
+   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.
+   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.
+3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.
+4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.
+5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.
+6. **Agendamento:** Se o cliente confirmar um horário, PEÇA O E-MAIL para o convite. Com horário E e-mail, retorne 'agendar_reuniao' em `acao_agenda`, a data/hora ISO em `data_agendamento` e o e-mail em `email_cliente`.
+# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)
+Retorne APENAS um JSON válido, sem blocos de código.
+{
+  "mensagem_para_enviar": "Texto da resposta (ou null)",
+  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",
+  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),
+  "observacoes": "Resumo curto da conversa",
+  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],
+  "novos_contatos": [{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}],
+  "acao_agenda": "agendar_reuniao" | null,
+  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null,
+  "email_cliente": "email@cliente.com" | null
+}
+=== GEMINI RESPONSE ===
+{
+  "mensagem_para_enviar": "Combinado!",
+  "nova_situacao": "Lead Qualificado",
+  "lead_score": 10,
+  "observacoes": "Reunião agendada para 11/03 às 16h. Email: crisgkist@gmail.com.",
+  "arquivos_anexos": [],
+  "novos_contatos": [],
+  "acao_agenda": "agendar_reuniao",
+  "data_agendamento": "2026-03-11T16:00:00-03:00",
+  "email_cliente": "crisgkist@gmail.com"
+}
+
+
+==================== LOG ENTRY: 2026-03-06T17:55:48.260021+00:00 ====================
+
+=== SYSTEM INSTRUCTION ===
+Você é um assistente de prospecção.
+
+=== PROMPT CONTENTS ===
+# CONTEXTO (RAG)
+
+
+# HISTÓRICO
+IA: Oi
+Contato: [Análise de Mídia]: A imagem contém um logotipo estilizado com as letras 'L' e 'F' em tom dourado metálico, apresentando um efeito 3D. O fundo é de cor azul escuro. As letras parecem estar interligadas, formando um único emblema.
+Contato: Transforme o atendimento e a captação de clientes da sua empresa com a Digital ForMe! 🚀 Oferecemos soluções inteligentes de automação e prospecção com Inteligência Artificial via WhatsApp. Reduza o tempo de espera, atraia novos leads 24 horas por dia e escale suas vendas. Fale com nossa equipe e saiba mais!
+IA: Cristian, recebi sua mensagem sobre a Digital ForMe e as soluções de automação com IA via WhatsApp. É interessante. Pensando nisso, como vocês têm gerenciado a qualificação de leads e o acompanhamento dos clientes após a captação? Podemos conversar sobre algumas estratégias que podem complementar o trabalho de vocês.
+Contato: Quero uma reunião para hj
+IA: Certo, podemos conversar hoje sim. Que tal às 16h?
+Contato: pode ser
+IA: Combinado! Reunião agendada para hoje, sexta-feira, às 16h. Te vejo lá!
+Contato: quero ela para amanhã nesse horário
+IA: Combinado! Podemos fazer amanhã, sábado, às 16h. Qual seu e-mail para eu te enviar o convite?
+Contato: crisgkist@gmail.com
+IA: Certo, vou enviar o convite para crisgkist@gmail.com para nossa reunião amanhã, sábado, às 16h.
+Contato: Marca para segunda, mesmo horário
+IA: Para segunda-feira, dia 9, às 16h, não consigo, tenho um compromisso. Podemos fazer na quarta, dia 11, às 16h, ou na sexta, dia 13, no mesmo horário?
+Contato: Deixa para quarta
+IA: Certo, então fica para quarta, dia 11, às 16h. Vou enviar o convite para crisgkist@gmail.com.
+Contato: Fechou!
+IA: Combinado!
+Contato: Cancela, deixa marcado para sexta dia 13
+
+# DADOS DO CONTATO
+Nome: Cristian Gabriel Kist
+Observações: 
+# CONTEXTO TEMPORAL
+Data e Hora Atual: 06/03/2026 14:55:47
+Dia da Semana: sexta-feira
+
+# DISPONIBILIDADE DE AGENDA
+Seu padrão de horários disponíveis: {"dom": ["09:00-18:00"], "qua": ["09:00-18:00"], "qui": ["09:00-18:00"], "sab": ["09:00-18:00"], "seg": ["09:00-18:00"], "sex": ["09:00-18:00"], "ter": ["09:00-18:00"]}.
+Compromissos já agendados (HORÁRIOS OCUPADOS):
+- Happy birthday!: 2026-03-09 até 2026-03-10
+- Reunião com Cristian Gabriel Kist: 2026-03-11T16:00:00-03:00 até 2026-03-11T17:00:00-03:00
+- Reunião com Cristian Gabriel Kist: 2026-03-11T16:00:00-03:00 até 2026-03-11T17:00:00-03:00
+- Reunião: Cristian: 2026-03-12T15:00:00-03:00 até 2026-03-12T16:00:00-03:00
+- Reunião: Cristian: 2026-03-13T10:00:00-03:00 até 2026-03-13T11:00:00-03:00
+
+REGRAS DE AGENDAMENTO:
+1. Verifique se o horário proposto pelo cliente não conflita com os compromissos listados acima.
+2. Proponha apenas horários dentro do seu padrão de disponibilidade.
+3. Se o cliente confirmar, solicite o e-mail. Com horário E e-mail, use a ação 'agendar_reuniao'.
+
+# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)
+- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.
+- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.
+- **Continuidade Real:** Trate o histórico como uma conversa contínua de WhatsApp. Se já houver mensagens anteriores, JAMAIS use 'Olá' ou apresentações novamente.
+- **Zero Saudações Repetidas:** Se já houve um cumprimento no histórico recente, NÃO inicie a resposta com 'Olá', 'Oi', 'Bom dia', etc. Continue a conversa diretamente.
+- **Conexão Lógica:** Use conectivos de conversa real ('Então...', 'Nesse caso...', 'Ah, sobre isso...'). Evite listas com bullets se puder responder em uma frase corrida.
+- **Espelhamento de Tom:** Se a mensagem do cliente for curta (ex: 'qual o preço?'), seja direto ('Custa R$ 50,00'). Se ele for detalhista, explique mais.
+- **Formatação de Chat:** Evite listas com marcadores (bullets) ou negrito excessivo a menos que seja estritamente necessário. No WhatsApp, pessoas usam parágrafos curtos.
+- **Banalidade Controlada:** Em vez de 'Sinto muito pelo inconveniente causado', use algo mais leve como 'Poxa, entendo o problema' ou 'Que chato isso, vamos resolver'.
+- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, Cristian Gabriel Kist', 'Olá Cristian Gabriel Kist' ou similares. Fale direto.
+- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.
+- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.
+
+# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)
+- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica, pede para parar ou ignora perguntas.
+- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento. Faz perguntas genéricas sem demonstrar intenção real de avanço.
+- **6-8 (Interessado):** Engajado na conversa, responde a perguntas de qualificação, solicita informações específicas (preços, fotos, prazos) e mantém o diálogo fluido.
+- **9-10 (Quente):** Demonstra urgência, solicita visita técnica, reunião ou orçamento formal. Aceita prontamente os próximos passos propostos.
+
+# CRITÉRIOS PARA SITUAÇÃO 'Lead Qualificado'
+Mude a `nova_situacao` para 'Lead Qualificado' APENAS se:
+1. O contato demonstrou interesse real e ativo (Score >= 7).
+2. Houve uma troca de mensagens significativa (não apenas uma resposta isolada).
+3. O contato concordou com um próximo passo claro (visita, reunião, envio de projeto).
+Se o interesse for vago ou inicial, mantenha como 'Aguardando Resposta'.
+Se a pessoa demonstrar desinterece, hostilidade, mude para 'Não Interessado'.
+
+# TAREFA ATUAL: Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa, usando o contexto disponível.
+
+# REGRAS DE EXECUÇÃO
+1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).
+2. **Envio de Arquivos do Drive (IMPORTANTE):**
+   - Identifique arquivos no CONTEXTO (RAG) que começam com `[DRIVE]`. O ID está no formato `| ID: <ID_DO_ARQUIVO> |`.
+   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.
+   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.
+3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.
+4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.
+5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.
+6. **Agendamento:** Se o cliente confirmar um horário, PEÇA O E-MAIL para o convite. Com horário E e-mail, retorne 'agendar_reuniao' em `acao_agenda`, a data/hora ISO em `data_agendamento` e o e-mail em `email_cliente`.
+# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)
+Retorne APENAS um JSON válido, sem blocos de código.
+{
+  "mensagem_para_enviar": "Texto da resposta (ou null)",
+  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",
+  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),
+  "observacoes": "Resumo curto da conversa",
+  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],
+  "novos_contatos": [{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}],
+  "acao_agenda": "agendar_reuniao" | null,
+  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null,
+  "email_cliente": "email@cliente.com" | null
+}
+=== GEMINI RESPONSE ===
+{
+  "mensagem_para_enviar": "Certo, então vamos remarcar para sexta-feira, dia 13, às 16h. Vou enviar o convite para crisgkist@gmail.com.",
+  "nova_situacao": "Lead Qualificado",
+  "lead_score": 9,
+  "observacoes": "Reunião reagendada para sexta-feira, 13 de março, às 16h.",
+  "arquivos_anexos": [],
+  "novos_contatos": [],
+  "acao_agenda": "agendar_reuniao",
+  "data_agendamento": "2026-03-13T16:00:00-03:00",
+  "email_cliente": "crisgkist@gmail.com"
+}
+
+
+==================== LOG ENTRY: 2026-03-06T18:05:56.483901+00:00 ====================
+
+=== SYSTEM INSTRUCTION ===
+Você é um assistente de prospecção.
+
+=== PROMPT CONTENTS ===
+# CONTEXTO (RAG)
+
+
+# HISTÓRICO
+IA: Oi
+Contato: [Análise de Mídia]: A imagem contém um logotipo estilizado com as letras 'L' e 'F' em tom dourado metálico, apresentando um efeito 3D. O fundo é de cor azul escuro. As letras parecem estar interligadas, formando um único emblema.
+Contato: Transforme o atendimento e a captação de clientes da sua empresa com a Digital ForMe! 🚀 Oferecemos soluções inteligentes de automação e prospecção com Inteligência Artificial via WhatsApp. Reduza o tempo de espera, atraia novos leads 24 horas por dia e escale suas vendas. Fale com nossa equipe e saiba mais!
+IA: Cristian, recebi sua mensagem sobre a Digital ForMe e as soluções de automação com IA via WhatsApp. É interessante. Pensando nisso, como vocês têm gerenciado a qualificação de leads e o acompanhamento dos clientes após a captação? Podemos conversar sobre algumas estratégias que podem complementar o trabalho de vocês.
+Contato: Quero uma reunião para hj
+IA: Certo, podemos conversar hoje sim. Que tal às 16h?
+Contato: pode ser
+IA: Combinado! Reunião agendada para hoje, sexta-feira, às 16h. Te vejo lá!
+Contato: quero ela para amanhã nesse horário
+IA: Combinado! Podemos fazer amanhã, sábado, às 16h. Qual seu e-mail para eu te enviar o convite?
+Contato: crisgkist@gmail.com
+IA: Certo, vou enviar o convite para crisgkist@gmail.com para nossa reunião amanhã, sábado, às 16h.
+Contato: Marca para segunda, mesmo horário
+IA: Para segunda-feira, dia 9, às 16h, não consigo, tenho um compromisso. Podemos fazer na quarta, dia 11, às 16h, ou na sexta, dia 13, no mesmo horário?
+Contato: Deixa para quarta
+IA: Certo, então fica para quarta, dia 11, às 16h. Vou enviar o convite para crisgkist@gmail.com.
+Contato: Fechou!
+IA: Combinado!
+Contato: Cancela, deixa marcado para sexta dia 13
+IA: Certo, então vamos remarcar para sexta-feira, dia 13, às 16h. Vou enviar o convite para crisgkist@gmail.com.
+Contato: Perfeito!
+
+# DADOS DO CONTATO
+Nome: Cristian Gabriel Kist
+Observações: 
+# CONTEXTO TEMPORAL
+Data e Hora Atual: 06/03/2026 15:05:55
+Dia da Semana: sexta-feira
+
+# DISPONIBILIDADE DE AGENDA
+Seu padrão de horários disponíveis: {"dom": ["09:00-18:00"], "qua": ["09:00-18:00"], "qui": ["09:00-18:00"], "sab": ["09:00-18:00"], "seg": ["09:00-18:00"], "sex": ["09:00-18:00"], "ter": ["09:00-18:00"]}.
+Compromissos já agendados (HORÁRIOS OCUPADOS):
+- Happy birthday!: 2026-03-09 até 2026-03-10
+- Reunião: Cristian: 2026-03-12T15:00:00-03:00 até 2026-03-12T16:00:00-03:00
+- Reunião: Cristian: 2026-03-13T10:00:00-03:00 até 2026-03-13T11:00:00-03:00
+
+REGRAS DE AGENDAMENTO:
+1. Verifique se o horário proposto pelo cliente não conflita com os compromissos listados acima.
+2. Proponha apenas horários dentro do seu padrão de disponibilidade.
+3. Se o cliente confirmar, solicite o e-mail. Com horário E e-mail, use a ação 'agendar_reuniao'.
+
+# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)
+- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.
+- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.
+- **Continuidade Real:** Trate o histórico como uma conversa contínua de WhatsApp. Se já houver mensagens anteriores, JAMAIS use 'Olá' ou apresentações novamente.
+- **Zero Saudações Repetidas:** Se já houve um cumprimento no histórico recente, NÃO inicie a resposta com 'Olá', 'Oi', 'Bom dia', etc. Continue a conversa diretamente.
+- **Conexão Lógica:** Use conectivos de conversa real ('Então...', 'Nesse caso...', 'Ah, sobre isso...'). Evite listas com bullets se puder responder em uma frase corrida.
+- **Espelhamento de Tom:** Se a mensagem do cliente for curta (ex: 'qual o preço?'), seja direto ('Custa R$ 50,00'). Se ele for detalhista, explique mais.
+- **Formatação de Chat:** Evite listas com marcadores (bullets) ou negrito excessivo a menos que seja estritamente necessário. No WhatsApp, pessoas usam parágrafos curtos.
+- **Banalidade Controlada:** Em vez de 'Sinto muito pelo inconveniente causado', use algo mais leve como 'Poxa, entendo o problema' ou 'Que chato isso, vamos resolver'.
+- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, Cristian Gabriel Kist', 'Olá Cristian Gabriel Kist' ou similares. Fale direto.
+- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.
+- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.
+
+# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)
+- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica, pede para parar ou ignora perguntas.
+- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento. Faz perguntas genéricas sem demonstrar intenção real de avanço.
+- **6-8 (Interessado):** Engajado na conversa, responde a perguntas de qualificação, solicita informações específicas (preços, fotos, prazos) e mantém o diálogo fluido.
+- **9-10 (Quente):** Demonstra urgência, solicita visita técnica, reunião ou orçamento formal. Aceita prontamente os próximos passos propostos.
+
+# CRITÉRIOS PARA SITUAÇÃO 'Lead Qualificado'
+Mude a `nova_situacao` para 'Lead Qualificado' APENAS se:
+1. O contato demonstrou interesse real e ativo (Score >= 7).
+2. Houve uma troca de mensagens significativa (não apenas uma resposta isolada).
+3. O contato concordou com um próximo passo claro (visita, reunião, envio de projeto).
+Se o interesse for vago ou inicial, mantenha como 'Aguardando Resposta'.
+Se a pessoa demonstrar desinterece, hostilidade, mude para 'Não Interessado'.
+
+# TAREFA ATUAL: Analisar a última mensagem do contato e formular a PRÓXIMA resposta para avançar na conversa, usando o contexto disponível.
+
+# REGRAS DE EXECUÇÃO
+1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).
+2. **Envio de Arquivos do Drive (IMPORTANTE):**
+   - Identifique arquivos no CONTEXTO (RAG) que começam com `[DRIVE]`. O ID está no formato `| ID: <ID_DO_ARQUIVO> |`.
+   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.
+   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.
+3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.
+4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.
+5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.
+6. **Agendamento:** Se o cliente confirmar um horário, PEÇA O E-MAIL para o convite. Com horário E e-mail, retorne 'agendar_reuniao' em `acao_agenda`, a data/hora ISO em `data_agendamento` e o e-mail em `email_cliente`.
+# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)
+Retorne APENAS um JSON válido, sem blocos de código.
+{
+  "mensagem_para_enviar": "Texto da resposta (ou null)",
+  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",
+  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),
+  "observacoes": "Resumo curto da conversa",
+  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],
+  "novos_contatos": [{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}],
+  "acao_agenda": "agendar_reuniao" | null,
+  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null,
+  "email_cliente": "email@cliente.com" | null
+}
+=== GEMINI RESPONSE ===
+{
+  "mensagem_para_enviar": "Combinado! O convite da nossa reunião será enviado para o seu e-mail.",
+  "nova_situacao": "Lead Qualificado",
+  "lead_score": 9,
+  "observacoes": "Reunião agendada para 13/03/2026 às 16h. Convite será enviado para crisgkist@gmail.com.",
+  "arquivos_anexos": [],
+  "novos_contatos": [],
+  "acao_agenda": "agendar_reuniao",
+  "data_agendamento": "2026-03-13T16:00:00",
+  "email_cliente": "crisgkist@gmail.com"
+}

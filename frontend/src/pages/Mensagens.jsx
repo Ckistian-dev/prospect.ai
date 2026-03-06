@@ -104,6 +104,7 @@ function Mensagens() {
                         situacao: chat.situacao,
                         campanha: chat.campanha,
                         prospect_contact_id: chat.prospect_contact_id,
+                        observacoes: chat.observacoes,
                         updated_at: new Date(chat.timestamp * 1000).toISOString(),
                         last_message_ts: chat.timestamp * 1000,
                         conversa: JSON.stringify([{

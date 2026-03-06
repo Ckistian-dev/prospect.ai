@@ -17,9 +17,19 @@ const ProfileSidebar = ({ atendimento, onClose, statusOptions, getTextColorForBa
         setImgError(false);
     }, [atendimento.id]);
 
+    useEffect(() => {
+        if (!isEditingObs) {
+            setObsText(atendimento.observacoes || '');
+        }
+    }, [atendimento.observacoes]);
+
     const handleSaveObs = async () => {
         try {
-            await api.put(`/prospecting/contacts/${atendimento.id}`, { observacoes: obsText });
+            if (!atendimento.prospect_contact_id) {
+                toast.error('Este contato não está vinculado a uma prospecção.');
+                return;
+            }
+            await api.put(`/prospecting/contacts/${atendimento.prospect_contact_id}`, { observacoes: obsText });
             onUpdateStatus(atendimento.id, { observacoes: obsText });
             setIsEditingObs(false);
             toast.success('Observações atualizadas!');
@@ -77,6 +87,47 @@ const ProfileSidebar = ({ atendimento, onClose, statusOptions, getTextColorForBa
                             {atendimento.situacao?.toUpperCase()}
                         </span>
                     </div>
+                </div>
+
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                    <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                            <FileText size={16} className="text-brand-green" />
+                            Resumo / Observações
+                        </h4>
+                        {!isEditingObs ? (
+                            <button onClick={() => setIsEditingObs(true)} className="p-1 text-gray-400 hover:text-blue-600 transition-colors">
+                                <Edit size={14} />
+                            </button>
+                        ) : (
+                            <div className="flex gap-1">
+                                <button onClick={() => {
+                                    setIsEditingObs(false);
+                                    setObsText(atendimento.observacoes || '');
+                                }} className="p-1 text-gray-400 hover:text-red-600 transition-colors">
+                                    <X size={14} />
+                                </button>
+                                <button onClick={handleSaveObs} className="p-1 text-gray-400 hover:text-green-600 transition-colors">
+                                    <Check size={14} />
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                    
+                    {isEditingObs ? (
+                        <textarea
+                            ref={textareaRef}
+                            value={obsText}
+                            onChange={(e) => setObsText(e.target.value)}
+                            className="w-full text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-2 focus:outline-none focus:ring-1 focus:ring-brand-green resize-none"
+                            rows={6}
+                            placeholder="Adicione um resumo ou observação..."
+                        />
+                    ) : (
+                        <p className="text-sm text-gray-600 whitespace-pre-wrap text-left">
+                            {obsText || <span className="italic text-gray-400">Nenhuma observação registrada.</span>}
+                        </p>
+                    )}
                 </div>
             </div>
         </div>

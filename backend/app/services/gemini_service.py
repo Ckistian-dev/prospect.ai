@@ -567,7 +567,7 @@ class GeminiService:
                 f"REGRAS DE AGENDAMENTO:\n"
                 f"1. Verifique se o horário proposto pelo cliente não conflita com os compromissos listados acima.\n"
                 f"2. Proponha apenas horários dentro do seu padrão de disponibilidade.\n"
-                f"3. Se o cliente confirmar, use a ação 'agendar_reuniao' com a data/hora no formato ISO.\n"
+                f"3. Se o cliente confirmar, solicite o e-mail. Com horário E e-mail, use a ação 'agendar_reuniao'.\n"
             )
 
         # Montagem do Prompt Texto (Estilo AtendAI)
@@ -613,7 +613,7 @@ class GeminiService:
             f"3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.\n"
             f"4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.\n"
             f"5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.\n"
-            f"6. **Agendamento:** Se o cliente confirmar um horário, retorne 'agendar_reuniao' em `acao_agenda` e a data/hora ISO em `data_agendamento`.\n"
+            f"6. **Agendamento:** Se o cliente confirmar um horário, PEÇA O E-MAIL para o convite. Com horário E e-mail, retorne 'agendar_reuniao' em `acao_agenda`, a data/hora ISO em `data_agendamento` e o e-mail em `email_cliente`.\n"
             f"# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)\n"
             f"Retorne APENAS um JSON válido, sem blocos de código.\n"
             f"{{\n"
@@ -624,7 +624,8 @@ class GeminiService:
             f'  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],\n'
             f'  "novos_contatos": [{{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}}],\n'
             f'  "acao_agenda": "agendar_reuniao" | null,\n'
-            f'  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null\n'
+            f'  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null,\n'
+            f'  "email_cliente": "email@cliente.com" | null\n'
             f"}}"
         )
 

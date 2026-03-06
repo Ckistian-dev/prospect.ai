@@ -3,6 +3,8 @@ import logging
 import os
 import json
 import random
+import uuid
+import re
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 
@@ -243,6 +245,7 @@ async def process_active_prospects():
                     ia_tokens_used = ia_response.get("token_usage", 0)
                     acao_agenda = ia_response.get("acao_agenda")
                     data_agendamento = ia_response.get("data_agendamento")
+                    email_cliente = ia_response.get("email_cliente")
                     new_notification_id = None
                     
                     history_after_response = full_history.copy()
@@ -406,21 +409,98 @@ async def process_active_prospects():
                             service = calendar_service.get_service()
 
                             dt_start = datetime.fromisoformat(data_agendamento)
-                            dt_end = dt_start + timedelta(hours=1)
-
-                            event_body = {
-                                'summary': f'Reunião com {contact.nome}',
-                                'description': f'Agendado via ProspectAI.\nContato: {contact.nome}\nWhatsApp: {contact.whatsapp}\nObs: {new_observation}',
-                                'start': {'dateTime': dt_start.isoformat(), 'timeZone': 'America/Sao_Paulo'},
-                                'end': {'dateTime': dt_end.isoformat(), 'timeZone': 'America/Sao_Paulo'},
-                            }
-
+                            
+                            # --- Verificação de Agendamentos Existentes ---
                             loop = asyncio.get_running_loop()
-                            event = await loop.run_in_executor(
+                            now_utc = datetime.now(timezone.utc).isoformat()
+                            
+                            # Busca eventos futuros com o nome do contato
+                            existing_events_result = await loop.run_in_executor(
                                 None,
-                                lambda: service.events().insert(calendarId='primary', body=event_body).execute()
+                                lambda: service.events().list(
+                                    calendarId='primary',
+                                    timeMin=now_utc,
+                                    q=contact.nome,
+                                    singleEvents=True,
+                                    orderBy='startTime'
+                                ).execute()
                             )
-                            new_observation += f" [Reunião agendada: {event.get('htmlLink')}]"
+                            existing_events = existing_events_result.get('items', [])
+                            
+                            already_scheduled = False
+                            
+                            for event in existing_events:
+                                if 'dateTime' not in event.get('start', {}):
+                                    continue
+                                
+                                event_start_str = event['start']['dateTime']
+                                try:
+                                    event_start = datetime.fromisoformat(event_start_str)
+                                    
+                                    # Normaliza para comparação (remove timezone se necessário)
+                                    if dt_start.tzinfo is None:
+                                        event_start_compare = event_start.replace(tzinfo=None)
+                                        dt_start_compare = dt_start
+                                    else:
+                                        event_start_compare = event_start
+                                        dt_start_compare = dt_start
+                                    
+                                    # Verifica se é o mesmo horário (tolerância de 1 minuto)
+                                    if abs((event_start_compare - dt_start_compare).total_seconds()) < 60:
+                                        already_scheduled = True
+                                        logger.info(f"AGENTE WORKER: Reunião já existe para {contact.nome} em {event_start_str}. Mantendo.")
+                                    else:
+                                        # Horário diferente: Deleta o evento antigo (reagendamento)
+                                        logger.info(f"AGENTE WORKER: Removendo agendamento antigo de {contact.nome} em {event_start_str}.")
+                                        await loop.run_in_executor(
+                                            None,
+                                            lambda e_id=event['id']: service.events().delete(calendarId='primary', eventId=e_id).execute()
+                                        )
+                                except ValueError:
+                                    continue
+
+                            if already_scheduled:
+                                new_observation += " [Reunião já agendada]"
+                            else:
+                                dt_end = dt_start + timedelta(hours=1)
+
+                                event_body = {
+                                    'summary': f'Reunião com {contact.nome}',
+                                    'description': f'Agendado via ProspectAI.\nContato: {contact.nome}\nWhatsApp: {contact.whatsapp}\nObs: {new_observation}',
+                                    'start': {'dateTime': dt_start.isoformat(), 'timeZone': 'America/Sao_Paulo'},
+                                    'end': {'dateTime': dt_end.isoformat(), 'timeZone': 'America/Sao_Paulo'},
+                                    'conferenceData': {
+                                        'createRequest': {
+                                            'requestId': f"{uuid.uuid4()}",
+                                        }
+                                    }
+                                }
+
+                                if email_cliente and isinstance(email_cliente, str):
+                                    clean_email = email_cliente.strip()
+                                    if re.match(r"[^@]+@[^@]+\.[^@]+", clean_email):
+                                        event_body['attendees'] = [{'email': clean_email}]
+
+                                try:
+                                    event = await loop.run_in_executor(
+                                        None,
+                                        lambda: service.events().insert(calendarId='primary', body=event_body, conferenceDataVersion=1, sendUpdates='all').execute()
+                                    )
+                                    meeting_link = event.get('hangoutLink')
+                                    if meeting_link:
+                                        new_observation += f" [Reunião agendada: {meeting_link}]"
+                                    else:
+                                        new_observation += f" [Reunião agendada]"
+                                except Exception as req_err:
+                                    logger.warning(f"AGENTE WORKER: Falha ao criar evento com Meet, tentando sem. Erro: {req_err}")
+                                    if 'conferenceData' in event_body:
+                                        del event_body['conferenceData']
+                                    event = await loop.run_in_executor(
+                                        None,
+                                        lambda: service.events().insert(calendarId='primary', body=event_body, sendUpdates='all').execute()
+                                    )
+                                    new_observation += f" [Reunião agendada (Sem Meet)]"
+
                         except HttpError as e:
                             logger.error(f"AGENTE WORKER: Erro HTTP do Google Calendar: {e}")
                             error_message = f"Erro da API do Google ({e.resp.status})"
