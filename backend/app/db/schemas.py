@@ -34,6 +34,9 @@ class ConfigBase(BaseModel):
     prompt: Optional[str] = None
     available_hours: Optional[Dict[str, Any]] = None
     is_calendar_active: Optional[bool] = False
+    workflow_json: Optional[Dict[str, Any]] = None
+    notification_active: Optional[bool] = False
+    notification_destination: Optional[str] = None
 
 class ConfigCreate(ConfigBase):
     pass
@@ -47,6 +50,9 @@ class ConfigUpdate(BaseModel):
     available_hours: Optional[Dict[str, Any]] = None
     google_calendar_credentials: Optional[Dict[str, Any]] = None
     is_calendar_active: Optional[bool] = None
+    workflow_json: Optional[Dict[str, Any]] = None
+    notification_active: Optional[bool] = None
+    notification_destination: Optional[str] = None
 
 class Config(ConfigBase):
     id: int
@@ -131,8 +137,6 @@ class ProspectBase(BaseModel):
     initial_message_interval_seconds: int = 90
     horario_inicio: Optional[time] = None
     horario_fim: Optional[time] = None
-    notification_number: Optional[str] = None
-    notification_instance_id: Optional[int] = None
     whatsapp_instance_ids: Optional[List[int]] = None
     categorias: Optional[List[str]] = None
 
@@ -149,8 +153,6 @@ class ProspectUpdate(BaseModel):
     contact_ids_to_add: Optional[List[int]] = None
     horario_inicio: Optional[time] = None
     horario_fim: Optional[time] = None
-    notification_number: Optional[str] = None
-    notification_instance_id: Optional[int] = None
     whatsapp_instance_ids: Optional[List[int]] = None
     categorias: Optional[List[str]] = None
 

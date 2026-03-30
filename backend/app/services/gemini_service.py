@@ -354,10 +354,26 @@ class GeminiService:
             # Define o remetente como 'ia' ou 'contato'
             role = "IA" if msg.get("role") == "assistant" else "Contato"
             content = str(msg.get("content", "")).strip()
+            content = content.replace('\n', '\\n')
+            
+            # Adiciona timestamp se disponível
+            timestamp = msg.get("timestamp")
+            if timestamp:
+                try:
+                    # Assume timestamp é uma string ISO
+                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    # Ajusta para Brasília (UTC-3)
+                    dt_br = dt.astimezone(timezone(timedelta(hours=-3)))
+                    formatted_time = dt_br.strftime('%d/%m/%Y %H:%M:%S')
+                except (ValueError, TypeError):
+                    formatted_time = str(timestamp)
+                line = f"[{formatted_time}] {role}: {content}"
+            else:
+                line = f"{role}: {content}"
             
             # Adiciona a linha apenas se houver conteúdo
             if content:
-                history_lines.append(f"{role}: {content}")
+                history_lines.append(line)
         
         # Se não houver histórico, retorna uma mensagem padrão
         if not history_lines:
@@ -372,10 +388,40 @@ class GeminiService:
         now_br = now_utc.astimezone(timezone(timedelta(hours=-3)))
         dias_semana = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
         return (
-            f"# CONTEXTO TEMPORAL\n"
+            f"\n# CONTEXTO TEMPORAL\n"
             f"Data e Hora Atual: {now_br.strftime('%d/%m/%Y %H:%M:%S')}\n"
             f"Dia da Semana: {dias_semana[now_br.weekday()]}\n"
         )
+
+    def _format_workflow_to_markdown(self, workflow_data: Optional[Dict[str, Any]]) -> str:
+        """Converte o JSON do React Flow em uma tabela Markdown legível para a IA."""
+        if not workflow_data or not isinstance(workflow_data, dict):
+            return ""
+            
+        nodes = {n['id']: n for n in workflow_data.get('nodes', [])}
+        edges = workflow_data.get('edges', [])
+        
+        if not nodes:
+            return ""
+            
+        lines = ["# Fluxo de Atendimento e Condições", "Etapa ou Estado|Ação/Instrução Esperada|Condição para Avançar"]
+        
+        for node_id, node in nodes.items():
+            etapa = node.get('data', {}).get('label', 'Etapa').replace('\n', ' ')
+            acao = node.get('data', {}).get('description', 'Sem instrução específica').replace('\n', ' ')
+            
+            target_edges = [e for e in edges if e.get('source') == node_id]
+            proximos = []
+            for e in target_edges:
+                target_node = nodes.get(e.get('target'))
+                if target_node:
+                    condicao = e.get('label', 'Avanço Direto')
+                    proximos.append(f"Se '{condicao}' -> Ir para [{target_node.get('data', {}).get('label', '')}]")
+            
+            proximo_str = " | ".join(proximos) if proximos else "Fim do fluxo"
+            lines.append(f"{etapa}|{acao}|{proximo_str}")
+            
+        return "\n".join(lines) + "\n\n"
 
     # --- ASSINATURA ATUALIZADA PARA PASSAR DB E USER ---
     async def transcribe_and_analyze_media(
@@ -480,8 +526,9 @@ class GeminiService:
             
             time_context = self._get_time_context()
 
+            rag_section_analysis = f"# CONTEXTO (RAG)\n{rag_context}\n\n" if rag_context else ""
             analysis_prompt_text = (
-                f"# CONTEXTO (RAG)\n{rag_context}\n\n"
+                f"{rag_section_analysis}"
                 f"{time_context}\n"
                 f"# HISTÓRICO DA CONVERSA\n{historico_conversa_str}\n\n"
                 f"# TAREFA ATUAL: Extração de Dados de Mídia\n"
@@ -570,13 +617,21 @@ class GeminiService:
                 f"3. Se o cliente confirmar, solicite o e-mail. Com horário E e-mail, use a ação 'agendar_reuniao'.\n"
             )
 
+        # --- WORKFLOW CONTEXT ---
+        workflow_context = ""
+        if hasattr(config, "workflow_json") and config.workflow_json:
+            workflow_context = self._format_workflow_to_markdown(config.workflow_json)
+
         # Montagem do Prompt Texto (Estilo AtendAI)
+        rag_section = f"# CONTEXTO (RAG)\n{rag_context}\n\n" if rag_context else ""
+        obs_section = f"Observações: {contact.observacoes}\n" if contact.observacoes else ""
         prompt_text = (
-            f"# CONTEXTO (RAG)\n{rag_context}\n\n"
+            f"{rag_section}"
             f"# HISTÓRICO\n{formatted_history}\n\n"
+            f"{workflow_context}"
             f"# DADOS DO CONTATO\n"
             f"Nome: {contact.nome}\n"
-            f"Observações: {contact.observacoes}\n"
+            f"{obs_section}"
             f"{time_context}"
             f"{calendar_context}\n"
             f"# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)\n"

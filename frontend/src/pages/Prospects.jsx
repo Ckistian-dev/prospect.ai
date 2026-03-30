@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import { Play, Pause, Trash2, Edit, Loader2, Search, MessageSquare, ChevronDown, Table as TableIcon, AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Image as ImageIcon, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -180,6 +181,7 @@ export const DeleteConfirmationModal = ({ title, message, onConfirm, onClose }) 
 // --- COMPONENTE PRINCIPAL ---
 
 function Prospects() {
+    const navigate = useNavigate();
     const [prospectsList, setProspectsList] = useState([]);
     const [selectedProspect, setSelectedProspect] = useState(null);
     const [contacts, setContacts] = useState([]);
@@ -442,7 +444,7 @@ function Prospects() {
                                 <tr><td colSpan="6" className="text-center p-8 text-red-500">{error}</td></tr>
                             ) : currentContacts.length > 0 ? (
                                 currentContacts.map((row) => (
-                                    <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
+                                    <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer" onDoubleClick={() => navigate('/mensagens', { state: { selectContactId: row.id } })}>
                                         <td className="p-4 font-medium text-gray-800">{row.nome}</td>
                                         <td className="p-4 text-gray-700">{row.whatsapp}</td>
                                         <td className="p-4 text-center">

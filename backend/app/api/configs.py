@@ -1,10 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete
 from typing import List, Dict, Any
 import logging
+import os
+import urllib.parse
+import httpx
+from pydantic import BaseModel
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 
-from app.db.database import get_db
+from app.db.database import get_db, SessionLocal
 from app.db import models
 from app.db.schemas import Config, ConfigCreate, ConfigUpdate
 from app.crud import crud_config
@@ -12,9 +18,20 @@ from app.api.dependencies import get_current_active_user
 from app.services.google_sheets_service import GoogleSheetsService
 from app.services.google_drive_service import get_drive_service
 from app.services.gemini_service import get_gemini_service
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# --- IDs BASE DE TEMPLATES (Adicione no seu .env) ---
+BASE_SYSTEM_SHEET_ID = os.getenv("BASE_SYSTEM_SHEET_ID", "")
+BASE_RAG_SHEET_ID = os.getenv("BASE_RAG_SHEET_ID", "")
+
+class ProvisionWithCodePayload(BaseModel):
+    config_id: int
+    resource_type: str
+    code: str
+    redirect_uri: str
 
 # --- Funções Auxiliares de Engenharia de Dados ---
 
@@ -146,8 +163,184 @@ async def get_situations(
         {"nome": "Falha no Envio", "cor": "#7f1d1d"}
     ]
 
+@router.get("/google-auth-url", summary="URL de Autenticação do Google para Provisionamento")
+async def get_google_auth_url(redirect_uri: str):
+    client_id = settings.GOOGLE_CLIENT_ID
+    scope = "email profile https://www.googleapis.com/auth/drive"
+    params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": scope,
+        "access_type": "online",
+        "prompt": "select_account"
+    }
+    url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
+    return {"authorization_url": url}
+
+@router.post("/provision", summary="Provisionar nova Planilha/Pasta usando Login do Google")
+async def provision_google_resource(
+    payload: ProvisionWithCodePayload = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user)
+):
+    db_config = await crud_config.get_config(db=db, config_id=payload.config_id, user_id=current_user.id)
+    if not db_config:
+        raise HTTPException(status_code=404, detail="Configuração não encontrada.")
+        
+    # Trocar código por token para descobrir o e-mail real do usuário
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        token_res = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                "code": payload.code,
+                "grant_type": "authorization_code",
+                "redirect_uri": payload.redirect_uri
+            }
+        )
+        token_data = token_res.json()
+        if "access_token" not in token_data:
+            raise HTTPException(status_code=400, detail="Falha ao autenticar com o Google.")
+
+        userinfo_res = await client.get(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            headers={"Authorization": f"Bearer {token_data['access_token']}"}
+        )
+        userinfo = userinfo_res.json()
+        user_email = userinfo.get("email")
+        if not user_email:
+            raise HTTPException(status_code=400, detail="Não foi possível obter o e-mail da conta do Google.")
+
+    # Cria o serviço do Google Drive autenticado como o usuário
+    user_creds = Credentials(token_data['access_token'])
+    user_drive_service = build('drive', 'v3', credentials=user_creds)
+
+    drive_service = get_drive_service()
+    
+    service_account_email = "integracaoapi@integracaoapi-436218.iam.gserviceaccount.com"
+    try:
+        if settings.GOOGLE_SERVICE_ACCOUNT_JSON:
+            import json
+            sa_info = json.loads(settings.GOOGLE_SERVICE_ACCOUNT_JSON)
+            service_account_email = sa_info.get("client_email", service_account_email)
+    except:
+        pass
+
+    emails_to_share = [service_account_email]
+
+    try:
+        if payload.resource_type == "system":
+            if not BASE_SYSTEM_SHEET_ID:
+                raise ValueError("BASE_SYSTEM_SHEET_ID não está configurado no .env")
+                
+            try:
+                perm = {'type': 'user', 'role': 'reader', 'emailAddress': user_email}
+                drive_service.service.permissions().create(fileId=BASE_SYSTEM_SHEET_ID, body=perm, sendNotificationEmail=False).execute()
+            except Exception as e:
+                logger.warning(f"Não foi possível dar permissão de leitura prévia no template base: {e}")
+                
+            body = {'name': f"Instruções IA - {db_config.nome_config}"}
+            new_file = user_drive_service.files().copy(fileId=BASE_SYSTEM_SHEET_ID, body=body, supportsAllDrives=True).execute()
+            new_id = new_file.get('id')
+            db_config.spreadsheet_id = new_id
+            
+        elif payload.resource_type == "rag":
+            if not BASE_RAG_SHEET_ID:
+                raise ValueError("BASE_RAG_SHEET_ID não está configurado no .env")
+                
+            try:
+                perm = {'type': 'user', 'role': 'reader', 'emailAddress': user_email}
+                drive_service.service.permissions().create(fileId=BASE_RAG_SHEET_ID, body=perm, sendNotificationEmail=False).execute()
+            except Exception as e:
+                logger.warning(f"Não foi possível dar permissão de leitura prévia no template base: {e}")
+                
+            body = {'name': f"Conhecimento IA - {db_config.nome_config}"}
+            new_file = user_drive_service.files().copy(fileId=BASE_RAG_SHEET_ID, body=body, supportsAllDrives=True).execute()
+            new_id = new_file.get('id')
+            db_config.spreadsheet_rag_id = new_id
+            
+        elif payload.resource_type == "drive":
+            file_metadata = {'name': f"Arquivos IA - {db_config.nome_config}", 'mimeType': 'application/vnd.google-apps.folder'}
+            folder = user_drive_service.files().create(body=file_metadata, fields='id').execute()
+            new_id = folder.get('id')
+            db_config.drive_id = new_id
+
+        for email in emails_to_share:
+            if email and "@" in email:
+                perm = {'type': 'user', 'role': 'writer', 'emailAddress': email.strip()}
+                user_drive_service.permissions().create(fileId=new_id, body=perm, sendNotificationEmail=False).execute()
+
+        db.add(db_config)
+        await db.commit()
+        return {"message": "Recurso provisionado com sucesso.", "id": new_id}
+    except Exception as e:
+        logger.error(f"Falha ao provisionar recurso: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro ao criar/partilhar o recurso no Google: {str(e)}")
+
+async def background_sync_sheet(config_id: int, user_id: int, spreadsheet_id: str, sync_type: str):
+    """Tarefa agendada em segundo plano para ler planilhas e gerar contexto/vetores."""
+    logger.info(f"Iniciando sincronização de Planilha em background (Config: {config_id}, Tipo: {sync_type})")
+    
+    async with SessionLocal() as db:
+        try:
+            db_config = await crud_config.get_config(db=db, config_id=config_id, user_id=user_id)
+            if not db_config:
+                return
+
+            sheets_service = GoogleSheetsService()
+            gemini_service = get_gemini_service()
+            sheet_data_json = await sheets_service.get_sheet_as_json(spreadsheet_id)
+            
+            prompt_buffer = []
+            contextos_buffer = []
+
+            if sync_type == "system":
+                for sheet_name, rows in sheet_data_json.items():
+                    csv_section = format_sheet_to_csv_system(sheet_name, rows)
+                    if csv_section:
+                        prompt_buffer.append(csv_section)
+                db_config.prompt = "\n\n".join(prompt_buffer)
+
+            elif sync_type == "rag":
+                rag_items = []
+                for sheet_name, rows in sheet_data_json.items():
+                    for row in rows:
+                        csv_content = format_row_to_csv_rag(sheet_name, row)
+                        if csv_content:
+                            rag_items.append({"content": csv_content, "origin": sheet_name})
+                
+                if rag_items:
+                    lines_to_embed = [item["content"] for item in rag_items]
+                    embeddings = await gemini_service.generate_embeddings_batch(lines_to_embed)
+                    
+                    for item, embedding in zip(rag_items, embeddings):
+                        if embedding:
+                            contextos_buffer.append(models.KnowledgeVector(
+                                config_id=db_config.id,
+                                content=item["content"],
+                                origin=item["origin"],
+                                embedding=embedding
+                            ))
+                
+                await db.execute(delete(models.KnowledgeVector).where(
+                    models.KnowledgeVector.config_id == db_config.id,
+                    models.KnowledgeVector.origin != "drive"
+                ))
+                if contextos_buffer:
+                    db.add_all(contextos_buffer)
+            
+            db.add(db_config)
+            await db.commit()
+            logger.info(f"Sincronização ({sync_type}) finalizada com sucesso!")
+        except Exception as e:
+            logger.error(f"Erro na sincronização em background da Planilha: {e}", exc_info=True)
+            await db.rollback()
+
 @router.post("/sync_sheet", summary="Sincronizar planilha do Google Sheets com uma Configuração")
 async def sync_google_sheet(
+    background_tasks: BackgroundTasks,
     payload: Dict[str, Any] = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user)
@@ -246,8 +439,54 @@ async def sync_google_sheet(
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Falha ao sincronizar planilha: {str(e)}")
 
+async def background_sync_drive(config_id: int, user_id: int, folder_id: str):
+    """Tarefa agendada em segundo plano para varrer o Drive, extrair conteúdo e calcular vetores."""
+    logger.info(f"Iniciando sincronização de Drive em background (Config: {config_id})")
+    
+    async with SessionLocal() as db:
+        try:
+            db_config = await crud_config.get_config(db=db, config_id=config_id, user_id=user_id)
+            if not db_config:
+                logger.warning(f"Sincronização abortada: Configuração {config_id} não encontrada.")
+                return
+
+            drive_service = get_drive_service()
+            gemini_service = get_gemini_service()
+            
+            result = await drive_service.list_files_in_folder(folder_id)
+            tree = result.get("tree", {})
+            
+            rag_lines = flatten_drive_tree(tree)
+            contextos_buffer = []
+
+            if rag_lines:
+                embeddings = await gemini_service.generate_embeddings_batch(rag_lines)
+                
+                for line, embedding in zip(rag_lines, embeddings):
+                    if embedding:
+                        contextos_buffer.append(models.KnowledgeVector(
+                            config_id=db_config.id,
+                            content=line,
+                            origin="drive",
+                            embedding=embedding
+                        ))
+            
+            await db.execute(delete(models.KnowledgeVector).where(
+                models.KnowledgeVector.config_id == db_config.id,
+                models.KnowledgeVector.origin == "drive"
+            ))
+            if contextos_buffer:
+                db.add_all(contextos_buffer)
+            
+            await db.commit()
+            logger.info(f"Sincronização de Drive finalizada com sucesso! {len(contextos_buffer)} vetores gerados.")
+        except Exception as e:
+            logger.error(f"Erro na sincronização em background do Drive: {e}", exc_info=True)
+            await db.rollback()
+
 @router.post("/sync_drive", summary="Sincronizar pasta do Google Drive")
 async def sync_google_drive(
+    background_tasks: BackgroundTasks,
     payload: Dict[str, Any] = Body(...),
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user)
@@ -265,60 +504,16 @@ async def sync_google_drive(
     # Atualiza o ID da pasta se foi enviado
     if drive_id:
         db_config.drive_id = drive_id
+        db.add(db_config)
+        await db.commit()
     
     final_drive_id = db_config.drive_id
     if not final_drive_id:
         raise HTTPException(status_code=400, detail="Nenhum ID de pasta associado. Insira o ID da pasta do Google Drive.")
 
-    try:
-        drive_service = get_drive_service()
-        gemini_service = get_gemini_service()
-        drive_data = await drive_service.list_files_in_folder(final_drive_id)
-        
-        files_tree = drive_data.get("tree", {})
-        files_count = drive_data.get("count", 0)
+    background_tasks.add_task(background_sync_drive, config_id, current_user.id, final_drive_id)
 
-        # --- Lógica de Processamento de Dados ---
-        # 1. Achata a árvore para lista de strings densas
-        drive_lines = flatten_drive_tree(files_tree)
-        
-        # 2. Prepara vetores para RAG
-        contextos_buffer = []
-        if drive_lines:
-            embeddings = await gemini_service.generate_embeddings_batch(drive_lines)
-            
-            # --- PROTEÇÃO CONTRA PERDA DE DADOS ---
-            valid_embeddings = [e for e in embeddings if e]
-            if not valid_embeddings and len(drive_lines) > 0:
-                raise HTTPException(status_code=500, detail="Falha crítica na geração de embeddings do Drive. A sincronização foi abortada.")
-
-            for line, embedding in zip(drive_lines, embeddings):
-                if embedding:
-                    contextos_buffer.append(models.KnowledgeVector(
-                        config_id=db_config.id, 
-                        content=line, 
-                        origin="drive", 
-                        embedding=embedding
-                    ))
-
-        # 3. Atualiza Vetores (Limpa anteriores da origem 'drive' e insere novos)
-        await db.execute(delete(models.KnowledgeVector).where(
-            models.KnowledgeVector.config_id == db_config.id,
-            models.KnowledgeVector.origin == "drive"
-        ))
-        if contextos_buffer:
-            db.add_all(contextos_buffer)
-
-        await db.commit()
-        await db.refresh(db_config)
-
-        return {
-            "message": "Drive sincronizado com Knowledge Base", 
-            "files_count": files_count,
-            "vectors_created": len(contextos_buffer)
-        }
-    
-    except Exception as e:
-        logger.error(f"Falha na rota sync_drive: {e}", exc_info=True)
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Falha ao sincronizar Drive: {str(e)}")
+    return {
+        "message": "Sincronização iniciada em segundo plano. Os arquivos estarão disponíveis em breve.",
+        "files_found": "Calculando em background...",
+    }

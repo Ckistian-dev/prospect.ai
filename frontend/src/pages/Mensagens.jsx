@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import toast from 'react-hot-toast';
 import { Loader2, MoreVertical } from 'lucide-react';
@@ -13,6 +14,7 @@ import ChatPlaceholder from '../components/mensagens/ChatPlaceholder';
 const getTextColorForBackground = (hexColor) => '#FFFFFF';
 
 function Mensagens() {
+    const location = useLocation();
     const [mensagens, setAtendimentos] = useState([]);
     const [instances, setInstances] = useState([]);
     const [filteredAtendimentos, setFilteredAtendimentos] = useState([]);
@@ -36,6 +38,7 @@ function Mensagens() {
     const [searchTerm, setSearchTerm] = useState('');
     const [activeButtonGroup, setActiveButtonGroup] = useState('atendimentos');
     const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
+    const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
     const [statusFilters, setStatusFilters] = useState(null);
     const [tagFilters, setTagFilters] = useState(null);
     const [timeStart, setTimeStart] = useState(null);
@@ -123,10 +126,49 @@ function Mensagens() {
             const results = await Promise.all(chatPromises);
             results.forEach(chats => allChats.push(...chats));
 
-            // Sort by timestamp desc
-            allChats.sort((a, b) => b.last_message_ts - a.last_message_ts);
+            setAtendimentos(prevAtendimentos => {
+                const prevMap = new Map(prevAtendimentos.map(at => [at.id, at]));
+                let hasChanges = false;
 
-            setAtendimentos(allChats);
+                allChats.forEach(incomingChat => {
+                    const existingChat = prevMap.get(incomingChat.id);
+                    
+                    if (!existingChat) {
+                        // Novo chat
+                        prevMap.set(incomingChat.id, incomingChat);
+                        hasChanges = true;
+                    } else {
+                        // Atualizar chat existente
+                        // Preservar a conversa local se tiver mensagens sendo enviadas
+                        let conversaToKeep = incomingChat.conversa;
+                        if (existingChat.conversa && existingChat.conversa.includes('"type":"sending"')) {
+                            conversaToKeep = existingChat.conversa;
+                        }
+
+                        const updatedChat = { ...existingChat, ...incomingChat, conversa: conversaToKeep };
+
+                        // Só atualiza o estado se houver mudança real
+                        if (
+                            existingChat.last_message_ts !== updatedChat.last_message_ts ||
+                            existingChat.status !== updatedChat.status ||
+                            existingChat.situacao !== updatedChat.situacao ||
+                            existingChat.conversa !== updatedChat.conversa
+                        ) {
+                            prevMap.set(incomingChat.id, updatedChat);
+                            hasChanges = true;
+                        }
+                    }
+                });
+
+                if (!hasChanges && prevAtendimentos.length === prevMap.size) {
+                    return prevAtendimentos;
+                }
+
+                const updatedArray = Array.from(prevMap.values());
+                updatedArray.sort((a, b) => b.last_message_ts - a.last_message_ts);
+                return updatedArray;
+            });
+
             setHasMore(someInstanceHasMore);
             setError('');
         } catch (err) {
@@ -155,6 +197,18 @@ function Mensagens() {
         });
         return () => { isMounted = false; clearTimeout(timeoutId); };
     }, [fetchData, limit]);
+
+    // Handle selection from navigation state
+    useEffect(() => {
+        if (location.state?.selectContactId && mensagens.length > 0) {
+            const atendimento = mensagens.find(at => at.prospect_contact_id === location.state.selectContactId);
+            if (atendimento) {
+                setSelectedAtendimento(atendimento);
+                setActiveButtonGroup('bot_ia');
+            }
+            window.history.replaceState({}, document.title);
+        }
+    }, [location.state, mensagens]);
 
     // Infinite Scroll Observer
     useEffect(() => {
@@ -188,14 +242,31 @@ function Mensagens() {
         const fetchMessages = async () => {
             try {
                 const res = await api.get(`/whatsapp/${instanceId}/messages/${remoteJid}`);
+                
                 setSelectedAtendimento(prev => {
-                    // Só atualiza se ainda estivermos no mesmo chat
                     if (prev?.id !== currentId) return prev;
                     
-                    const newConversa = JSON.stringify(res.data);
-                    // Evita atualizações de estado desnecessárias se a conversa não mudou
+                    const fetchedMessages = res.data;
+                    const prevMessages = JSON.parse(prev.conversa || '[]');
+                    
+                    // Preserva as mensagens locais otimistas (status enviando/erro ou IDs locais)
+                    const localMessages = prevMessages.filter(msg => 
+                        String(msg.id).startsWith('local-') || msg.type === 'sending' || msg.type === 'error'
+                    );
+
+                    // Junta o que veio da API com o que está pendente localmente
+                    const mergedMessages = [...fetchedMessages, ...localMessages];
+                    mergedMessages.sort((a, b) => a.timestamp - b.timestamp);
+
+                    const newConversa = JSON.stringify(mergedMessages);
+                    
                     if (prev.conversa === newConversa) return prev;
                     
+                    // Sincroniza também a lista principal para não ser sobrescrita pelo fetchData
+                    setAtendimentos(listaPrev => listaPrev.map(at => 
+                        at.id === currentId ? { ...at, conversa: newConversa } : at
+                    ));
+
                     return { ...prev, conversa: newConversa };
                 });
             } catch (err) {
@@ -207,7 +278,7 @@ function Mensagens() {
 
         const intervalId = setInterval(() => {
             if (!document.hidden) fetchMessages();
-        }, 5000); // Polling a cada 5 segundos para a conversa ativa
+        }, 5000);
 
         return () => clearInterval(intervalId);
     }, [selectedAtendimento?.id]);
@@ -215,7 +286,7 @@ function Mensagens() {
     useEffect(() => {
         const filtered = mensagens.filter(at => {
             const matchesSearch = at.nome_contato?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                 at.whatsapp?.includes(searchTerm);
+                                  at.whatsapp?.includes(searchTerm);
             
             if (!matchesSearch) return false;
 
@@ -271,14 +342,19 @@ function Mensagens() {
             setSelectedAtendimento(prev => {
                 const conversa = JSON.parse(prev.conversa || '[]');
                 conversa.push(msg);
-                return { ...prev, conversa: JSON.stringify(conversa) };
+                const newConversa = JSON.stringify(conversa);
+                
+                setAtendimentos(listaPrev => listaPrev.map(at => 
+                    at.id === atendimentoId ? { ...at, conversa: newConversa } : at
+                ));
+
+                return { ...prev, conversa: newConversa };
             });
         }
     };
 
     const handleUpdateAtendimento = useCallback(async (atendimentoId, updates) => {
         try {
-            // Se for uma atualização de situação (vinda do menu do ContactItem)
             if (updates.status) {
                 const atendimento = mensagens.find(at => at.id === atendimentoId);
                 if (atendimento && atendimento.prospect_contact_id) {
@@ -297,7 +373,7 @@ function Mensagens() {
             console.error("Erro ao atualizar atendimento:", err);
             toast.error("Erro ao atualizar situação.");
         }
-    }, [selectedAtendimento]);
+    }, [selectedAtendimento, mensagens]);
 
     const setMessageToError = useCallback((atendimentoId, msgId, errorMessage) => {
         setAtendimentos(prev => prev.map(at => {
@@ -337,13 +413,12 @@ function Mensagens() {
                                 headers: { 'Content-Type': 'multipart/form-data' }
                             });
                         }
-                        // Recarrega mensagens para atualizar o histórico real
+                        
                         const res = await api.get(`/whatsapp/${itemToProcess.instanceId}/messages/${itemToProcess.remoteJid}`);
                         const newConversa = JSON.stringify(res.data);
                         setAtendimentos(prev => prev.map(at => 
                             at.id === atendimentoId ? { ...at, conversa: newConversa } : at
                         ));
-                        // Atualiza o atendimento selecionado imediatamente se for o mesmo que acabou de enviar
                         setSelectedAtendimento(prev => {
                             if (prev?.id !== atendimentoId) return prev;
                             return { ...prev, conversa: newConversa };

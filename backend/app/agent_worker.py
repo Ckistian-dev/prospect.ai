@@ -72,7 +72,23 @@ async def process_active_prospects():
                     
                     pc, contact = contact_to_process
                     original_status = pc.situacao # Captura o status original antes de mudar para 'Processando'
-                    mode = "reply" if pc.situacao == "Resposta Recebida" else ("initial" if pc.situacao == "Aguardando Início" else "followup")
+                    
+                    # Determina o modo de processamento, lidando com reprocessamento de erros
+                    if pc.situacao == "Resposta Recebida":
+                        mode = "reply"
+                    elif pc.situacao == "Aguardando Início":
+                        mode = "initial"
+                    elif pc.situacao in ["Erro IA", "Falha no Envio", "Erro Verificação", "Erro: Persona não encontrada"]:
+                        # Se deu erro, verifica o histórico para saber se era o início
+                        try:
+                            history = json.loads(pc.conversa) if pc.conversa else []
+                        except:
+                            history = []
+                        # Se não tem mensagens da IA no histórico, era uma tentativa inicial
+                        has_ai_msg = any(m.get('role') == 'assistant' for m in history)
+                        mode = "initial" if not has_ai_msg else "reply"
+                    else:
+                        mode = "reply"
                     
                     logger.info(f"AGENTE WORKER: Contato selecionado: '{contact.nome}' (Campanha: {campaign.id}, Modo: {mode}).")
                     
@@ -104,37 +120,74 @@ async def process_active_prospects():
                         # Encontra uma instância que respeite o intervalo
                         ready_instance = None
                         for inst in available_instances:
+                            # 1. Verificar conexão primeiro
+                            conn_status = await whatsapp_service.get_connection_status(inst.instance_name)
+                            if conn_status.get("status") != "connected":
+                                logger.warning(f"Instância '{inst.name}' (ID: {inst.id}) está desconectada. Inativando e pulando.")
+                                inst.is_active = False
+                                await db.commit()
+                                continue # Tenta a próxima instância
+
+                            # 2. Se conectada, verificar intervalo
                             last_sent = inst.last_message_at or datetime.min.replace(tzinfo=timezone.utc)
                             interval = inst.interval_seconds or 60
                             time_since_last = (datetime.now(timezone.utc) - last_sent).total_seconds()
                             
                             if time_since_last >= interval:
                                 ready_instance = inst
-                                break
+                                break # Encontrou uma instância pronta
                             else:
                                 logger.debug(f"Instância {inst.name} em cooldown. Faltam {interval - time_since_last:.1f}s")
 
                         if not ready_instance:
-                            logger.info(f"Todas as instâncias da campanha {campaign.id} estão em intervalo. Aguardando...")
+                            logger.info(f"Todas as instâncias da campanha {campaign.id} estão em intervalo ou desconectadas. Aguardando...")
                             continue
                         
                         selected_instance = ready_instance
                     
                     elif mode == 'reply':
-                        # Para respostas, usa a instância associada ao contato ou a primeira disponível
-                        if pc.whatsapp_instance_id:
-                            selected_instance = await db.get(models.WhatsappInstance, pc.whatsapp_instance_id)
+                        # Para respostas, usa a instância associada ao contato
+                        if not pc.whatsapp_instance_id:
+                            logger.error(f"Contato {pc.id} em modo 'reply' não tem instância associada. Tratando possível duplicidade.")
+                            
+                            clean_whatsapp = "".join(filter(str.isdigit, str(contact.whatsapp)))
+                            if len(clean_whatsapp) >= 8:
+                                last_8_digits = clean_whatsapp[-8:]
+                                logger.info(f"AGENTE WORKER: Buscando contato duplicado com final {last_8_digits} na campanha {campaign.id}...")
+                                
+                                stmt = (
+                                    select(models.ProspectContact, models.Contact)
+                                    .join(models.Contact, models.ProspectContact.contact_id == models.Contact.id)
+                                    .where(
+                                        models.ProspectContact.prospect_id == campaign.id,
+                                        models.ProspectContact.id != pc.id
+                                    )
+                                )
+                                result = await db.execute(stmt)
+                                other_contacts = result.all()
+                                
+                                for other_pc, other_c in other_contacts:
+                                    other_clean = "".join(filter(str.isdigit, str(other_c.whatsapp)))
+                                    if other_clean.endswith(last_8_digits):
+                                        logger.info(f"AGENTE WORKER: Contato duplicado encontrado (ID: {other_pc.id}). Atualizando status e removendo o atual (ID: {pc.id}).")
+                                        await crud_prospect.update_prospect_contact_status(db, other_pc.id, "Resposta Recebida")
+                                        await crud_prospect.delete_prospect_contact(db, prospect_contact_to_delete=pc)
+                                        await db.commit()
+                                        break
+                            continue
                         
-                        if not selected_instance:
-                             # Fallback: pega a primeira instância ativa da campanha
-                             instance_ids = campaign.whatsapp_instance_ids or []
-                             if instance_ids:
-                                 stmt = select(models.WhatsappInstance).where(models.WhatsappInstance.id == instance_ids[0])
-                                 result = await db.execute(stmt)
-                                 selected_instance = result.scalars().first()
+                        selected_instance = await db.get(models.WhatsappInstance, pc.whatsapp_instance_id)
                         
+                        # Se não houver instância associada, não podemos responder.
                         if not selected_instance:
-                            logger.error(f"Não foi possível determinar a instância para responder ao contato {contact.id}.")
+                            logger.error(f"Instância {pc.whatsapp_instance_id} associada ao contato {pc.id} não foi encontrada no banco. Pulando.")
+                            continue
+
+                        # NOVA LÓGICA: Verificar conexão da instância
+                        conn_status = await whatsapp_service.get_connection_status(selected_instance.instance_name)
+                        if conn_status.get("status") != "connected":
+                            logger.warning(f"Instância '{selected_instance.name}' (ID: {selected_instance.id}) para resposta está desconectada. Contato {pc.id} aguardará reconexão.")
+                            # Não processa este contato, ele será pego na próxima rodada quando a instância voltar.
                             continue
                     
                     # 5. Processamento do contato
@@ -155,8 +208,7 @@ async def process_active_prospects():
                         check_result = await whatsapp_service.check_whatsapp_numbers(selected_instance.instance_name, [contact.whatsapp])
                         
                         if check_result is None:
-                            logger.error(f"AGENTE WORKER: Erro técnico ao verificar número {contact.whatsapp}. Pausando campanha {campaign.id}.")
-                            campaign.status = "Pausado"
+                            logger.error(f"AGENTE WORKER: Erro técnico ao verificar número {contact.whatsapp} na campanha {campaign.id}.")
                             await crud_prospect.update_prospect_contact(
                                 db, pc_id=pc.id, situacao="Erro Verificação", 
                                 observacoes="Falha na comunicação com a API de verificação."
@@ -165,8 +217,7 @@ async def process_active_prospects():
                             continue
                         
                         if not isinstance(check_result, list) or len(check_result) == 0:
-                            logger.error(f"AGENTE WORKER: Resposta inválida da verificação para {contact.whatsapp}: {check_result}")
-                            campaign.status = "Pausado"
+                            logger.error(f"AGENTE WORKER: Resposta inválida da verificação para {contact.whatsapp} na campanha {campaign.id}: {check_result}")
                             await crud_prospect.update_prospect_contact(
                                 db, pc_id=pc.id, situacao="Erro Verificação", 
                                 observacoes=f"Resposta inesperada da API: {check_result}"
@@ -187,8 +238,7 @@ async def process_active_prospects():
 
                     persona_config = await crud_config.get_config(db, config_id=campaign.config_id, user_id=user.id)
                     if not persona_config:
-                        logger.error(f"Persona não encontrada para a campanha {campaign.id}. Pausando prospecção.")
-                        campaign.status = "Pausado"
+                        logger.error(f"Persona não encontrada para a campanha {campaign.id}. Pulando contato.")
                         await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao="Erro: Persona não encontrada", observacoes="A configuração de IA associada não foi encontrada.")
                         await db.commit()
                         continue
@@ -252,21 +302,16 @@ async def process_active_prospects():
                     sent_any_message = False
                     
                     # --- NOTIFICAÇÃO DE STATUS ---
-                    if campaign.notification_number and new_status in ["Lead Qualificado", "Atendente Chamado"]:
+                    if persona_config.notification_active and persona_config.notification_destination and new_status in ["Lead Qualificado", "Atendente Chamado"]:
                         # Usa original_status pois pc.situacao agora é 'Processando'
                         if original_status != new_status:
-                            # Determina qual instância enviará a notificação
+                            # Usa a instância atual selecionada para enviar a notificação
                             notify_instance_name = selected_instance.instance_name
-                            if campaign.notification_instance_id:
-                                # Busca a instância específica configurada para notificações
-                                notify_inst_obj = await db.get(models.WhatsappInstance, campaign.notification_instance_id)
-                                if notify_inst_obj:
-                                    notify_instance_name = notify_inst_obj.instance_name
 
                             # Tenta apagar a notificação anterior se existir
                             if pc.last_notification_message_id:
-                                logger.info(f"Apagando notificação antiga {pc.last_notification_message_id} para {campaign.notification_number}")
-                                await whatsapp_service.delete_message_for_everyone(notify_instance_name, campaign.notification_number, pc.last_notification_message_id)
+                                logger.info(f"Apagando notificação antiga {pc.last_notification_message_id} para {persona_config.notification_destination}")
+                                await whatsapp_service.delete_message_for_everyone(notify_instance_name, persona_config.notification_destination, pc.last_notification_message_id)
 
                             try:
                                 notify_msg = (
@@ -278,12 +323,12 @@ async def process_active_prospects():
                                     f"📝 *Obs:* {new_observation or 'Sem observações'}\n"
                                     f"⭐ *Score:* {lead_score}"
                                 )
-                                sent_notification = await whatsapp_service.send_text_message(notify_instance_name, campaign.notification_number, notify_msg)
+                                sent_notification = await whatsapp_service.send_text_message(notify_instance_name, persona_config.notification_destination, notify_msg)
                                 if sent_notification and 'key' in sent_notification:
                                     new_notification_id = sent_notification['key'].get('id')
 
                             except Exception as e:
-                                logger.error(f"AGENTE WORKER: Falha ao enviar notificação para {campaign.notification_number}: {e}")
+                                logger.error(f"AGENTE WORKER: Falha ao enviar notificação para {persona_config.notification_destination}: {e}")
 
                     if message_to_send and str(message_to_send).strip():
                         try:
@@ -530,11 +575,6 @@ async def process_active_prospects():
                         selected_instance.last_message_at = datetime.now(timezone.utc)
                         await db.commit()
 
-                    # --- PAUSA AUTOMÁTICA EM CASO DE ERRO ---
-                    if new_status and (str(new_status).startswith("Erro") or str(new_status).startswith("Falha")):
-                        logger.warning(f"AGENTE WORKER: Pausando campanha {campaign.id} devido a erro no contato: {new_status}")
-                        campaign.status = "Pausado"
-
                     await crud_prospect.update_prospect_contact(
                         db, pc_id=pc.id, situacao=new_status,
                         conversa=json.dumps(history_after_response), 
@@ -548,17 +588,6 @@ async def process_active_prospects():
                 except Exception as e:
                     logger.error(f"AGENTE WORKER: Erro ao processar campanha ID {campaign_id}: {e}", exc_info=True)
                     await db.rollback()
-
-                    # --- PAUSA A CAMPANHA EM CASO DE ERRO ---
-                    try:
-                        logger.warning(f"Pausando campanha {campaign_id} devido a erro crítico no processamento.")
-                        campaign_to_pause = await db.get(models.Prospect, campaign_id)
-                        if campaign_to_pause:
-                            campaign_to_pause.status = "Pausado"
-                            db.add(campaign_to_pause)
-                            await db.commit()
-                    except Exception as pause_error:
-                        logger.error(f"Erro ao tentar pausar campanha {campaign_id}: {pause_error}")
 
                     # Tenta marcar o contato específico com erro, se possível
                     if 'pc' in locals():

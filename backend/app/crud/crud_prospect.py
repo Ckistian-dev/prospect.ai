@@ -130,6 +130,9 @@ async def get_prospects_para_processar(db: AsyncSession, prospect: models.Prospe
             "Não Interessado", 
             "Concluído", 
             "Falha no Envio",
+            "Erro IA",
+            "Erro Verificação",
+            "Erro: Persona não encontrada",
             "Resposta Recebida", # Já tratado pela primeira query (maior prioridade)
             "Aguardando Início",   # Já tratado pela última query (menor prioridade)
             "Conversa Manual",
@@ -162,6 +165,25 @@ async def get_prospects_para_processar(db: AsyncSession, prospect: models.Prospe
         .order_by(models.ProspectContact.id.asc()).limit(1)
     )
     next_contact = (await db.execute(initial_query)).first()
+    if next_contact:
+        return next_contact
+
+    # 4. Quarta Prioridade: Reprocessar erros (Falha no Envio, Erro IA, Erro Verificação, etc)
+    # Tenta reprocessar após 15 minutos do último erro para evitar loops imediatos.
+    retry_time_limit = datetime.now(timezone.utc) - timedelta(minutes=15)
+    retryable_errors = ["Erro IA", "Falha no Envio", "Erro Verificação", "Erro: Persona não encontrada"]
+    
+    errors_query = (
+        select(models.ProspectContact, models.Contact)
+        .join(models.Contact, models.ProspectContact.contact_id == models.Contact.id)
+        .where(
+            models.ProspectContact.prospect_id == prospect.id,
+            models.ProspectContact.situacao.in_(retryable_errors),
+            models.ProspectContact.updated_at < retry_time_limit
+        )
+        .order_by(models.ProspectContact.updated_at.asc()).limit(1)
+    )
+    next_contact = (await db.execute(errors_query)).first()
     if next_contact:
         return next_contact
 

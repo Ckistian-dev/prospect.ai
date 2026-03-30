@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import os
 from typing import List, Optional, Dict, Any
 
 from google.oauth2.credentials import Credentials
@@ -30,6 +31,10 @@ class GoogleContactsService:
         # Prioriza o redirect_uri do frontend, se fornecido. Caso contrário, usa o padrão.
         redirect_uri = redirect_uri_override or f"{settings.FRONTEND_URL}/whatsapp"
         
+        redirect_uris = [f"{settings.FRONTEND_URL}/whatsapp", "http://localhost:5173/whatsapp"]
+        if redirect_uri and redirect_uri not in redirect_uris:
+            redirect_uris.append(redirect_uri)
+
         client_config = {
             "web": {
                 "client_id": settings.GOOGLE_CLIENT_ID,
@@ -39,7 +44,7 @@ class GoogleContactsService:
                 # Esta lista deve conter as URIs autorizadas no Google Cloud Console.
                 # Não deve ser modificada dinamicamente aqui.
                 # A URI de redirecionamento real é passada para o construtor do Flow.
-                "redirect_uris": [f"{settings.FRONTEND_URL}/whatsapp", "http://localhost:5173/whatsapp"],
+                "redirect_uris": redirect_uris,
             }
         }
         return Flow.from_client_config(client_config, scopes=SCOPES, redirect_uri=redirect_uri)
@@ -61,6 +66,9 @@ class GoogleContactsService:
 
     def fetch_token(self, code: str, redirect_uri: str) -> Dict[str, Any]:
         """Troca o código de autorização por um token de acesso."""
+        # Relaxa a verificação de escopo para evitar erros quando o Google retorna escopos adicionais
+        os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
+        
         # Recria o flow com o mesmo redirect_uri usado na autorização
         self.flow = self._create_flow(redirect_uri_override=redirect_uri)
         self.flow.fetch_token(code=code)

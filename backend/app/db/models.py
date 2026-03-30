@@ -75,6 +75,10 @@ class Config(Base):
     google_calendar_credentials: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     available_hours: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, comment="Horários disponíveis para agendamento")
     is_calendar_active: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    workflow_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, comment="Configuração visual do fluxo de conversa")
+    notification_active: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    notification_destination: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
 
@@ -107,8 +111,6 @@ class Prospect(Base):
     initial_message_interval_seconds = Column(Integer, default=90, nullable=False)
     horario_inicio = Column(Time, nullable=True)
     horario_fim = Column(Time, nullable=True)
-    notification_number = Column(String, nullable=True)
-    notification_instance_id = Column(Integer, ForeignKey("whatsapp_instances.id"), nullable=True)
     whatsapp_instance_ids: Mapped[Optional[List[int]]] = mapped_column(JSONB, nullable=True)
     categorias: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
     
