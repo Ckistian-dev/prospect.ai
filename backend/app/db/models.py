@@ -41,6 +41,13 @@ class WhatsappInstance(Base):
     interval_seconds: Mapped[int] = mapped_column(Integer, default=60)
     last_message_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    # --- NOVOS CAMPOS DE PROXY SEPARADOS ---
+    proxy_host: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    proxy_port: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    proxy_protocol: Mapped[Optional[str]] = mapped_column(String(10), nullable=True) # Ex: http, https, socks5
+    proxy_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    proxy_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     owner: Mapped["User"] = relationship(back_populates="whatsapp_instances")
     prospect_contacts: Mapped[List["ProspectContact"]] = relationship(back_populates="whatsapp_instance")

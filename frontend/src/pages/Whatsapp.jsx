@@ -114,7 +114,13 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
         name: instance?.name || '',
         instance_name: instance?.instance_name || '',
         interval_seconds: instance?.interval_seconds || 900,
-        is_active: instance?.is_active ?? true
+        is_active: instance?.is_active ?? true,
+        // --- NOVOS CAMPOS NO STATE ---
+        proxy_host: instance?.proxy_host || '',
+        proxy_port: instance?.proxy_port || '',
+        proxy_protocol: instance?.proxy_protocol || 'http', // Default para http
+        proxy_username: instance?.proxy_username || '',
+        proxy_password: instance?.proxy_password || ''
     });
     
     const [intervalUI, setIntervalUI] = useState(getInitialInterval());
@@ -444,6 +450,77 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
                                 placeholder="Ex: Vendas 1"
                             />
                         </div>
+
+                        {/* SEÇÃO DE PROXY */}
+                        <div className="pt-2 mt-2 border-t border-gray-100">
+                            <label className="block text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                                <ServerCrash size={16} /> Configuração de Proxy (Opcional)
+                            </label>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                                <div className="md:col-span-2">
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">Host / IP</label>
+                                    <input 
+                                        type="text" 
+                                        name="proxy_host"
+                                        value={formData.proxy_host} 
+                                        onChange={handleFormChange}
+                                        className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-green focus:border-transparent"
+                                        placeholder="Ex: 192.168.1.100 ou proxy.site.com"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">Porta</label>
+                                    <input 
+                                        type="text" 
+                                        name="proxy_port"
+                                        value={formData.proxy_port} 
+                                        onChange={handleFormChange}
+                                        className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-green focus:border-transparent"
+                                        placeholder="Ex: 8080"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">Protocolo</label>
+                                    <select 
+                                        name="proxy_protocol"
+                                        value={formData.proxy_protocol} 
+                                        onChange={handleFormChange}
+                                        className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-green focus:border-transparent bg-white"
+                                    >
+                                        <option value="http">HTTP</option>
+                                        <option value="https">HTTPS</option>
+                                        <option value="socks5">SOCKS5</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">Usuário</label>
+                                    <input 
+                                        type="text" 
+                                        name="proxy_username"
+                                        value={formData.proxy_username} 
+                                        onChange={handleFormChange}
+                                        className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-green focus:border-transparent"
+                                        placeholder="Usuário (Opcional)"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">Senha</label>
+                                    <input 
+                                        type="password" 
+                                        name="proxy_password"
+                                        value={formData.proxy_password} 
+                                        onChange={handleFormChange}
+                                        className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-green focus:border-transparent"
+                                        placeholder="Senha (Opcional)"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
                         <div>
                             <label className="block text-xs font-medium text-gray-600 mb-1">Intervalo entre mensagens</label>
                             <div className="flex gap-2">

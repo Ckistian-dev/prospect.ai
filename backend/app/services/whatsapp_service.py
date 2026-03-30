@@ -95,7 +95,7 @@ class WhatsAppService:
             logger.error(f"Erro ao checar status: {e}")
             return {"status": "disconnected", "detail": str(e)}
 
-    async def create_and_connect_instance(self, instance_name: str) -> dict:
+    async def create_and_connect_instance(self, instance_name: str, instance_model=None) -> dict:
         """
         Lógica de "Hard Reset": Deleta instância anterior, cria uma nova e obtém o QR Code.
         """
@@ -114,6 +114,19 @@ class WhatsAppService:
                         "url": settings.WEBHOOK_URL, "enabled": True, "events": ["MESSAGES_UPSERT"]
                     }
                 }
+                
+                # INJEÇÃO DOS CAMPOS DE PROXY CONFORME A DOCUMENTAÇÃO
+                if instance_model:
+                    if getattr(instance_model, "proxy_host", None):
+                        create_payload["proxyHost"] = instance_model.proxy_host
+                    if getattr(instance_model, "proxy_port", None):
+                        create_payload["proxyPort"] = str(instance_model.proxy_port)
+                    if getattr(instance_model, "proxy_protocol", None):
+                        create_payload["proxyProtocol"] = instance_model.proxy_protocol
+                    if getattr(instance_model, "proxy_username", None):
+                        create_payload["proxyUsername"] = instance_model.proxy_username
+                    if getattr(instance_model, "proxy_password", None):
+                        create_payload["proxyPassword"] = instance_model.proxy_password
                 
                 # A chamada de criação já retorna o QR Code. Vamos capturar a resposta.
                 create_response = await client.post(

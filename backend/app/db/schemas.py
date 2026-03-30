@@ -70,6 +70,12 @@ class WhatsappInstanceBase(BaseModel):
     instance_name: str
     interval_seconds: Optional[int] = 60
     is_active: Optional[bool] = True
+    # --- CAMPOS DE PROXY ---
+    proxy_host: Optional[str] = None
+    proxy_port: Optional[str] = None
+    proxy_protocol: Optional[str] = None
+    proxy_username: Optional[str] = None
+    proxy_password: Optional[str] = None
 
 class WhatsappInstanceCreate(WhatsappInstanceBase):
     pass
@@ -78,6 +84,11 @@ class WhatsappInstanceUpdate(BaseModel):
     name: Optional[str] = None
     interval_seconds: Optional[int] = None
     is_active: Optional[bool] = None
+    proxy_host: Optional[str] = None
+    proxy_port: Optional[str] = None
+    proxy_protocol: Optional[str] = None
+    proxy_username: Optional[str] = None
+    proxy_password: Optional[str] = None
 
 class WhatsappInstance(WhatsappInstanceBase):
     id: int

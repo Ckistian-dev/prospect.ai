@@ -94,7 +94,11 @@ async def connect(
     if not instance:
         raise HTTPException(status_code=404, detail="Instância não encontrada.")
     
-    result = await whatsapp_service.create_and_connect_instance(instance.instance_name)
+    # Passa o instance inteiro agora
+    result = await whatsapp_service.create_and_connect_instance(
+        instance.instance_name, 
+        instance_model=instance
+    )
     
     if result.get("status") == "error":
         raise HTTPException(status_code=500, detail=result.get("detail", "Erro desconhecido ao conectar."))
