@@ -108,7 +108,7 @@ class WhatsAppService:
                 create_payload = {
                     "instanceName": instance_name,
                     "qrcode": True,
-                    "syncFullHistory": True,
+                    "syncFullHistory": False,
                     "integration": "WHATSAPP-BAILEYS",
                     "webhook": {
                         "url": settings.WEBHOOK_URL, "enabled": True, "events": ["MESSAGES_UPSERT"]

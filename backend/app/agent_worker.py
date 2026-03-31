@@ -302,16 +302,25 @@ async def process_active_prospects():
                     sent_any_message = False
                     
                     # --- NOTIFICAÇÃO DE STATUS ---
-                    if persona_config.notification_active and persona_config.notification_destination and new_status in ["Lead Qualificado", "Atendente Chamado"]:
+                    notification_statuses = ["lead qualificado", "atendente chamado"]
+                    if (persona_config.notification_active and persona_config.notification_destination
+                            and new_status and str(new_status).strip().lower() in notification_statuses):
                         # Usa original_status pois pc.situacao agora é 'Processando'
-                        if original_status != new_status:
+                        if original_status and str(original_status).strip().lower() != str(new_status).strip().lower():
                             # Usa a instância atual selecionada para enviar a notificação
                             notify_instance_name = selected_instance.instance_name
 
-                            # Tenta apagar a notificação anterior se existir
-                            if pc.last_notification_message_id:
-                                logger.info(f"Apagando notificação antiga {pc.last_notification_message_id} para {persona_config.notification_destination}")
-                                await whatsapp_service.delete_message_for_everyone(notify_instance_name, persona_config.notification_destination, pc.last_notification_message_id)
+                            notify_destination = str(persona_config.notification_destination).strip()
+                            if notify_destination:
+                                if "@" not in notify_destination:
+                                    notify_destination = f"{whatsapp_service._normalize_number(notify_destination)}@s.whatsapp.net"
+                                else:
+                                    parts = notify_destination.split("@")
+                                    notify_destination = f"{parts[0].strip()}@{parts[1].strip()}"
+
+                            if pc.last_notification_message_id and notify_destination:
+                                logger.info(f"Apagando notificação antiga {pc.last_notification_message_id} para {notify_destination}")
+                                await whatsapp_service.delete_message_for_everyone(notify_instance_name, notify_destination, pc.last_notification_message_id)
 
                             try:
                                 notify_msg = (
@@ -323,7 +332,7 @@ async def process_active_prospects():
                                     f"📝 *Obs:* {new_observation or 'Sem observações'}\n"
                                     f"⭐ *Score:* {lead_score}"
                                 )
-                                sent_notification = await whatsapp_service.send_text_message(notify_instance_name, persona_config.notification_destination, notify_msg)
+                                sent_notification = await whatsapp_service.send_text_message(notify_instance_name, notify_destination, notify_msg)
                                 if sent_notification and 'key' in sent_notification:
                                     new_notification_id = sent_notification['key'].get('id')
 

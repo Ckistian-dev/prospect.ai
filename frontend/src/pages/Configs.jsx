@@ -85,6 +85,8 @@ function Configs() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [destinations, setDestinations] = useState([]);
   const [destSearchTerm, setDestSearchTerm] = useState('');
+  const [whatsappInstances, setWhatsappInstances] = useState([]);
+  const [selectedWhatsappInstanceId, setSelectedWhatsappInstanceId] = useState(null);
   const dropdownRef = useRef(null);
 
   const [activeTab, setActiveTab] = useState('system'); // 'system', 'rag', 'drive', 'agenda'
@@ -92,16 +94,21 @@ function Configs() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [configsRes] = await Promise.all([
+      const [configsRes, whatsappRes] = await Promise.all([
         api.get('/configs/'),
+        api.get('/whatsapp/'),
       ]);
       setConfigs(configsRes.data);
+      setWhatsappInstances(whatsappRes.data || []);
+      if (!selectedWhatsappInstanceId && whatsappRes.data && whatsappRes.data.length > 0) {
+        setSelectedWhatsappInstanceId(whatsappRes.data[0].id);
+      }
     } catch (err) {
       setError('Não foi possível carregar os dados.');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [selectedWhatsappInstanceId]);
 
   useEffect(() => {
     fetchData();
@@ -475,12 +482,37 @@ function Configs() {
   // --- Funcionalidades de Notificações ---
   const fetchDestinations = async () => {
     try {
-      // Usando contatos do ProspectAI para a busca
-      const response = await api.get('/contacts/');
-      setDestinations(response.data || []);
+      let responseData = [];
+
+      if (selectedWhatsappInstanceId) {
+        const response = await api.get(`/prospecting/whatsapp/destinations/${selectedWhatsappInstanceId}`);
+        responseData = response.data || [];
+      } else {
+        // Fallback para contatos tradicionais caso não exista instância configurada
+        const response = await api.get('/contacts/');
+        responseData = (response.data || []).map(contact => ({
+          id: contact.id,
+          name: contact.nome || contact.name || 'Contato sem nome',
+          type: 'contact',
+          remoteJid: contact.whatsapp ? `${normalizeJid(contact.whatsapp)}@s.whatsapp.net` : null,
+        }));
+      }
+
+      // Normaliza cada destino para ter 'remoteJid' e tipo
+      const normalized = (responseData || []).map(dest => {
+        const remoteJid = dest.remoteJid ? normalizeJid(dest.remoteJid) : (dest.id ? normalizeJid(dest.id) : null);
+        return {
+          ...dest,
+          remoteJid,
+          type: dest.type || 'contact',
+          name: dest.name || dest.subject || dest.nome || 'Sem nome',
+        };
+      }).filter(dest => dest.remoteJid);
+
+      setDestinations(normalized);
     } catch (err) {
       console.error("Erro ao buscar destinos:", err);
-      toast.error("Não foi possível carregar a lista de contatos.");
+      toast.error("Não foi possível carregar a lista de contatos e grupos.");
     }
   };
 
@@ -499,22 +531,23 @@ function Configs() {
 
     const uniqueMap = new Map();
     destinations.forEach(d => {
-      const jid = d.whatsapp ? `${normalizeJid(d.whatsapp)}@s.whatsapp.net` : null;
+      const rawJid = d.remoteJid || (d.whatsapp ? `${normalizeJid(d.whatsapp)}@s.whatsapp.net` : null);
+      const jid = rawJid ? normalizeJid(rawJid) : null;
       if (jid && !uniqueMap.has(jid)) {
         uniqueMap.set(jid, { ...d, remoteJid: jid });
       }
     });
 
     const uniqueList = Array.from(uniqueMap.values()).sort((a, b) => {
-      const nameA = (a.nome || a.name || 'Sem nome').toLowerCase();
-      const nameB = (b.nome || b.name || 'Sem nome').toLowerCase();
+      const nameA = (a.name || a.nome || a.subject || 'Sem nome').toLowerCase();
+      const nameB = (b.name || b.nome || b.subject || 'Sem nome').toLowerCase();
       return nameA.localeCompare(nameB);
     });
 
     if (!term) return uniqueList;
 
     return uniqueList.filter(dest => {
-      const name = (dest.nome || dest.name || '').toLowerCase();
+      const name = (dest.name || dest.nome || dest.subject || '').toLowerCase();
       const fullJid = (dest.remoteJid || '').toLowerCase();
 
       if (name.includes(term)) return true;
@@ -539,7 +572,7 @@ function Configs() {
     if (activeTab === 'notifications') {
       fetchDestinations();
     }
-  }, [activeTab]);
+  }, [activeTab, selectedWhatsappInstanceId]);
 
 const labelClass = "block text-sm font-semibold text-gray-700 mb-1";
 const inputClass = "w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green resize-none";
@@ -809,6 +842,20 @@ return (
             {/* CONTEÚDO ABA: NOTIFICAÇÕES */}
             {activeTab === 'notifications' && (
               <div className="animate-fade-in space-y-6">
+                <div>
+                  <label className={labelClass}>Instância WhatsApp</label>
+                  <select
+                    className={`${inputClass} w-full`}
+                    value={selectedWhatsappInstanceId || ''}
+                    onChange={(e) => setSelectedWhatsappInstanceId(Number(e.target.value) || null)}
+                  >
+                    <option value="">Selecione a instância</option>
+                    {whatsappInstances.map(inst => (
+                      <option key={inst.id} value={inst.id}>{inst.name || inst.instance_name || `#${inst.id}`}</option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="relative">
                   <label className={labelClass}>Destino das Notificações (WhatsApp)</label>
                   <div className="flex items-center gap-4">
