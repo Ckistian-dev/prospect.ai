@@ -124,3 +124,37 @@ Retorne APENAS um JSON válido. O campo `mensagem_para_enviar` DEVE SER UMA LIST
   "email_cliente": null,
   "reagir_com_emoji": null
 }
+
+
+==================== LOG ENTRY: 2026-04-01T15:43:16.700990+00:00 ====================
+
+=== PROMPT CONTENTS ===
+{"objetivo": "Você é um analista de vendas sênior. Analise os dados de prospecção fornecidos para responder à pergunta do usuário. Sua resposta DEVE ser um objeto JSON.", "pergunta_usuario": "Quero um resumo dos atendimentos", "dados_contexto": {"resumo_usuario": {"id": 1, "email": "cjstestes@gmail.com"}, "prospeccoes_no_periodo": [{"id": 109, "nome": "Teste", "status": "Em Andamento", "created_at": "2026-03-30T17:03:21.834133+00:00", "contacts_summary": {"total": 1, "concluido": 0, "lead_qualificado": 0, "aguardando_resposta": 1}}], "contexto_temporal": "# CONTEXTO TEMPORAL\nData e Hora Atual: 01/04/2026 12:43:16\nDia da Semana: quarta-feira"}, "formato_resposta_obrigatorio": {"descricao": "Sua resposta DEVE ser um único objeto JSON válido. Siga a estrutura sugerida.", "estrutura_sugerida": {"diagnostico_geral": "Um parágrafo resumindo a situação.", "principais_pontos_de_friccao": [{"area": "Nome da Área (ex: Abertura da conversa)", "observacoes": "Detalhes observados.", "impacto_na_conversao": "Alto/Médio/Baixo"}], "insights_acionaveis": [{"titulo": "Título da Sugestão", "sugestoes": ["Sugestão 1.", "Sugestão 2."]}], "proximos_passos_recomendados": "Recomendação final."}}}
+=== GEMINI RESPONSE ===
+{
+  "diagnostico_geral": "Atualmente, há apenas uma prospecção registrada no período, que se encontra 'Em Andamento'. Esta prospecção possui um único contato, que está 'aguardando resposta', e não há contatos concluídos ou leads qualificados até o momento. Isso sugere uma atividade de prospecção muito inicial ou de baixo volume, com foco em um único potencial cliente.",
+  "principais_pontos_de_friccao": [
+    {
+      "area": "Progressão da Prospecção",
+      "observacoes": "A única prospecção existente está 'Em Andamento' com um contato 'aguardando resposta', sem progresso para as fases de conclusão ou qualificação de lead. Isso pode indicar um gargalo na fase inicial de engajamento ou na conversão de respostas em qualificações.",
+      "impacto_na_conversao": "Alto"
+    }
+  ],
+  "insights_acionaveis": [
+    {
+      "titulo": "Acompanhamento de Prospecções Atuais",
+      "sugestoes": [
+        "Verificar o status do contato 'aguardando resposta' na prospecção 'Teste' (ID 109) e planejar o próximo passo (follow-up, reengajamento, etc.).",
+        "Analisar o tempo médio que os contatos permanecem no status 'aguardando resposta' para identificar possíveis atrasos no processo."
+      ]
+    },
+    {
+      "titulo": "Volume e Diversificação da Prospecção",
+      "sugestoes": [
+        "Considerar aumentar o volume de novas prospecções para diversificar as oportunidades e não depender de um único contato.",
+        "Explorar diferentes canais ou abordagens para iniciar novas prospecções e testar a eficácia."
+      ]
+    }
+  ],
+  "proximos_passos_recomendados": "Recomenda-se focar no acompanhamento ativo da prospecção existente para garantir sua progressão e, simultaneamente, planejar a expansão das atividades de prospecção para criar um pipeline mais robusto e diversificado."
+}

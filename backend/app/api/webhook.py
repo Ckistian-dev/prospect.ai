@@ -15,12 +15,9 @@ def _normalize_number(number: str) -> str:
     if not clean_number.startswith("55") and len(clean_number) in [10, 11]:
         clean_number = "55" + clean_number
 
-    if len(clean_number) == 13 and clean_number.startswith("55"):
-        if clean_number[4] == '9':
-            normalized = clean_number[:4] + clean_number[5:]
-            return normalized
+    # A remoção do 9º dígito para fins de busca será tratada em find_prospect_contact_by_number
+    # para garantir que todas as variações sejam testadas no DB.
     return clean_number
-
 async def process_webhook_message(data: dict):
     """Processa a mensagem recebida do webhook diretamente."""
     try:

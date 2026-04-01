@@ -308,7 +308,8 @@ async def process_active_prospects():
                                         )
                                         
                                         # Devolve o status para "Aguardando Resposta" para ser pego no próximo ciclo do Worker
-                                        await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao="Aguardando Resposta")
+                                        # MANTENHA COMO RESPOSTA RECEBIDA para que a query do worker pegue ele de novo!
+                                        await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao="Resposta Recebida")
                                         continue # Pula este contato e vai pro próximo da fila
                                 except Exception as e:
                                     logger.warning(f"Erro ao calcular Sistema Anti-Rajada: {e}")
