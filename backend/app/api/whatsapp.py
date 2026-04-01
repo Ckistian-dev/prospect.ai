@@ -101,7 +101,8 @@ async def connect(
     )
     
     if result.get("status") == "error":
-        raise HTTPException(status_code=500, detail=result.get("detail", "Erro desconhecido ao conectar."))
+        # Mudando de 500 para 400, pois é um erro conhecido no fluxo de conexão (ex: proxy demorou)
+        raise HTTPException(status_code=400, detail=result.get("detail", "Erro desconhecido ao conectar."))
 
     instance_data = result.get("instance")
     if result.get("status") == "qrcode" and instance_data:

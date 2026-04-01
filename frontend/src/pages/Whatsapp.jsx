@@ -115,15 +115,17 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
         instance_name: instance?.instance_name || '',
         interval_seconds: instance?.interval_seconds || 900,
         is_active: instance?.is_active ?? true,
-        // --- NOVOS CAMPOS NO STATE ---
         proxy_host: instance?.proxy_host || '',
         proxy_port: instance?.proxy_port || '',
-        proxy_protocol: instance?.proxy_protocol || 'http', // Default para http
+        proxy_protocol: instance?.proxy_protocol || 'socks5', // Mudei o default para SOCKS5 por ser melhor pro WhatsApp
         proxy_username: instance?.proxy_username || '',
         proxy_password: instance?.proxy_password || ''
     });
     
     const [intervalUI, setIntervalUI] = useState(getInitialInterval());
+
+    // --- NOVO ESTADO: Controla o tipo de autenticação do proxy ---
+    const [proxyAuthMethod, setProxyAuthMethod] = useState(instance?.proxy_username ? 'password' : 'ip');
 
     // Connection States
     const [statusInfo, setStatusInfo] = useState({ status: 'loading' });
@@ -136,7 +138,7 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
     // Google States
     const [googleStatus, setGoogleStatus] = useState('loading');
     const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
-    const [confirmAction, setConfirmAction] = useState(null); // { type: 'disconnect' | 'google_disconnect', action: () => void }
+    const [confirmAction, setConfirmAction] = useState(null);
 
     const checkStatus = useCallback(async () => {
         if (isCreating || isChecking) return;
@@ -172,7 +174,7 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
             setStatusInfo({ status: 'disconnected' });
             setGoogleStatus('disconnected');
         }
-    }, [isCreating]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [isCreating]);
 
     const handleConnect = async () => {
         if (isChecking) return;
@@ -291,6 +293,12 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
         try {
             let payload = { ...formData };
 
+            // Limpa usuário e senha se a opção for IP antes de salvar
+            if (proxyAuthMethod === 'ip') {
+                payload.proxy_username = '';
+                payload.proxy_password = '';
+            }
+
             if (isCreating) {
                 const userEmail = localStorage.getItem('userEmail') || '';
                 const emailPrefix = userEmail.split('@')[0];
@@ -339,7 +347,6 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
                     </button>
                 </div>
 
-                {/* Status Section - Apenas se não estiver criando */}
                 {!isCreating && (
                     <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-3">
                         <div className="flex items-center justify-between">
@@ -368,7 +375,6 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
                     </div>
                 )}
 
-                {/* Card: Google Contacts (Apenas Editando) */}
                 {!isCreating && (
                     <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col gap-3">
                         <div className="flex items-center justify-between">
@@ -432,7 +438,6 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
                     </div>
                 )}
 
-                {/* Card: Configurações */}
                 <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col">
                     <div className="flex items-center gap-2 mb-3 text-gray-800 font-semibold border-b border-gray-100 pb-2 text-sm">
                         <Settings size={18} /> Configurações
@@ -451,7 +456,7 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
                             />
                         </div>
 
-                        {/* SEÇÃO DE PROXY */}
+                        {/* SEÇÃO DE PROXY REDESENHADA */}
                         <div className="pt-2 mt-2 border-t border-gray-100">
                             <label className="block text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                                 <ServerCrash size={16} /> Configuração de Proxy (Opcional)
@@ -482,7 +487,7 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                                 <div>
                                     <label className="block text-xs font-medium text-gray-600 mb-1">Protocolo</label>
                                     <select 
@@ -491,38 +496,61 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
                                         onChange={handleFormChange}
                                         className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-green focus:border-transparent bg-white"
                                     >
+                                        <option value="socks5">SOCKS5 (Recomendado)</option>
                                         <option value="http">HTTP</option>
                                         <option value="https">HTTPS</option>
-                                        <option value="socks5">SOCKS5</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-medium text-gray-600 mb-1">Usuário</label>
-                                    <input 
-                                        type="text" 
-                                        name="proxy_username"
-                                        value={formData.proxy_username} 
-                                        onChange={handleFormChange}
-                                        className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-green focus:border-transparent"
-                                        placeholder="Usuário (Opcional)"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-medium text-gray-600 mb-1">Senha</label>
-                                    <input 
-                                        type="password" 
-                                        name="proxy_password"
-                                        value={formData.proxy_password} 
-                                        onChange={handleFormChange}
-                                        className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-green focus:border-transparent"
-                                        placeholder="Senha (Opcional)"
-                                    />
+                                    <label className="block text-xs font-medium text-gray-600 mb-1">Autenticação</label>
+                                    <select 
+                                        value={proxyAuthMethod}
+                                        onChange={(e) => {
+                                            setProxyAuthMethod(e.target.value);
+                                            // Limpa os campos se o usuário trocar para IP
+                                            if (e.target.value === 'ip') {
+                                                setFormData(prev => ({ ...prev, proxy_username: '', proxy_password: '' }));
+                                            }
+                                        }}
+                                        className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-green focus:border-transparent bg-white"
+                                    >
+                                        <option value="ip">Liberação por IP</option>
+                                        <option value="password">Usuário e Senha</option>
+                                    </select>
                                 </div>
                             </div>
+
+                            {/* Campos condicionais baseados no proxyAuthMethod */}
+                            {proxyAuthMethod === 'password' && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Usuário</label>
+                                        <input 
+                                            type="text" 
+                                            name="proxy_username"
+                                            value={formData.proxy_username} 
+                                            onChange={handleFormChange}
+                                            className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-green focus:border-transparent"
+                                            placeholder="Ex: user123"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Senha</label>
+                                        <input 
+                                            type="password" 
+                                            name="proxy_password"
+                                            value={formData.proxy_password} 
+                                            onChange={handleFormChange}
+                                            className="w-full p-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-green focus:border-transparent"
+                                            placeholder="Sua senha secreta"
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Intervalo entre mensagens</label>
+                            <label className="block text-xs font-medium text-gray-600 mb-1 mt-2">Intervalo entre mensagens</label>
                             <div className="flex gap-2">
                                 <input 
                                     type="number" 
@@ -545,7 +573,6 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
                     </div>
                 </div>
 
-                {/* Footer Actions */}
                 <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
                     {!isCreating && (
                         <button 
@@ -566,7 +593,6 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
                 </div>
             </div>
 
-            {/* QR Code Modal Interno */}
             {isQRCodeModalOpen && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm" onClick={handleCloseQRCodeModal}>
                     <div className="bg-white p-6 rounded-xl shadow-2xl relative" onClick={e => e.stopPropagation()}>

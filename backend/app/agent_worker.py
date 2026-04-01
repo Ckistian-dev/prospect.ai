@@ -128,16 +128,30 @@ async def process_active_prospects():
                                 await db.commit()
                                 continue # Tenta a próxima instância
 
-                            # 2. Se conectada, verificar intervalo
+                            # 2. Se conectada, verificar intervalo com Aleatorização Proporcional (Jitter)
                             last_sent = inst.last_message_at or datetime.min.replace(tzinfo=timezone.utc)
-                            interval = inst.interval_seconds or 60
+                            
+                            # Pega o tempo base configurado no painel (padrão 60s)
+                            intervalo_base = inst.interval_seconds or 60
+                            
+                            # Cria um multiplicador aleatório entre 0.7 (30% mais rápido) e 1.6 (60% mais lento)
+                            # Ex: Se base é 60s, varia de 42s a 96s.
+                            # Ex: Se base é 300s (5 min), varia de 3.5 min a 8 min.
+                            fator_aleatorizacao = random.uniform(0.7, 1.6)
+                            
+                            # Aplica o fator ao tempo base
+                            target_interval = int(intervalo_base * fator_aleatorizacao)
+                            
+                            # Trava de segurança: Nunca envia mensagens com menos de 15 segundos entre um lead e outro (evita ban)
+                            target_interval = max(15, target_interval)
+
                             time_since_last = (datetime.now(timezone.utc) - last_sent).total_seconds()
                             
-                            if time_since_last >= interval:
+                            if time_since_last >= target_interval:
                                 ready_instance = inst
                                 break # Encontrou uma instância pronta
                             else:
-                                logger.debug(f"Instância {inst.name} em cooldown. Faltam {interval - time_since_last:.1f}s")
+                                logger.debug(f"Instância {inst.name} aguardando. Base: {intervalo_base}s | Alvo Aleatório: {target_interval}s | Faltam {target_interval - time_since_last:.1f}s")
 
                         if not ready_instance:
                             logger.info(f"Todas as instâncias da campanha {campaign.id} estão em intervalo ou desconectadas. Aguardando...")
@@ -254,27 +268,81 @@ async def process_active_prospects():
                         whatsapp_instance=selected_instance
                     )
 
-                    # --- MARCAR COMO LIDO (NOVO) ---
-                    try:
-                        # Filtra apenas mensagens que vieram do contato (role='user') e que possuem ID real (não temporário)
-                        user_msg_ids = [
-                            msg['id'] for msg in full_history 
-                            if msg.get('role') == 'user' and 'id' in msg and not str(msg['id']).startswith(('sent_', 'internal_'))
-                        ]
+                    # --- SISTEMA ANTI-RAJADA (Esperar o lead terminar o raciocínio) ---
+                    if mode == 'reply' and full_history:
+                        # Filtra apenas as mensagens enviadas pelo lead
+                        user_messages = [msg for msg in full_history if msg.get('role') == 'user']
                         
-                        if user_msg_ids:
-                            # Tenta obter o JID correto (priorizando o que está salvo no contato)
-                            target_jid = None
-                            if pc.jid_options:
-                                jids = [j.strip() for j in pc.jid_options.split(',') if j.strip()]
-                                if jids: target_jid = jids[0]
+                        if user_messages:
+                            last_user_msg = user_messages[-1]
+                            last_user_msg_time_str = last_user_msg.get('timestamp')
                             
-                            if not target_jid:
-                                target_jid = f"{whatsapp_service._normalize_number(contact.whatsapp)}@s.whatsapp.net"
-                            
-                            await whatsapp_service.mark_messages_as_read(selected_instance.instance_name, target_jid, user_msg_ids)
-                    except Exception as e:
-                        logger.warning(f"Erro ao tentar marcar mensagens como lidas para {contact.nome}: {e}")
+                            if last_user_msg_time_str:
+                                try:
+                                    last_msg_time = datetime.fromisoformat(last_user_msg_time_str.replace('Z', '+00:00'))
+                                    seconds_since_last_msg = (datetime.now(timezone.utc) - last_msg_time).total_seconds()
+                                    
+                                    # Conta quantas mensagens o lead enviou nos últimos 60 segundos (para identificar a rajada)
+                                    msgs_last_minute = 0
+                                    for m in reversed(user_messages):
+                                        m_time_str = m.get('timestamp')
+                                        if not m_time_str: continue
+                                        m_time = datetime.fromisoformat(m_time_str.replace('Z', '+00:00'))
+                                        if (datetime.now(timezone.utc) - m_time).total_seconds() < 60:
+                                            msgs_last_minute += 1
+                                        else:
+                                            break # Como está em ordem reversa, se passou de 60s pode parar de checar
+                                            
+                                    # Tempo de carência dinâmico: 
+                                    # Base de 8 segundos + 4 segundos extras para cada mensagem na rajada
+                                    carencia_rajada = 8.0 + (msgs_last_minute * 4.0)
+                                    
+                                    # Limite máximo de espera (para não travar o bot para sempre se o cara for um maníaco do WhatsApp)
+                                    carencia_rajada = min(carencia_rajada, 30.0)
+                                    
+                                    if seconds_since_last_msg < carencia_rajada:
+                                        logger.info(
+                                            f"AGENTE WORKER: Lead {contact.whatsapp} em modo RAJADA "
+                                            f"({msgs_last_minute} msgs). Última foi há {seconds_since_last_msg:.1f}s. "
+                                            f"Aguardando a poeira baixar (Carência: {carencia_rajada}s)."
+                                        )
+                                        
+                                        # Devolve o status para "Aguardando Resposta" para ser pego no próximo ciclo do Worker
+                                        await crud_prospect.update_prospect_contact(db, pc_id=pc.id, situacao="Aguardando Resposta")
+                                        continue # Pula este contato e vai pro próximo da fila
+                                except Exception as e:
+                                    logger.warning(f"Erro ao calcular Sistema Anti-Rajada: {e}")
+
+                    # --- FIM DO SISTEMA ANTI-RAJADA ---
+                    # --- 4. TEMPO DE LEITURA PROPORCIONAL ---
+                    if mode == 'reply' and full_history and full_history[-1]['role'] == 'user':
+                        tamanho_mensagem_cliente = len(str(full_history[-1].get('content', '')))
+                        
+                        # Um humano lê em média 15 a 20 caracteres por segundo (com calma no WhatsApp).
+                        # Se a mensagem tiver 100 caracteres, demora uns 5 segundos só processando.
+                        tempo_digestao_texto = tamanho_mensagem_cliente / 20.0
+                        
+                        # Trava máxima para o bot não travar o worker se o cliente mandar um livro
+                        tempo_digestao_texto = min(tempo_digestao_texto, 15.0) 
+                        
+                        if tempo_digestao_texto > 2.0:
+                            logger.info(f"AGENTE WORKER: Cliente mandou mensagem longa ({tamanho_mensagem_cliente} chars). Simulando {tempo_digestao_texto:.1f}s de tempo de leitura profundo...")
+                            await asyncio.sleep(tempo_digestao_texto)
+
+                    # --- 1. TEMPO DE ESCUTA REAL (Para áudios) ---
+                    if mode == 'reply' and full_history and full_history[-1]['role'] == 'user' and full_history[-1].get('type') == 'audio':
+                        # Pega o tamanho do texto transcrito para estimar o tempo
+                        texto_transcrito = full_history[-1].get('content', '')
+                        
+                        # Um humano fala em média 2.5 palavras por segundo.
+                        qtd_palavras = len(texto_transcrito.split())
+                        tempo_escuta_estimado = max(5.0, qtd_palavras / 2.5)
+                        
+                        logger.info(f"AGENTE WORKER: Cliente mandou áudio. Simulando {tempo_escuta_estimado:.1f}s de escuta...")
+                        
+                        # Fica online, mas não faz nada enquanto "ouve"
+                        await whatsapp_service.send_presence(selected_instance.instance_name, contact.whatsapp, "available")
+                        await asyncio.sleep(tempo_escuta_estimado)
 
                     if mode == 'reply' and (not full_history or full_history[-1]['role'] != 'user'):
                         logger.warning(f"AGENTE WORKER: Contato {pc.id} em modo 'reply' mas a última mensagem não é do usuário. Ignorando e voltando para 'Aguardando Resposta'.")
@@ -297,6 +365,20 @@ async def process_active_prospects():
                     data_agendamento = ia_response.get("data_agendamento")
                     email_cliente = ia_response.get("email_cliente")
                     new_notification_id = None
+                    
+                    emoji_reaction = ia_response.get("reagir_com_emoji")
+                    
+                    if emoji_reaction and full_history and full_history[-1]['role'] == 'user':
+                        last_msg_id = full_history[-1].get('id')
+                        if last_msg_id:
+                            await whatsapp_service.send_reaction(
+                                selected_instance.instance_name, 
+                                contact.whatsapp, 
+                                last_msg_id, 
+                                emoji_reaction
+                            )
+                            logger.info(f"AGENTE WORKER: Reagiu com {emoji_reaction} na mensagem {last_msg_id}")
+                            sent_any_message = True
                     
                     history_after_response = full_history.copy()
                     sent_any_message = False
@@ -339,29 +421,69 @@ async def process_active_prospects():
                             except Exception as e:
                                 logger.error(f"AGENTE WORKER: Falha ao enviar notificação para {persona_config.notification_destination}: {e}")
 
-                    if message_to_send and str(message_to_send).strip():
+                    if message_to_send:
                         try:
-                            # Divide a mensagem por quebras de linha para enviar separadamente
-                            # CORREÇÃO: Garante que quebras de linha que a IA possa ter escapado (ex: "\\n")
-                            # sejam convertidas para quebras de linha reais (\n) antes de dividir.
-                            processed_message = str(message_to_send).replace('\\n', '\n')
-                            messages_parts = [p.strip() for p in processed_message.split('\n') if p.strip()]
+                            # --- 1. ABRINDO O CHAT (Marcando como lido de forma humana) ---
+                            # Pega as mensagens do usuário para marcar como lidas agora
+                            user_msg_ids = [
+                                msg['id'] for msg in full_history 
+                                if msg.get('role') == 'user' and 'id' in msg and not str(msg['id']).startswith(('sent_', 'internal_'))
+                            ]
                             
-                            for part in messages_parts:
-                                # Simula tempo de digitação: 1.5s base + 0.05s por caractere (Max 7s)
-                                typing_delay = min(2 + (len(part) * 0.1), 10.0)
+                            if user_msg_ids:
+                                target_jid = f"{whatsapp_service._normalize_number(contact.whatsapp)}@s.whatsapp.net"
                                 
-                                # Envia status "Digitando..." (composing)
+                                # Simula o tempo do humano pegando o celular na mão e abrindo o app ANTES de ficar azul
+                                tempo_pegar_celular = random.uniform(2.0, 8.0)
+                                await asyncio.sleep(tempo_pegar_celular)
+                                
+                                # AQUI a mensagem fica azul para o cliente
+                                await whatsapp_service.mark_messages_as_read(selected_instance.instance_name, target_jid, user_msg_ids)
+                                logger.info(f"AGENTE WORKER: Mensagens de {contact.whatsapp} marcadas como lidas. Iniciando leitura/digitação...")
+                                
+                                # Simula o humano lendo a mensagem que acabou de abrir
+                                tempo_leitura = random.uniform(1.5, 4.0)
+                                await asyncio.sleep(tempo_leitura)
+
+                            # 1. Normaliza para Lista (caso a IA erre e mande string)
+                            if isinstance(message_to_send, str):
+                                messages_parts = [p.strip() for p in message_to_send.replace('\\n', '\n').split('\n') if p.strip()]
+                            elif isinstance(message_to_send, list):
+                                messages_parts = [str(p).strip() for p in message_to_send if str(p).strip()]
+                            else:
+                                messages_parts = []
+
+                            for i, part in enumerate(messages_parts):
+                                # Verifica se a IA gerou uma mensagem "âncora" de consulta
+                                frases_de_espera = ["minutinho", "peraí", "espera", "olhar aqui", "confirmar aqui", "rapidão", "sistema"]
+                                is_mensagem_espera = i == 0 and any(f in part.lower() for f in frases_de_espera) and len(messages_parts) > 1
+
+                                hesitation = random.uniform(0.5, 1.8)
+                                chars_per_sec = random.uniform(4.0, 7.0)
+                                typing_delay = hesitation + (len(part) / chars_per_sec)
+                                
+                                # Digita e envia a mensagem âncora ("peraí que vou olhar")
                                 await whatsapp_service.send_presence(selected_instance.instance_name, contact.whatsapp, "composing", delay=int(typing_delay * 1000))
                                 await asyncio.sleep(typing_delay)
-
                                 await whatsapp_service.send_text_message(selected_instance.instance_name, contact.whatsapp, part)
-                                logger.info(f"AGENTE WORKER: Parte da mensagem enviada para {contact.whatsapp}.")
+                                logger.info(f"AGENTE WORKER: Parte {i+1}/{len(messages_parts)} da mensagem enviada para {contact.whatsapp}.")
+
                                 now_iso = datetime.now(timezone.utc).isoformat()
                                 pending_id = f"sent_{now_iso}_{random.randint(1000, 9999)}"
                                 history_after_response.append({"id": pending_id, "role": "assistant", "content": part, "timestamp": now_iso})
+                                sent_any_message = True
 
-                            sent_any_message = True
+                                # SE FOI UMA MENSAGEM DE ESPERA, O BOT DESAPARECE PARA "PROCURAR"
+                                if is_mensagem_espera:
+                                    tempo_procurando = random.uniform(15.0, 40.0)
+                                    logger.info(f"AGENTE WORKER: Simulando consulta em sistema por {tempo_procurando:.1f}s...")
+                                    # Fica apenas 'available' (online), sem digitar
+                                    await whatsapp_service.send_presence(selected_instance.instance_name, contact.whatsapp, "available")
+                                    await asyncio.sleep(tempo_procurando)
+                                else:
+                                    # Pausa normal entre mensagens comuns
+                                    if i < len(messages_parts) - 1:
+                                        await asyncio.sleep(random.uniform(0.8, 2.0))
 
                         except MessageSendError as e:
                             logger.error(f"AGENTE WORKER: Falha ao enviar mensagem para {contact.whatsapp}. Erro: {e}")

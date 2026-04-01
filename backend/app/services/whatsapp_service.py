@@ -108,7 +108,7 @@ class WhatsAppService:
                 create_payload = {
                     "instanceName": instance_name,
                     "qrcode": True,
-                    "syncFullHistory": False,
+                    "syncFullHistory": True,
                     "integration": "WHATSAPP-BAILEYS",
                     "webhook": {
                         "url": settings.WEBHOOK_URL, "enabled": True, "events": ["MESSAGES_UPSERT"]
@@ -132,7 +132,8 @@ class WhatsAppService:
                 create_response = await client.post(
                     f"{self.api_url}/instance/create",
                     json=create_payload,
-                    headers=self.headers
+                    headers=self.headers,
+                    timeout=60.0
                 )
                 create_response.raise_for_status()
                 data = create_response.json()
@@ -147,7 +148,7 @@ class WhatsAppService:
                 
                 if not qr_code_base64:
                     logger.info(f"Base64 do QR Code não veio na criação. Tentando obter via /connect para '{instance_name}'...")
-                    await asyncio.sleep(3) # Pausa para a instância inicializar
+                    await asyncio.sleep(60) # Pausa para a instância inicializar
                     connect_response = await client.get(
                         f"{self.api_url}/instance/connect/{instance_name}",
                         headers=self.headers,
@@ -165,8 +166,7 @@ class WhatsAppService:
                              "qrcode": qr_code_base64
                          }
                      }
-
-                return {"status": "error", "detail": "Não foi possível gerar o QR Code após criar a instância."}
+                return {"status": "error", "detail": "Não foi possível gerar o QR Code após criar a instância. Verifique se o proxy está causando lentidão na Evolution API."}
 
         except Exception as e:
             logger.error(f"Erro no fluxo de conexão forçada: {e}")
@@ -263,6 +263,29 @@ class WhatsAppService:
         except Exception as e:
             logger.error(f"Falha ao enviar áudio para {normalized_number}. Erro: {e}")
             raise MessageSendError(f"Falha no envio de áudio: {e}") from e
+
+    async def send_reaction(self, instance_name: str, number: str, message_id: str, emoji: str):
+        """Envia uma reação (emoji) para uma mensagem específica."""
+        normalized_number = self._normalize_number(number)
+        url = f"{self.api_url}/message/sendReaction/{instance_name}"
+        
+        payload = {
+            "number": normalized_number,
+            "reactionMessage": {
+                "key": {
+                    "id": message_id,
+                    "fromMe": False  # Assumindo que estamos reagindo à mensagem do cliente
+                },
+                "text": emoji
+            }
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, headers=self.headers, json=payload, timeout=10.0)
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger.warning(f"Falha ao enviar reação {emoji} para {normalized_number}: {e}")
 
     async def get_media_and_convert(self, instance_name: str, message: dict) -> Optional[Dict[str, Any]]:
         """

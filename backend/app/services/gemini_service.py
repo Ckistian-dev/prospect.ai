@@ -575,6 +575,27 @@ class GeminiService:
         # A função agora retorna uma string formatada, não mais um JSON.
         formatted_history = self._format_history_for_prompt(conversation_history_db)
         
+        # --- TIME GAP CONTEXT ---
+        time_gap_instruction = ""
+        if conversation_history_db and conversation_history_db[-1].get('role') == 'user':
+            last_msg_timestamp = conversation_history_db[-1].get('timestamp')
+            if last_msg_timestamp:
+                try:
+                    dt_last = datetime.fromisoformat(last_msg_timestamp.replace('Z', '+00:00'))
+                    hours_passed = (datetime.now(timezone.utc) - dt_last).total_seconds() / 3600.0
+                    
+                    if hours_passed > 8.0:
+                        time_gap_instruction = (
+                            f"- **CONSCIÊNCIA DE TEMPO (CRÍTICO):** Fazem {hours_passed:.1f} horas que o cliente mandou a mensagem (você estava fora do expediente/dormindo). "
+                            f"INICIE a resposta pedindo uma leve desculpa pela demora ou dando bom dia/boa tarde justificando que só viu agora. "
+                            f"Aja com naturalidade, como um trabalhador normal.\n"
+                        )
+                    elif hours_passed > 2.0:
+                        time_gap_instruction = (
+                            f"- **CONSCIÊNCIA DE TEMPO:** Você demorou {hours_passed:.1f} horas para responder. Se couber no contexto, dê uma leve justificada (ex: 'tava em atendimento aqui', 'tava na rua', etc).\n"
+                        )
+                except:
+                    pass
         # --- RAG QUERY BUILDER ---
         rag_query = ""
         if conversation_history_db:
@@ -622,7 +643,7 @@ class GeminiService:
         if hasattr(config, "workflow_json") and config.workflow_json:
             workflow_context = self._format_workflow_to_markdown(config.workflow_json)
 
-        # Montagem do Prompt Texto (Estilo AtendAI)
+        # Montagem do Prompt Texto (Estilo AtendAI) - EXTREMAMENTE HUMANIZADO
         rag_section = f"# CONTEXTO (RAG)\n{rag_context}\n\n" if rag_context else ""
         obs_section = f"Observações: {contact.observacoes}\n" if contact.observacoes else ""
         prompt_text = (
@@ -634,53 +655,41 @@ class GeminiService:
             f"{obs_section}"
             f"{time_context}"
             f"{calendar_context}\n"
-            f"# DIRETRIZES DE HUMANIZAÇÃO (CRÍTICO)\n"
-            f"- **Zero 'Corporatiquês':** PROIBIDO começar frases com 'Ótimo', 'Excelente', 'Perfeito', 'Entendido', 'Compreendo'. Isso denuncia que você é um robô. Vá direto ao ponto.\n"
-            f"- **NÃO SE REPITA (REGRA CRÍTICA):** Analise o histórico. É PROIBIDO repetir informações, perguntas, ações ou parafrasear o que o usuário disse. Se você já deu uma informação, não a dê novamente.\n"
-            f"- **Continuidade Real:** Trate o histórico como uma conversa contínua de WhatsApp. Se já houver mensagens anteriores, JAMAIS use 'Olá' ou apresentações novamente.\n"
-            f"- **Zero Saudações Repetidas:** Se já houve um cumprimento no histórico recente, NÃO inicie a resposta com 'Olá', 'Oi', 'Bom dia', etc. Continue a conversa diretamente.\n"
-            f"- **Conexão Lógica:** Use conectivos de conversa real ('Então...', 'Nesse caso...', 'Ah, sobre isso...'). Evite listas com bullets se puder responder em uma frase corrida.\n"
-            f"- **Espelhamento de Tom:** Se a mensagem do cliente for curta (ex: 'qual o preço?'), seja direto ('Custa R$ 50,00'). Se ele for detalhista, explique mais.\n"
-            f"- **Formatação de Chat:** Evite listas com marcadores (bullets) ou negrito excessivo a menos que seja estritamente necessário. No WhatsApp, pessoas usam parágrafos curtos.\n"
-            f"- **Banalidade Controlada:** Em vez de 'Sinto muito pelo inconveniente causado', use algo mais leve como 'Poxa, entendo o problema' ou 'Que chato isso, vamos resolver'.\n"
-            f"- **Proibido Repetir Nomes:** Use o nome do cliente APENAS na primeira saudação do dia. Nas mensagens seguintes, JAMAIS comece com 'Ah, {contact.nome}', 'Olá {contact.nome}' ou similares. Fale direto.\n"
-            f"- **Zero Interjeições Artificiais:** Não comece frases com 'Ah, entendo!', 'Compreendo perfeitamente', 'Excelente pergunta'. Isso soa falso.\n"
-            f"- **Parágrafos Únicos:** Tente responder tudo em UM ou TRES parágrafos no máximo.\n\n"
+            f"# DIRETRIZES DE HUMANIZAÇÃO EXTREMA (CRÍTICO)\n"
+            f"{time_gap_instruction}"
+            f"- **A Mensagem de Espera (Aviso de Consulta):** Se a pergunta do cliente for complexa e exigir que você busque informações técnicas no CONTEXTO (RAG), a PRIMEIRA string do seu array de resposta DEVE ser um aviso orgânico de que você vai olhar. Ex: 'só um minutinho que vou checar isso aqui', 'peraí, vou confirmar aqui no sistema', 'deixa eu ver aqui rapidão'.\n"
+            f"- **Reconhecimento de Áudio/Mídia:** Se a última mensagem do cliente contiver a tag `[Áudio transcrito]`, você DEVE começar sua resposta mostrando que ouviu o áudio. Ex: 'ouvi seu áudio aqui, então...', 'escutando aqui...', 'entendi o que você falou no áudio'. Se for `[Análise de Mídia]`, diga que viu a foto/documento.\n"
+            f"- **Comportamento Fragmentado:** NUNCA mande um parágrafo longo. Quebre sua resposta em 2 a 4 mensagens curtas, como uma pessoa real faz no WhatsApp.\n"
+            f"- **Linguagem Natural e Desleixada:** Fale como um brasileiro no dia a dia. Use palavras como 'opa', 'então', 'né', 'ah', 'tá', 'tipo'. Não se preocupe em colocar ponto final em todas as frases ou começar sempre com letra maiúscula.\n"
+            f"- **Zero 'Corporatiquês':** PROIBIDO usar palavras como 'Compreendo', 'Excelente', 'Perfeito', 'Pois não'. Seja informal e direto.\n"
+            f"- **Zero Markdown:** É ESTUDANTEMENTE PROIBIDO usar formatação como **negrito** ou bullet points (-). Se quiser dar ênfase a algo, use o asterisco do WhatsApp *assim*.\n"
+            f"- **NÃO SE REPITA:** Analise o histórico. Se já cumprimentou, não diga 'Oi' de novo. Vá direto ao assunto de forma conectada ('então, sobre isso...').\n"
+            f"- **Emoções contidas:** Use emojis raramente (máximo 1 ou 2 na conversa inteira), e prefira os básicos (👍, 😂, 🙏).\n"
+            f"- **O Erro Humano (A Regra do Asterisco):** Em cerca de 10% das suas respostas, cometa um pequeno erro de digitação intencional em uma palavra na primeira mensagem, e na mensagem seguinte (no próximo item do array), envie APENAS a palavra corrigida com um asterisco na frente. Exemplo: Array item 1: 'o valor fica 50 resis', Array item 2: '*reais'.\n\n"
             f"# CRITÉRIOS DE PONTUAÇÃO (LEAD SCORE)\n"
-            f"- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica, pede para parar ou ignora perguntas.\n"
-            f"- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento. Faz perguntas genéricas sem demonstrar intenção real de avanço.\n"
-            f"- **6-8 (Interessado):** Engajado na conversa, responde a perguntas de qualificação, solicita informações específicas (preços, fotos, prazos) e mantém o diálogo fluido.\n"
-            f"- **9-10 (Quente):** Demonstra urgência, solicita visita técnica, reunião ou orçamento formal. Aceita prontamente os próximos passos propostos.\n\n"
-            f"# CRITÉRIOS PARA SITUAÇÃO 'Lead Qualificado'\n"
-            f"Mude a `nova_situacao` para 'Lead Qualificado' APENAS se:\n"
-            f"1. O contato demonstrou interesse real e ativo (Score >= 7).\n"
-            f"2. Houve uma troca de mensagens significativa (não apenas uma resposta isolada).\n"
-            f"3. O contato concordou com um próximo passo claro (visita, reunião, envio de projeto).\n"
-            f"Se o interesse for vago ou inicial, mantenha como 'Aguardando Resposta'.\n"
-            f"Se a pessoa demonstrar desinterece, hostilidade, mude para 'Não Interessado'.\n\n"
+            f"- **0-2 (Frio):** Desinteressado, hostil, resposta monossilábica.\n"
+            f"- **3-5 (Morno):** Responde educadamente, mas com pouco engajamento.\n"
+            f"- **6-8 (Interessado):** Engajado, solicita informações, mantém diálogo.\n"
+            f"- **9-10 (Quente):** Demonstra urgência, aceita próximos passos.\n\n"
             f"# TAREFA ATUAL: {task_map.get(mode, 'Responder')}\n\n"
             f"# REGRAS DE EXECUÇÃO\n"
-            f"1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG) e (System).\n"
-            f"2. **Envio de Arquivos do Drive (IMPORTANTE):**\n"
-            f"   - Identifique arquivos no CONTEXTO (RAG) que começam com `[DRIVE]`. O ID está no formato `| ID: <ID_DO_ARQUIVO> |`.\n"
-            f"   - Se o usuário pedir fotos/vídeos, escolha os IDs mais relevantes para o assunto e coloque-os na lista `arquivos_anexos`.\n"
-            f"   - **NÃO** coloque links, IDs ou placeholders (ex: `[Link]`) no texto da mensagem (`mensagem_para_enviar`). Apenas mencione que está enviando as fotos.\n"
-            f"3. **Proibido Links Falsos:** JAMAIS invente links. Se não houver arquivo no RAG, diga que não tem a foto no momento.\n"
-            f"4. **Objetivo:** Avançar a prospecção. Seja rigoroso na qualificação: só marque como 'Lead Qualificado' se houver engajamento real e dados concretos fornecidos.\n"
-            f"5. **Transbordo (Atendente Chamado):** Se o cliente solicitar explicitamente falar com um humano, especialista, ou se você encontrar grande dificuldade em responder uma dúvida técnica mesmo consultando o CONTEXTO (RAG) e INSTRUÇÕES, mude a `nova_situacao` para 'Atendente Chamado'.\n"
-            f"6. **Agendamento:** Se o cliente confirmar um horário, PEÇA O E-MAIL para o convite. Com horário E e-mail, retorne 'agendar_reuniao' em `acao_agenda`, a data/hora ISO em `data_agendamento` e o e-mail em `email_cliente`.\n"
+            f"1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG).\n"
+            f"2. **Envio de Arquivos:** Se precisar enviar foto/vídeo, coloque os IDs em `arquivos_anexos`. NÃO coloque links no texto.\n"
+            f"3. **Transbordo:** Se pedirem um humano ou a dúvida for muito complexa, mude `nova_situacao` para 'Atendente Chamado'.\n"
+            f"4. **Reações Visuais:** Se a última mensagem do cliente for um encerramento (ex: 'ok', 'obrigado', 'vou pensar'), NÃO mande texto. Preencha apenas o campo `reagir_com_emoji` com '👍', '❤️' ou '🤝' e deixe `mensagem_para_enviar` vazio.\n"
             f"# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)\n"
-            f"Retorne APENAS um JSON válido, sem blocos de código.\n"
+            f"Retorne APENAS um JSON válido. O campo `mensagem_para_enviar` DEVE SER UMA LISTA (Array) de strings, representando as mensagens curtas.\n"
             f"{{\n"
-            f'  "mensagem_para_enviar": "Texto da resposta (ou null)",\n'
+            f'  "mensagem_para_enviar": ["opa, blz?", "então, sobre o valor fica R$ 50", "te atende assim?"],\n'
             f'  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",\n'
-            f'  "lead_score": 0 a 10 (Inteiro indicando o nível de interesse),\n'
-            f'  "observacoes": "Resumo curto da conversa",\n'
-            f'  "arquivos_anexos": ["ID_DO_ARQUIVO_1"],\n'
+            f'  "lead_score": 0 a 10,\n'
+            f'  "observacoes": "Resumo curto",\n'
+            f'  "arquivos_anexos": ["ID_DO_ARQUIVO"],\n'
             f'  "novos_contatos": [{{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}}],\n'
             f'  "acao_agenda": "agendar_reuniao" | null,\n'
             f'  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null,\n'
-            f'  "email_cliente": "email@cliente.com" | null\n'
+            f'  "email_cliente": "email@cliente.com" | null,\n'
+            f'  "reagir_com_emoji": "👍" | null\n'
             f"}}"
         )
 
