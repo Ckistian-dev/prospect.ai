@@ -3,84 +3,154 @@ import api from '../api/axiosConfig';
 import {
   Plus, Save, Trash2, FileText, ChevronRight, Loader2, CheckCircle, RefreshCw,
   Link as LinkIcon, Folder, Copy, Share2, Database, ExternalLink, AlertTriangle, Calendar, Info,
-  Clock, X, Check, Search, User, Users, Network, Maximize2, Bell
+  Clock, X, Check, Search, User, Users, Network, Maximize2, Bell, Smartphone, Monitor, Shield, Zap, ArrowRight, Layout
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import DatePicker, { registerLocale } from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { ptBR } from 'date-fns/locale';
-registerLocale('pt-BR', ptBR);
 import { WorkflowPreview, WorkflowEditorModal } from '../components/configs/WorkflowEditor';
+import PageLoader from '../components/common/PageLoader';
 
-// --- CONFIGURAÇÃO ---
-// Substitua pelo client_email do seu JSON de credenciais do service account
+registerLocale('pt-BR', ptBR);
+
+// ─── DESIGN SYSTEM ──────────────────────────────────────────────────────────
+const DS_STYLE = `
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
+.configs-page { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+.configs-page h1, .configs-page h2, .configs-page h3, .configs-page h4 { font-family: 'Plus Jakarta Sans', sans-serif; }
+.ds-surface { background: #ffffff; border-radius: 2rem; border: 1px solid rgba(0,0,0,0.05); box-shadow: 0 4px 20px rgba(0,0,0,0.03); }
+.ds-card { background: #ffffff; border-radius: 1.5rem; border: 1px solid rgba(0,0,0,0.05); padding: 1.5rem; transition: all 0.3s ease; }
+.ds-card:hover { border-color: rgba(53,104,84,0.1); box-shadow: 0 8px 30px rgba(0,0,0,0.04); }
+.config-input {
+    width: 100%;
+    height: 3.5rem;
+    padding: 0 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border-radius: 1rem;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    color: #1e293b;
+    outline: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.config-input:focus { border-color: #356854; background: #ffffff; box-shadow: 0 0 0 4px rgba(53,104,84,0.08); }
+.config-tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.25rem 1.5rem;
+    font-size: 0.75rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    transition: all 0.3s;
+    border-bottom: 3px solid transparent;
+    color: #94a3b8;
+}
+.config-tab-btn.active {
+    color: #356854;
+    border-bottom-color: #356854;
+    background: rgba(53,104,84,0.02);
+}
+.config-tab-btn:hover:not(.active) { color: #64748b; background: rgba(0,0,0,0.01); }
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+.ai-gradient { background: linear-gradient(135deg, #1b3d2f 0%, #356854 100%); }
+`;
+
 const BOT_EMAIL = "integracaoapi@integracaoapi-436218.iam.gserviceaccount.com";
 
-// Helper para normalizar JIDs brasileiros
 const normalizeJid = (jid) => {
   if (!jid) return '';
   const parts = jid.split('@');
   let id = parts[0];
-  if (id.startsWith('55') && id.length === 13 && id[4] === '9') {
-    id = id.slice(0, 4) + id.slice(5);
-  }
+  if (id.startsWith('55') && id.length === 13 && id[4] === '9') id = id.slice(0, 4) + id.slice(5);
   return parts.length > 1 ? `${id}@${parts[1]}` : id;
 };
 
-const initialFormData = {
-  nome_config: '',
-  spreadsheet_id: '',
-  spreadsheet_rag_id: '',
-  drive_id: '',
-  available_hours: { seg: [], ter: [], qua: [], qui: [], sex: [], sab: [], dom: [] },
-  is_calendar_connected: false,
-  is_calendar_active: false,
-  workflow_json: { nodes: [], edges: [] },
-  notification_active: false,
-  notification_destination: ''
-};
-
-const Modal = ({ onClose, children }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm animate-fade-in" onClick={onClose}>
-    <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 animate-fade-in-up" onClick={e => e.stopPropagation()}>
+const Modal = ({ onClose, children, maxWidth = "max-w-2xl" }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose}>
+    <div className={`bg-white w-full ${maxWidth} relative overflow-hidden animate-in zoom-in duration-300`} style={{ borderRadius: '2.5rem', boxShadow: '0 40px 100px rgba(0,0,0,0.25)' }} onClick={e => e.stopPropagation()}>
+      <button onClick={onClose} className="absolute top-8 right-8 w-10 h-10 flex items-center justify-center bg-slate-50 text-slate-400 hover:text-slate-600 rounded-xl transition-all z-10"><X size={20} /></button>
       {children}
     </div>
   </div>
 );
 
-const DeleteConfirmationModal = ({ onClose, onConfirm }) => (
-  <Modal onClose={onClose}>
-    <div className="p-6 text-center">
-      <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
-        <AlertTriangle className="h-6 w-6 text-red-600" aria-hidden="true" />
+const ResourceCard = ({ title, desc, id, type, onOpen, onSync, onProvision, isSyncing, selectedConfigId }) => {
+  const isSheet = type === 'sheet';
+  return (
+    <div className="ds-card group">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+        <div className="flex items-center gap-5">
+          <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center transition-all shadow-lg ${id ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-300'}`}>
+            {isSheet ? <Database size={28} /> : <Folder size={28} />}
+          </div>
+          <div>
+            <h4 className="text-lg font-black text-slate-800 leading-tight">{title}</h4>
+            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">{desc}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          {id ? (
+            <>
+              <button onClick={onOpen} className="flex-1 md:flex-none h-12 px-6 bg-slate-100 text-slate-600 font-black text-[10px] uppercase tracking-widest rounded-xl hover:bg-slate-200 transition-all flex items-center justify-center gap-2">
+                <ExternalLink size={14} /> Abrir
+              </button>
+              <button onClick={onSync} disabled={isSyncing} className="flex-1 md:flex-none h-12 px-6 bg-emerald-50 text-emerald-600 font-black text-[10px] uppercase tracking-widest rounded-xl hover:bg-emerald-100 transition-all flex items-center justify-center gap-2">
+                {isSyncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Sincronizar
+              </button>
+            </>
+          ) : (
+            <button onClick={onProvision} disabled={!selectedConfigId} className="w-full md:w-auto h-12 px-8 bg-[#356854] text-white font-black text-[10px] uppercase tracking-widest rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#2d5847] transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+              <Plus size={16} /> Criar no Google Drive
+            </button>
+          )}
+        </div>
       </div>
-      <h3 className="mt-4 text-lg font-semibold text-gray-900">Excluir Configuração</h3>
-      <p className="mt-2 text-sm text-gray-500">Tem certeza que deseja excluir esta configuração?</p>
-      <div className="mt-6 flex justify-center gap-4">
-        <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition">Cancelar</button>
-        <button onClick={onConfirm} className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition">Sim, Excluir</button>
-      </div>
+      {id && (
+        <div className="mt-6 p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-3 truncate">
+            <LinkIcon size={14} className="text-slate-400 shrink-0" />
+            <span className="text-[11px] font-bold text-slate-400 truncate tracking-tight">{id}</span>
+          </div>
+          <button onClick={() => { navigator.clipboard.writeText(id); toast.success("ID copiado!"); }} className="p-2 text-slate-400 hover:text-[#356854] transition-all"><Copy size={16} /></button>
+        </div>
+      )}
     </div>
-  </Modal>
+  );
+};
+
+const InfoBox = ({ icon: Icon, title, children }) => (
+  <div className="p-8 bg-emerald-50/50 rounded-[2rem] border border-emerald-100/30 flex gap-6 items-start">
+    <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-emerald-600 shadow-sm shrink-0 border border-emerald-100/50"><Icon size={24} /></div>
+    <div>
+      <h4 className="text-sm font-black text-emerald-900 uppercase tracking-widest mb-2">{title}</h4>
+      <div className="text-sm text-emerald-800/80 font-medium leading-relaxed">{children}</div>
+    </div>
+  </div>
 );
 
 function Configs() {
   const [configs, setConfigs] = useState([]);
   const [selectedConfig, setSelectedConfig] = useState(null);
-  const [formData, setFormData] = useState(initialFormData);
-
+  const [formData, setFormData] = useState({
+    nome_config: '', spreadsheet_id: '', spreadsheet_rag_id: '', drive_id: '',
+    available_hours: { seg: [], ter: [], qua: [], qui: [], sex: [], sab: [], dom: [] },
+    is_calendar_connected: false, is_calendar_active: false,
+    workflow_json: { nodes: [], edges: [] }, notification_active: false, notification_destination: ''
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [error, setError] = useState('');
   const [deleteConfirmation, setDeleteConfirmation] = useState({ isOpen: false, configId: null });
-
-  // Agenda Logic States
   const [schedule, setSchedule] = useState({});
   const [exceptions, setExceptions] = useState({});
   const [eventRules, setEventRules] = useState({ duration: 30, buffer_before: 0, buffer_after: 0, increment: 30 });
-
-  // Estados do Workflow e Notificações
   const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [destinations, setDestinations] = useState([]);
@@ -88,115 +158,57 @@ function Configs() {
   const [whatsappInstances, setWhatsappInstances] = useState([]);
   const [selectedWhatsappInstanceId, setSelectedWhatsappInstanceId] = useState(null);
   const dropdownRef = useRef(null);
-
-  const [activeTab, setActiveTab] = useState('system'); // 'system', 'rag', 'drive', 'agenda'
+  const [activeTab, setActiveTab] = useState('system');
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [configsRes, whatsappRes] = await Promise.all([
-        api.get('/configs/'),
-        api.get('/whatsapp/'),
-      ]);
+      const [configsRes, whatsappRes] = await Promise.all([api.get('/configs/'), api.get('/whatsapp/')]);
       setConfigs(configsRes.data);
       setWhatsappInstances(whatsappRes.data || []);
-      if (!selectedWhatsappInstanceId && whatsappRes.data && whatsappRes.data.length > 0) {
-        setSelectedWhatsappInstanceId(whatsappRes.data[0].id);
-      }
-    } catch (err) {
-      setError('Não foi possível carregar os dados.');
-    } finally {
-      setIsLoading(false);
-    }
+      if (!selectedWhatsappInstanceId && whatsappRes.data?.length > 0) setSelectedWhatsappInstanceId(whatsappRes.data[0].id);
+    } catch (err) { setError('Falha ao carregar dados de configuração.'); }
+    finally { setIsLoading(false); }
   }, [selectedWhatsappInstanceId]);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  useEffect(() => {
-    if (configs.length > 0 && !selectedConfig) {
-      handleSelectConfig(configs[0]);
-    }
-  }, [configs, selectedConfig]);
-
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsDropdownOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  useEffect(() => { if (configs.length > 0 && !selectedConfig) handleSelectConfig(configs[0]); }, [configs, selectedConfig]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     const pendingConfigId = localStorage.getItem('pendingCalendarConfigId');
-    const storedRedirectUri = localStorage.getItem('pendingCalendarRedirectUri');
-
     const pendingProvisionId = localStorage.getItem('pendingProvisionConfigId');
     const pendingProvisionType = localStorage.getItem('pendingProvisionType');
 
     if (code) {
       window.history.replaceState({}, document.title, window.location.pathname);
-
       if (pendingConfigId) {
-        const handleCallback = async () => {
+        (async () => {
           setIsLoading(true);
           try {
-            const redirectUri = storedRedirectUri || (window.location.origin + window.location.pathname);
+            const redirectUri = localStorage.getItem('pendingCalendarRedirectUri') || (window.location.origin + window.location.pathname);
             await api.post(`/google-contacts/calendar/auth/callback?code=${encodeURIComponent(code)}&redirect_uri=${encodeURIComponent(redirectUri)}&config_id=${pendingConfigId}`);
-            toast.success('Google Agenda conectado com sucesso!');
+            toast.success('Agenda conectada!');
             localStorage.removeItem('pendingCalendarConfigId');
-            localStorage.removeItem('pendingCalendarRedirectUri');
-
-            const res = await api.get('/configs/');
-            setConfigs(res.data);
-            const updated = res.data.find(c => c.id === parseInt(pendingConfigId));
-            if (updated) {
-              handleSelectConfig(updated);
-              setActiveTab('agenda');
-            }
-          } catch (error) {
-            console.error(error);
-            toast.error('Falha ao conectar Google Agenda.');
-          } finally {
-            setIsLoading(false);
-          }
-        };
-        handleCallback();
+            fetchData();
+          } catch (e) { toast.error('Falha ao conectar Agenda.'); }
+          finally { setIsLoading(false); }
+        })();
       } else if (pendingProvisionId && pendingProvisionType) {
-        const handleProvisionCallback = async () => {
+        (async () => {
           setIsSyncing(true);
           try {
             const redirectUri = window.location.origin + window.location.pathname;
-            const response = await api.post('/configs/provision', {
-              config_id: parseInt(pendingProvisionId),
-              resource_type: pendingProvisionType,
-              code: code,
-              redirect_uri: redirectUri
-            });
-            toast.success("Recurso criado e compartilhado com sucesso!");
-
-            const newId = response.data?.id;
-            if (newId) {
-              setFormData(prev => ({
-                ...prev,
-                [pendingProvisionType === 'system' ? 'spreadsheet_id' : pendingProvisionType === 'rag' ? 'spreadsheet_rag_id' : 'drive_id']: newId
-              }));
-            }
+            const res = await api.post('/configs/provision', { config_id: parseInt(pendingProvisionId), resource_type: pendingProvisionType, code, redirect_uri: redirectUri });
+            toast.success("Recurso criado com sucesso!");
+            if (res.data?.id) setFormData(p => ({ ...p, [pendingProvisionType === 'system' ? 'spreadsheet_id' : pendingProvisionType === 'rag' ? 'spreadsheet_rag_id' : 'drive_id']: res.data.id }));
             localStorage.removeItem('pendingProvisionConfigId');
-            localStorage.removeItem('pendingProvisionType');
             fetchData();
-          } catch (err) {
-            toast.error(err.response?.data?.detail || 'Falha ao criar o recurso no Google.');
-          } finally {
-            setIsSyncing(false);
-          }
-        };
-        handleProvisionCallback();
+          } catch (err) { toast.error('Falha ao criar recurso.'); }
+          finally { setIsSyncing(false); }
+        })();
       }
     }
   }, [fetchData]);
@@ -204,887 +216,330 @@ function Configs() {
   const handleSelectConfig = useCallback((config) => {
     setSelectedConfig(config);
     setFormData({
-      nome_config: config.nome_config,
-      spreadsheet_id: config.spreadsheet_id || '',
-      spreadsheet_rag_id: config.spreadsheet_rag_id || '',
-      drive_id: config.drive_id || '',
+      nome_config: config.nome_config, spreadsheet_id: config.spreadsheet_id || '',
+      spreadsheet_rag_id: config.spreadsheet_rag_id || '', drive_id: config.drive_id || '',
       available_hours: config.available_hours || { seg: [], ter: [], qua: [], qui: [], sex: [], sab: [], dom: [] },
-      is_calendar_connected: !!config.google_calendar_credentials,
-      is_calendar_active: config.is_calendar_active || false,
-      workflow_json: {
-        nodes: config.workflow_json?.nodes || [],
-        edges: (config.workflow_json?.edges || []).map(e => ({ ...e, type: 'customEdge' }))
-      },
-      notification_active: config.notification_active || false,
-      notification_destination: config.notification_destination || ''
+      is_calendar_connected: !!config.google_calendar_credentials, is_calendar_active: config.is_calendar_active || false,
+      workflow_json: { nodes: config.workflow_json?.nodes || [], edges: (config.workflow_json?.edges || []).map(e => ({ ...e, type: 'customEdge' })) },
+      notification_active: config.notification_active || false, notification_destination: config.notification_destination || ''
     });
-
-    // Parse Weekly Schedule for UI
     const parsedSchedule = {};
-    const days = ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'];
-    days.forEach(day => {
+    ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'].forEach(day => {
       const dayHours = config.available_hours?.[day] || [];
-      parsedSchedule[day] = {
-        active: dayHours.length > 0,
-        blocks: dayHours.length > 0
-          ? dayHours.map(h => {
-            const [start, end] = h.split('-');
-            return { start: start?.trim(), end: end?.trim() };
-          })
-          : [{ start: '09:00', end: '18:00' }]
-      };
+      parsedSchedule[day] = { active: dayHours.length > 0, blocks: dayHours.length > 0 ? dayHours.map(h => ({ start: h.split('-')[0].trim(), end: h.split('-')[1].trim() })) : [{ start: '09:00', end: '18:00' }] };
     });
     setSchedule(parsedSchedule);
     setExceptions(config.date_overrides || {});
     setEventRules(config.event_rules || { duration: 30, buffer_before: 0, buffer_after: 0, increment: 30 });
     setDestSearchTerm(config.notification_destination || '');
-
     setActiveTab('system');
     setError('');
   }, []);
 
-  const handleNewConfig = () => {
-    setSelectedConfig(null);
-    setFormData(initialFormData);
-
-    // Reset Schedule UI
-    const defaultSchedule = {};
-    ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'].forEach(day => {
-      defaultSchedule[day] = { active: false, blocks: [{ start: '09:00', end: '18:00' }] };
-    });
-    setSchedule(defaultSchedule);
-    setExceptions({});
-    setEventRules({ duration: 30, buffer_before: 0, buffer_after: 0, increment: 30 });
-    setDestSearchTerm('');
-
-    setActiveTab('system');
-    setError('');
-  };
-
-  const extractId = (value) => {
-    if (!value) return "";
-    const sheetMatch = value.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-    if (sheetMatch) return sheetMatch[1];
-    const folderMatch = value.match(/\/folders\/([a-zA-Z0-9-_]+)/);
-    if (folderMatch) return folderMatch[1];
-    return value;
-  };
-
-  const handleFormChange = (e) => {
-    const { name, value } = e.target;
-    let finalValue = value;
-
-    if (['spreadsheet_id', 'spreadsheet_rag_id', 'drive_id'].includes(name)) {
-      finalValue = extractId(value);
-    }
-
-    setFormData(prev => ({ ...prev, [name]: finalValue }));
-  };
-
-  // --- Agenda Logic Handlers ---
-  const toggleDay = (day) => {
-    setSchedule(prev => ({
-      ...prev,
-      [day]: { ...prev[day], active: !prev[day].active }
-    }));
-  };
-
-  const addTimeBlock = (day) => {
-    setSchedule(prev => ({
-      ...prev,
-      [day]: { ...prev[day], blocks: [...prev[day].blocks, { start: '09:00', end: '18:00' }] }
-    }));
-  };
-
-  const removeTimeBlock = (day, index) => {
-    setSchedule(prev => {
-      const newBlocks = [...prev[day].blocks];
-      newBlocks.splice(index, 1);
-      return { ...prev, [day]: { ...prev[day], blocks: newBlocks } };
-    });
-  };
-
-  const updateTimeBlock = (day, index, field, value) => {
-    setSchedule(prev => {
-      const newBlocks = [...prev[day].blocks];
-      newBlocks[index] = { ...newBlocks[index], [field]: value };
-      return { ...prev, [day]: { ...prev[day], blocks: newBlocks } };
-    });
-  };
-
   const saveConfig = async (overrides = {}) => {
     setIsSaving(true);
-    setError('');
-
-    // Serialize Schedule
     const serializedHours = {};
-    Object.keys(schedule).forEach(day => {
-      if (schedule[day]?.active) {
-        serializedHours[day] = schedule[day].blocks
-          .filter(b => b.start && b.end)
-          .map(b => `${b.start}-${b.end}`);
-      } else {
-        serializedHours[day] = [];
-      }
-    });
-
-    const payload = {
-      ...formData,
-      ...overrides,
-      available_hours: serializedHours,
-      date_overrides: exceptions,
-      event_rules: eventRules
-    };
-
+    Object.keys(schedule).forEach(day => { serializedHours[day] = schedule[day]?.active ? schedule[day].blocks.filter(b => b.start && b.end).map(b => `${b.start}-${b.end}`) : []; });
+    const payload = { ...formData, ...overrides, available_hours: serializedHours, date_overrides: exceptions, event_rules: eventRules };
     try {
-      let updatedConfig;
-      if (selectedConfig?.id) {
-        const response = await api.put(`/configs/${selectedConfig.id}`, payload);
-        updatedConfig = response.data;
-      } else {
-        const response = await api.post('/configs/', payload);
-        updatedConfig = response.data;
-      }
+      const res = selectedConfig?.id ? await api.put(`/configs/${selectedConfig.id}`, payload) : await api.post('/configs/', payload);
       await fetchData();
-      handleSelectConfig(updatedConfig);
-      toast.success('Configuração salva com sucesso!');
-    } catch (err) {
-      toast.error('Erro ao salvar. Verifique os campos.');
-    } finally {
-      setIsSaving(false);
-    }
+      handleSelectConfig(res.data);
+      toast.success('Configuração salva!');
+    } catch (err) { toast.error('Erro ao salvar.'); }
+    finally { setIsSaving(false); }
   };
 
-  const handleSave = async (e) => {
-    e.preventDefault();
-    await saveConfig();
-  };
-
-  const handleDeleteClick = (id) => {
-    setDeleteConfirmation({ isOpen: true, configId: id });
-  };
-
-  const confirmDelete = async () => {
-    const { configId } = deleteConfirmation;
+  const handleSyncSheet = async (type) => {
+    if (!selectedConfig) return toast.error("Salve antes de sincronizar.");
+    const targetId = type === 'rag' ? formData.spreadsheet_rag_id : formData.spreadsheet_id;
+    if (!targetId) return toast.error("ID inválido.");
+    setIsSyncing(true);
     try {
-      await api.delete(`/configs/${configId}`);
-      await fetchData();
-      handleNewConfig();
-      toast.success('Configuração excluída com sucesso!');
-    } catch (err) {
-      toast.error('Erro ao excluir. Esta configuração pode estar em uso.');
-    } finally {
-      setDeleteConfirmation({ isOpen: false, configId: null });
-    }
+      const res = await api.post('/configs/sync_sheet', { config_id: selectedConfig.id, spreadsheet_id: targetId, type });
+      toast.success(`Sincronizado! ${res.data.sheets_found.length} abas encontradas.`);
+    } catch (err) { toast.error('Falha na sincronização.'); }
+    finally { setIsSyncing(false); }
   };
 
-  const handleCopyEmail = () => {
-    navigator.clipboard.writeText(BOT_EMAIL);
-    toast.success("Email copiado para a área de transferência!");
+  const handleSyncDrive = async () => {
+    if (!selectedConfig || !formData.drive_id) return toast.error("Configure o ID da pasta.");
+    setIsSyncing(true);
+    try {
+      const res = await api.post('/configs/sync_drive', { config_id: selectedConfig.id, drive_id: formData.drive_id });
+      toast.success(`Sincronizado! ${res.data.files_count} arquivos.`);
+    } catch (err) { toast.error('Falha na sincronização.'); }
+    finally { setIsSyncing(false); }
   };
 
-  // --- Criar Recursos Automaticamente (Provision) ---
   const handleProvision = async (type) => {
-    if (!selectedConfig?.id) return toast.error("Salve a configuração antes de criar os recursos.");
-
+    if (!selectedConfig?.id) return toast.error("Salve antes.");
     try {
       localStorage.setItem('pendingProvisionConfigId', selectedConfig.id);
       localStorage.setItem('pendingProvisionType', type);
       const redirectUri = window.location.origin + window.location.pathname;
-      const response = await api.get(`/configs/google-auth-url?redirect_uri=${encodeURIComponent(redirectUri)}`);
-      if (response.data.authorization_url) {
-        window.location.href = response.data.authorization_url;
-      }
-    } catch (err) {
-      toast.error('Erro ao iniciar login com o Google.');
-    }
+      const res = await api.get(`/configs/google-auth-url?redirect_uri=${encodeURIComponent(redirectUri)}`);
+      if (res.data.authorization_url) window.location.href = res.data.authorization_url;
+    } catch (err) { toast.error('Erro Google Auth.'); }
   };
 
-  const handleSyncSheet = async (type) => {
-    if (!selectedConfig) return toast.error("Salve a configuração antes de sincronizar.");
-    const targetId = type === 'rag' ? formData.spreadsheet_rag_id : formData.spreadsheet_id;
-    if (!targetId) return toast.error("Insira o ID ou Link da planilha.");
-
-    setIsSyncing(true);
-    setError('');
-    try {
-      const payload = { config_id: selectedConfig.id, spreadsheet_id: targetId, type };
-      const response = await api.post('/configs/sync_sheet', payload);
-
-      toast.success(`Sucesso! ${response.data.sheets_found.length} abas processadas (${type.toUpperCase()}). Vetores criados: ${response.data.vectors_created}`);
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Falha ao sincronizar. Verifique se compartilhou a planilha com o e-mail do robô.');
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleSyncDrive = async () => {
-    if (!selectedConfig) return toast.error("Salve a configuração antes de sincronizar.");
-    if (!formData.drive_id) return toast.error("Insira o ID da pasta do Drive.");
-
-    setIsSyncing(true);
-    setError('');
-    try {
-      const payload = { config_id: selectedConfig.id, drive_id: formData.drive_id };
-      const response = await api.post('/configs/sync_drive', payload);
-      toast.success(`Sucesso! ${response.data.files_count} arquivos encontrados. Vetores criados: ${response.data.vectors_created}`);
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Falha ao sincronizar Drive. Verifique o ID e o compartilhamento.');
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const openResource = (id, type) => {
-    if (!id) return;
-    const baseUrl = type === 'drive'
-      ? 'https://drive.google.com/drive/folders/'
-      : 'https://docs.google.com/spreadsheets/d/';
-    window.open(`${baseUrl}${id}`, '_blank');
-  };
-
-  const handleConnectCalendar = async () => {
-    if (!selectedConfig?.id) {
-      toast.error("Salve a configuração antes de conectar a agenda.");
-      return;
-    }
-
-    try {
-      localStorage.setItem('pendingCalendarConfigId', selectedConfig.id);
-      const redirectUri = window.location.origin + window.location.pathname;
-      localStorage.setItem('pendingCalendarRedirectUri', redirectUri);
-      const response = await api.get(`/google-contacts/calendar/auth/url?redirect_uri=${encodeURIComponent(redirectUri)}`);
-
-      if (response.data.authorization_url) {
-        window.location.href = response.data.authorization_url;
-      }
-    } catch (error) {
-      console.error(error);
-      toast.error("Erro ao iniciar conexão com Google.");
-    }
-  };
-
-  const handleDisconnectCalendar = async () => {
-    if (!selectedConfig?.id) return;
-
-    try {
-      await api.post(`/google-contacts/calendar/${selectedConfig.id}/disconnect`);
-      toast.success("Agenda desconectada.");
-      setFormData(prev => ({ ...prev, is_calendar_connected: false }));
-      fetchData();
-    } catch (error) {
-      console.error(error);
-      toast.error("Erro ao desconectar agenda.");
-    }
-  };
-
-  // --- Funcionalidades de Notificações ---
   const fetchDestinations = async () => {
     try {
-      let responseData = [];
-
-      if (selectedWhatsappInstanceId) {
-        const response = await api.get(`/prospecting/whatsapp/destinations/${selectedWhatsappInstanceId}`);
-        responseData = response.data || [];
-      } else {
-        // Fallback para contatos tradicionais caso não exista instância configurada
-        const response = await api.get('/contacts/');
-        responseData = (response.data || []).map(contact => ({
-          id: contact.id,
-          name: contact.nome || contact.name || 'Contato sem nome',
-          type: 'contact',
-          remoteJid: contact.whatsapp ? `${normalizeJid(contact.whatsapp)}@s.whatsapp.net` : null,
-        }));
-      }
-
-      // Normaliza cada destino para ter 'remoteJid' e tipo
-      const normalized = (responseData || []).map(dest => {
-        const remoteJid = dest.remoteJid ? normalizeJid(dest.remoteJid) : (dest.id ? normalizeJid(dest.id) : null);
-        return {
-          ...dest,
-          remoteJid,
-          type: dest.type || 'contact',
-          name: dest.name || dest.subject || dest.nome || 'Sem nome',
-        };
-      }).filter(dest => dest.remoteJid);
-
+      const res = selectedWhatsappInstanceId ? await api.get(`/prospecting/whatsapp/destinations/${selectedWhatsappInstanceId}`) : await api.get('/contacts/');
+      const normalized = (res.data || []).map(d => ({ ...d, remoteJid: d.remoteJid || (d.whatsapp ? `${normalizeJid(d.whatsapp)}@s.whatsapp.net` : null), name: d.name || d.subject || d.nome || 'Sem nome' })).filter(d => d.remoteJid);
       setDestinations(normalized);
-    } catch (err) {
-      console.error("Erro ao buscar destinos:", err);
-      toast.error("Não foi possível carregar a lista de contatos e grupos.");
-    }
+    } catch (e) { }
   };
-
-  const manualJid = useMemo(() => {
-    let digits = destSearchTerm.replace(/\D/g, '');
-    if (digits.length >= 10) {
-      if (!digits.startsWith('55')) digits = `55${digits}`;
-      return normalizeJid(`${digits}@s.whatsapp.net`);
-    }
-    return null;
-  }, [destSearchTerm]);
 
   const filteredDestinations = useMemo(() => {
     const term = destSearchTerm.toLowerCase().trim();
-    const termDigits = term.replace(/\D/g, '');
-
-    const uniqueMap = new Map();
-    destinations.forEach(d => {
-      const rawJid = d.remoteJid || (d.whatsapp ? `${normalizeJid(d.whatsapp)}@s.whatsapp.net` : null);
-      const jid = rawJid ? normalizeJid(rawJid) : null;
-      if (jid && !uniqueMap.has(jid)) {
-        uniqueMap.set(jid, { ...d, remoteJid: jid });
-      }
-    });
-
-    const uniqueList = Array.from(uniqueMap.values()).sort((a, b) => {
-      const nameA = (a.name || a.nome || a.subject || 'Sem nome').toLowerCase();
-      const nameB = (b.name || b.nome || b.subject || 'Sem nome').toLowerCase();
-      return nameA.localeCompare(nameB);
-    });
-
-    if (!term) return uniqueList;
-
-    return uniqueList.filter(dest => {
-      const name = (dest.name || dest.nome || dest.subject || '').toLowerCase();
-      const fullJid = (dest.remoteJid || '').toLowerCase();
-
-      if (name.includes(term)) return true;
-
-      const jidPrefix = fullJid.split('@')[0];
-
-      if (termDigits.length >= 8) {
-        const normalizedJid = normalizeJid(jidPrefix);
-        let searchVal = termDigits;
-        if (termDigits.length === 10 || termDigits.length === 11) {
-          searchVal = termDigits.startsWith('55') ? termDigits : `55${termDigits}`;
-        }
-        const normalizedTerm = normalizeJid(searchVal);
-        if (normalizedJid.includes(normalizedTerm)) return true;
-      }
-
-      return term.includes('@') ? fullJid.includes(term) : jidPrefix.includes(term);
-    });
+    if (!term) return destinations;
+    return destinations.filter(d => (d.name || '').toLowerCase().includes(term) || (d.remoteJid || '').toLowerCase().includes(term));
   }, [destinations, destSearchTerm]);
 
-  useEffect(() => {
-    if (activeTab === 'notifications') {
-      fetchDestinations();
-    }
-  }, [activeTab, selectedWhatsappInstanceId]);
+  useEffect(() => { if (activeTab === 'notifications') fetchDestinations(); }, [activeTab, selectedWhatsappInstanceId]);
 
-const labelClass = "block text-sm font-semibold text-gray-700 mb-1";
-const inputClass = "w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green resize-none";
+  if (isLoading) return <PageLoader message="Acessando base de conhecimento..." subMessage="Configurando conexões com Google Drive..." />;
 
-const dayLabels = {
-  seg: 'Segunda-feira', ter: 'Terça-feira', qua: 'Quarta-feira', qui: 'Quinta-feira',
-  sex: 'Sexta-feira', sab: 'Sábado', dom: 'Domingo'
-};
+  const dayLabels = { seg: 'Segunda', ter: 'Terça', qua: 'Quarta', qui: 'Quinta', sex: 'Sexta', sab: 'Sábado', dom: 'Domingo' };
 
-const formatDateKey = (date) => date.toISOString().split('T')[0];
+  return (
+    <div className="configs-page p-6 md:p-12 min-h-screen bg-[#f8fafc]">
+      <style>{DS_STYLE}</style>
+      <div className="max-w-[1600px] mx-auto flex flex-col gap-10">
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+          <div>
+            <h1 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">Contexto da IA <Database size={24} className="text-[#356854]" /></h1>
+            <p className="text-slate-400 mt-1.5 text-sm font-medium">Personalidade, conhecimento técnico e regras de negócio</p>
+          </div>
+          <button onClick={() => { setSelectedConfig(null); setFormData({ ...initialFormData, nome_config: 'Nova Persona' }); }} className="h-14 px-8 bg-[#356854] text-white font-black text-xs uppercase tracking-[0.1em] rounded-2xl shadow-xl shadow-emerald-900/10 hover:bg-[#2d5847] transition-all flex items-center gap-3">
+            <Plus size={20} /> Nova Configuração
+          </button>
+        </header>
 
-return (
-  <div className="p-6 md:p-10 bg-gray-50 h-full flex flex-col">
-    <div className="mb-8">
-      <h1 className="text-3xl font-bold text-gray-800">Configurações de Contexto</h1>
-      <p className="text-gray-500 mt-1">Crie e gerencie as fontes de conhecimento para a sua IA.</p>
-    </div>
-
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 min-h-0">
-      <div className="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg border flex flex-col">
-        <button onClick={handleNewConfig} className="w-full flex items-center justify-center gap-2 bg-brand-green text-white font-bold py-3 px-4 rounded-lg shadow-md hover:bg-brand-green-dark transition mb-6">
-          <Plus size={20} /> Nova Configuração
-        </button>
-        <h2 className="text-lg font-semibold text-gray-700 mb-3 px-1">Configurações Salvas</h2>
-        {isLoading ? <p className="text-center text-gray-500">Carregando...</p> : (
-          <ul className="space-y-2 overflow-y-auto">
-            {configs.map(config => (
-              <li key={config.id}>
-                <button onClick={() => handleSelectConfig(config)} className={`w-full text-left p-3 rounded-lg flex justify-between items-center transition-all duration-200 ${selectedConfig?.id === config.id ? 'bg-brand-green text-white font-semibold shadow-sm' : 'hover:bg-gray-100 hover:pl-4'}`}>
-                  <span className="truncate pr-2">{config.nome_config}</span>
-                  <ChevronRight size={18} />
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-10">
+          <aside className="lg:col-span-1 ds-surface p-8 flex flex-col gap-6">
+            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Personas Criadas</h3>
+            <div className="flex flex-col gap-2 overflow-y-auto custom-scrollbar pr-2 max-h-[600px]">
+              {configs.map(c => (
+                <button key={c.id} onClick={() => handleSelectConfig(c)} className={`w-full group text-left px-5 py-4 rounded-2xl transition-all flex items-center justify-between border ${selectedConfig?.id === c.id ? 'bg-[#356854] border-[#356854] text-white shadow-xl shadow-emerald-900/10' : 'bg-white border-slate-50 hover:border-emerald-100 text-slate-600'}`}>
+                  <span className="truncate font-black text-sm tracking-tight">{c.nome_config}</span>
+                  <ChevronRight size={16} className={selectedConfig?.id === c.id ? 'text-emerald-300' : 'text-slate-200 group-hover:text-emerald-500'} />
                 </button>
-              </li>
-            ))}
-            {configs.length === 0 && <p className="text-center text-gray-500 py-4">Nenhuma configuração salva.</p>}
-          </ul>
-        )}
-      </div>
+              ))}
+            </div>
+          </aside>
 
-      <div className="lg:col-span-2 bg-white p-6 md:p-8 rounded-xl shadow-lg border overflow-y-auto">
-        <form onSubmit={handleSave} className="flex flex-col h-full">
-          <div className="flex-grow">
-            <div className="flex items-center gap-4 mb-6">
-              <FileText className="text-brand-green" size={32} />
-              <input type="text" placeholder="Dê um nome para esta Configuração..." name="nome_config" value={formData.nome_config} onChange={handleFormChange} required className="w-full text-2xl font-bold text-gray-800 border-b-2 border-gray-200 focus:border-brand-green focus:outline-none py-2 bg-transparent" />
+          <main className="lg:col-span-3 ds-surface flex flex-col overflow-hidden border-none shadow-2xl shadow-slate-200/50">
+            <div className="p-10 bg-white border-b border-slate-50 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+              <div className="flex items-center gap-6 w-full md:w-auto">
+                <div className="w-16 h-16 rounded-[2rem] bg-emerald-50 flex items-center justify-center text-[#356854] shadow-sm shrink-0 border border-emerald-100/50"><Layout size={32} /></div>
+                <input type="text" placeholder="Nome da Persona..." name="nome_config" value={formData.nome_config} onChange={(e) => setFormData(p => ({ ...p, nome_config: e.target.value }))} className="w-full text-2xl font-black text-slate-800 placeholder:text-slate-200 focus:outline-none bg-transparent" />
+              </div>
+              <div className="flex items-center gap-3 w-full md:w-auto">
+                {selectedConfig && <button onClick={() => setDeleteConfirmation({ isOpen: true, configId: selectedConfig.id })} className="w-14 h-14 flex items-center justify-center bg-slate-50 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all border border-slate-100"><Trash2 size={24} /></button>}
+                <button onClick={() => saveConfig()} disabled={isSaving} className="flex-1 md:flex-none h-14 px-10 bg-[#356854] text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-xl shadow-emerald-900/10 hover:bg-[#2d5847] transition-all flex items-center gap-3 disabled:opacity-50">
+                  {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />} {isSaving ? 'Salvando...' : 'Salvar Persona'}
+                </button>
+              </div>
             </div>
 
-            <div className="flex border-b border-gray-200 mb-6">
-              <button type="button" onClick={() => setActiveTab('system')} className={`flex items-center gap-2 px-4 py-3 font-semibold transition-all ${activeTab === 'system' ? 'border-b-2 border-brand-green text-brand-green' : 'text-gray-500 hover:text-gray-800'}`}>
-                <LinkIcon size={18} /> Persona
-              </button>
-              <button type="button" onClick={() => setActiveTab('rag')} className={`flex items-center gap-2 px-4 py-3 font-semibold transition-all ${activeTab === 'rag' ? 'border-b-2 border-brand-green text-brand-green' : 'text-gray-500 hover:text-gray-800'}`}>
-                <Database size={18} /> Dados
-              </button>
-              <button type="button" onClick={() => setActiveTab('drive')} className={`flex items-center gap-2 px-4 py-3 font-semibold transition-all ${activeTab === 'drive' ? 'border-b-2 border-brand-green text-brand-green' : 'text-gray-500 hover:text-gray-800'}`}>
-                <Folder size={18} /> Arquivos
-              </button>
-              <button type="button" onClick={() => setActiveTab('fluxo')} className={`flex items-center gap-2 px-4 py-3 font-semibold transition-all ${activeTab === 'fluxo' ? 'border-b-2 border-brand-green text-brand-green' : 'text-gray-500 hover:text-gray-800'}`}>
-                <Network size={18} /> Fluxo
-              </button>
-              <button type="button" onClick={() => setActiveTab('notifications')} className={`flex items-center gap-2 px-4 py-3 font-semibold transition-all ${activeTab === 'notifications' ? 'border-b-2 border-brand-green text-brand-green' : 'text-gray-500 hover:text-gray-800'}`}>
-                <Bell size={18} /> Notificações
-              </button>
-              <button type="button" onClick={() => setActiveTab('agenda')} className={`flex items-center gap-2 px-4 py-3 font-semibold transition-all ${activeTab === 'agenda' ? 'border-b-2 border-brand-green text-brand-green' : 'text-gray-500 hover:text-gray-800'}`}>
-                <Calendar size={18} /> Agenda
-              </button>
-            </div>
+            <nav className="flex border-b border-slate-50 bg-slate-50/30 overflow-x-auto no-scrollbar">
+              {[
+                { id: 'system', icon: User, label: 'Instruções' },
+                { id: 'rag', icon: Database, label: 'Conhecimento' },
+                { id: 'drive', icon: Folder, label: 'Media Center' },
+                { id: 'fluxo', icon: Network, label: 'Workflow' },
+                { id: 'notifications', icon: Bell, label: 'Transbordo' },
+                { id: 'agenda', icon: Calendar, label: 'Agenda' },
+              ].map(t => (
+                <button key={t.id} onClick={() => setActiveTab(t.id)} className={`config-tab-btn ${activeTab === t.id ? 'active' : ''}`}><t.icon size={18} /> {t.label}</button>
+              ))}
+            </nav>
 
-            {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded border border-red-200 text-sm">{error}</div>}
-
-            {activeTab === 'system' && (
-              <div className="animate-fade-in space-y-6">
-                {!formData.spreadsheet_id ? (
-                  <div className="p-6 bg-blue-50 border border-blue-100 rounded-lg shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                    <div>
-                      <div className="flex items-center gap-2 font-semibold text-brand-green mb-1">
-                        <FileText size={20} />
-                        <h3>Criar Planilha de Instruções</h3>
-                      </div>
-                      <p className="text-sm text-gray-700">Conecte sua conta do Google para criar a planilha automaticamente.</p>
-                    </div>
-                    <div className="flex-shrink-0">
-                      <button type="button" onClick={() => handleProvision('system')} disabled={isSyncing || !selectedConfig?.id} className="flex items-center gap-3 bg-white border border-gray-300 text-gray-700 px-6 py-2 rounded-md font-bold whitespace-nowrap hover:bg-gray-50 transition-colors disabled:opacity-50 shadow-sm">
-                        {isSyncing ? <Loader2 className="animate-spin mx-auto" size={20} /> : (
-                          <>
-                            <img src="https://img.icons8.com/color/24/000000/google-logo.png" alt="Google" className="w-5 h-5" />
-                            Conectar e Criar
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                    <div>
-                      <h3 className="font-bold text-brand-green flex items-center gap-2"><CheckCircle size={20} /> Planilha de Instruções Ativa</h3>
-                      <p className="text-sm text-gray-500 mt-1">A planilha já foi gerada e está conectada a esta configuração.</p>
-                    </div>
-                    <div className="flex flex-wrap gap-3">
-                      <button type="button" onClick={() => openResource(formData.spreadsheet_id, 'sheet')} className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 transition-colors font-medium text-gray-700">
-                        <ExternalLink size={18} /> Abrir Planilha
-                      </button>
-                      <button type="button" onClick={() => handleSyncSheet('system')} disabled={isSyncing} className="flex items-center gap-2 bg-brand-green text-white font-bold py-2 px-6 rounded shadow-md hover:bg-brand-green-dark transition-all disabled:bg-gray-400">
-                        {isSyncing ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />} Sincronizar
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Instruções System */}
-                <div className="p-4 bg-blue-50 rounded-lg border border-blue-100 text-sm text-gray-700 space-y-4 mt-6">
-                  <div className="flex items-center gap-2 font-semibold text-brand-green">
-                    <Info size={18} />
-                    <h4>Como funciona a Planilha de Instruções (System Prompt)</h4>
-                  </div>
-                  <p className="text-gray-600">
-                    Esta planilha define a personalidade, as regras de negócio e o comportamento geral da sua Inteligência Artificial.
-                  </p>
-                  <ul className="list-disc list-inside space-y-2 text-gray-600">
-                    <li><strong>Persona:</strong> Defina o tom de voz, o nome do assistente e como ele deve se comportar.</li>
-                    <li><strong>Regras:</strong> Crie categorias com diretrizes claras do que a IA deve ou não fazer (ex: "Sempre ofereça um desconto à vista", "Nunca passe informações de concorrentes").</li>
-                    <li><strong>Sincronização:</strong> Sempre que alterar algo na planilha no Google Sheets, clique em <strong>Sincronizar</strong> aqui para que a IA aprenda as novas regras e passe a utilizá-las.</li>
-                  </ul>
+            <div className="p-10 flex-1 overflow-y-auto custom-scrollbar bg-white min-h-[600px]">
+              {activeTab === 'system' && (
+                <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <ResourceCard title="Instruções de Personalidade" desc="Google Sheet contendo tom de voz, gatilhos e regras de comportamento." id={formData.spreadsheet_id} type="sheet" onOpen={() => window.open(`https://docs.google.com/spreadsheets/d/${formData.spreadsheet_id}`, '_blank')} onSync={() => handleSyncSheet('system')} onProvision={() => handleProvision('system')} isSyncing={isSyncing} selectedConfigId={selectedConfig?.id} />
+                  <InfoBox icon={Shield} title="Privacidade e Segurança">As instruções são processadas localmente pelo nosso motor de IA e nunca são usadas para treinar modelos públicos. Seus dados estão protegidos sob nossa arquitetura de isolamento por tenant.</InfoBox>
                 </div>
-              </div>
-            )}
+              )}
 
-            {activeTab === 'rag' && (
-              <div className="animate-fade-in space-y-6">
-                {!formData.spreadsheet_rag_id ? (
-                  <div className="p-6 bg-blue-50 border border-blue-100 rounded-lg shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              {activeTab === 'rag' && (
+                <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <ResourceCard title="Base de Conhecimento Dinâmica" desc="Planilha para alimentar o motor RAG com FAQs, detalhes técnicos e preços." id={formData.spreadsheet_rag_id} type="sheet" onOpen={() => window.open(`https://docs.google.com/spreadsheets/d/${formData.spreadsheet_rag_id}`, '_blank')} onSync={() => handleSyncSheet('rag')} onProvision={() => handleProvision('rag')} isSyncing={isSyncing} selectedConfigId={selectedConfig?.id} />
+                  <InfoBox icon={Zap} title="Busca Inteligente">Nossa tecnologia de vetores permite que a IA encontre a resposta exata mesmo que o cliente use termos diferentes dos cadastrados.</InfoBox>
+                </div>
+              )}
+
+              {activeTab === 'drive' && (
+                <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <ResourceCard title="Repositório de Mídia" desc="Pasta no Google Drive contendo fotos, vídeos e PDFs que a IA enviará aos leads." id={formData.drive_id} type="drive" onOpen={() => window.open(`https://drive.google.com/drive/folders/${formData.drive_id}`, '_blank')} onSync={handleSyncDrive} onProvision={() => handleProvision('drive')} isSyncing={isSyncing} selectedConfigId={selectedConfig?.id} />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="ds-card p-8 border-none bg-slate-50">
+                      <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-[#356854] mb-4 shadow-sm"><Check size={20} /></div>
+                      <h4 className="font-black text-slate-800 text-sm mb-2">Compartilhamento</h4>
+                      <p className="text-xs text-slate-500 leading-relaxed">Certifique-se de que a pasta esteja compartilhada com o e-mail: <br /><strong className="text-emerald-600 block mt-1">{BOT_EMAIL}</strong></p>
+                      <button onClick={() => { navigator.clipboard.writeText(BOT_EMAIL); toast.success("Copiado!"); }} className="mt-4 flex items-center gap-2 text-[10px] font-black uppercase text-[#356854] hover:underline tracking-widest"><Copy size={12} /> Copiar E-mail</button>
+                    </div>
+                    <div className="ds-card p-8 border-none bg-slate-50">
+                      <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-[#356854] mb-4 shadow-sm"><Info size={20} /></div>
+                      <h4 className="font-black text-slate-800 text-sm mb-2">Dica de Envio</h4>
+                      <p className="text-xs text-slate-500 leading-relaxed">A IA usará o nome do arquivo para entender o contexto. Nomeie seus arquivos como "Tabela_Preços_2024.pdf".</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'fluxo' && (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col gap-8 h-[600px]">
+                  <div className="flex justify-between items-center">
                     <div>
-                      <div className="flex items-center gap-2 font-semibold text-brand-green mb-1">
-                        <Database size={20} />
-                        <h3>Criar Base de Conhecimento</h3>
-                      </div>
-                      <p className="text-sm text-gray-700">Conecte sua conta do Google para criar a base de conhecimento automaticamente.</p>
+                      <h3 className="text-lg font-black text-slate-800 leading-tight">Visualização do Funil</h3>
+                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Configure o caminho lógico da conversação</p>
                     </div>
-                    <div className="flex-shrink-0">
-                      <button type="button" onClick={() => handleProvision('rag')} disabled={isSyncing || !selectedConfig?.id} className="flex items-center gap-3 bg-white border border-gray-300 text-gray-700 px-6 py-2 rounded-md font-bold whitespace-nowrap hover:bg-gray-50 transition-colors disabled:opacity-50 shadow-sm">
-                        {isSyncing ? <Loader2 className="animate-spin mx-auto" size={20} /> : (
-                          <>
-                            <img src="https://img.icons8.com/color/24/000000/google-logo.png" alt="Google" className="w-5 h-5" />
-                            Conectar e Criar
-                          </>
-                        )}
-                      </button>
-                    </div>
+                    <button onClick={() => setIsWorkflowModalOpen(true)} className="h-12 px-6 bg-[#356854] text-white font-black text-[10px] uppercase tracking-widest rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#2d5847] transition-all flex items-center gap-2"><Maximize2 size={16} /> Abrir Editor</button>
                   </div>
-                ) : (
-                  <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  <div className="flex-1 bg-slate-50 border border-slate-100 rounded-[2rem] relative overflow-hidden group cursor-pointer" onClick={() => setIsWorkflowModalOpen(true)}>
+                    <div className="absolute inset-0 z-10 bg-[#1b3d2f]/10 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center backdrop-blur-[2px]">
+                      <div className="bg-white px-8 py-4 rounded-2xl shadow-2xl font-black text-xs uppercase tracking-widest text-[#356854] flex items-center gap-3"><Network size={20} /> Clique para Editar</div>
+                    </div>
+                    <WorkflowPreview workflowJson={formData.workflow_json} />
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'notifications' && (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div>
-                      <h3 className="font-bold text-brand-green flex items-center gap-2"><CheckCircle size={20} /> Base RAG Ativa</h3>
-                      <p className="text-sm text-gray-500 mt-1">Sua base de conhecimento já está conectada.</p>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Canal de Disparo</label>
+                      <select value={selectedWhatsappInstanceId || ''} onChange={(e) => setSelectedWhatsappInstanceId(Number(e.target.value))} className="config-input bg-white">
+                        <option value="">Selecione uma instância...</option>
+                        {whatsappInstances.map(i => <option key={i.id} value={i.id}>{i.name || `ID: ${i.id}`}</option>)}
+                      </select>
                     </div>
-                    <div className="flex flex-wrap gap-3">
-                      <button type="button" onClick={() => openResource(formData.spreadsheet_rag_id, 'sheet')} className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 transition-colors font-medium text-gray-700">
-                        <ExternalLink size={18} /> Abrir Planilha
-                      </button>
-                      <button type="button" onClick={() => handleSyncSheet('rag')} disabled={isSyncing} className="flex items-center gap-2 bg-brand-green text-white font-bold py-2 px-6 rounded shadow-md hover:bg-brand-green-dark transition-all disabled:bg-gray-400">
-                        {isSyncing ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />} Sincronizar
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Instruções RAG */}
-                <div className="p-4 bg-blue-50 rounded-lg border border-blue-100 text-sm text-gray-700 space-y-4 mt-6">
-                  <div className="flex items-center gap-2 font-semibold text-brand-green">
-                    <Info size={18} />
-                    <h4>Como funciona a Base de Conhecimento (RAG)</h4>
-                  </div>
-                  <p className="text-gray-600">
-                    Esta planilha atua como a memória estendida da sua IA, permitindo que ela consulte informações volumosas e dados estruturados em tempo real.
-                  </p>
-                  <ul className="list-disc list-inside space-y-2 text-gray-600">
-                    <li><strong>Catálogo de Produtos:</strong> Liste seus produtos, serviços, preços, links e descrições detalhadas. A IA pesquisará nesta base antes de responder perguntas de vendas ou técnicas.</li>
-                    <li><strong>Perguntas Frequentes (FAQ):</strong> Adicione as dúvidas mais recorrentes dos seus clientes com as respostas exatas que a IA deve fornecer.</li>
-                    <li><strong>Sincronização:</strong> Toda vez que adicionar novos produtos ou alterar preços, lembre-se de clicar em <strong>Sincronizar</strong>.</li>
-                  </ul>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'drive' && (
-              <div className="animate-fade-in space-y-6">
-                {!formData.drive_id ? (
-                  <div className="p-6 bg-indigo-50 border border-indigo-100 rounded-lg shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                     <div>
-                      <div className="flex items-center gap-2 font-semibold text-green-800 mb-1">
-                        <Folder size={20} />
-                        <h3>Criar Pasta no Google Drive</h3>
-                      </div>
-                      <p className="text-sm text-gray-700">Conecte sua conta do Google para criar a pasta automaticamente.</p>
-                    </div>
-                    <div className="flex-shrink-0">
-                      <button type="button" onClick={() => handleProvision('drive')} disabled={isSyncing || !selectedConfig?.id} className="flex items-center gap-3 bg-white border border-gray-300 text-gray-700 px-6 py-2 rounded-md font-bold whitespace-nowrap hover:bg-gray-50 transition-colors disabled:opacity-50 shadow-sm">
-                        {isSyncing ? <Loader2 className="animate-spin mx-auto" size={20} /> : (
-                          <>
-                            <img src="https://img.icons8.com/color/24/000000/google-logo.png" alt="Google" className="w-5 h-5" />
-                            Conectar e Criar
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                    <div>
-                      <h3 className="font-bold text-brand-green flex items-center gap-2"><CheckCircle size={20} /> Pasta Conectada</h3>
-                      <p className="text-sm text-gray-500 mt-1">Pasta no Drive configurada e pronta para receber ficheiros.</p>
-                    </div>
-                    <div className="flex flex-wrap gap-3">
-                      <button type="button" onClick={() => openResource(formData.drive_id, 'drive')} className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 transition-colors font-medium text-gray-700">
-                        <ExternalLink size={18} /> Abrir Pasta
-                      </button>
-                      <button type="button" onClick={handleSyncDrive} disabled={isSyncing} className="flex items-center gap-2 bg-brand-green text-white font-bold py-2 px-6 rounded shadow-md hover:bg-brand-green-dark transition-all disabled:bg-gray-400">
-                        {isSyncing ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />} Sincronizar
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Instruções Drive */}
-                <div className="p-4 bg-blue-50 rounded-lg border border-blue-100 text-sm text-gray-700 space-y-4 mt-6">
-                  <div className="flex items-center gap-2 font-semibold text-brand-green">
-                    <Info size={18} />
-                    <h4>Como funciona a integração com o Google Drive</h4>
-                  </div>
-                  <p className="text-gray-600">
-                    Conecte uma pasta do Google Drive para que a IA consiga buscar e enviar arquivos de mídia (fotos, vídeos, PDFs) diretamente aos seus clientes durante o atendimento.
-                  </p>
-                  <ul className="list-disc list-inside space-y-2 text-gray-600">
-                    <li><strong>Organização:</strong> É recomendado criar subpastas dentro da pasta principal para categorizar seus arquivos (ex: /Tabelas de Preços, /Fotos de Produtos). A IA reconhece toda a estrutura.</li>
-                    <li><strong>Nomes Claros e Descritivos:</strong> Dê nomes explicativos aos arquivos (ex: "Foto_Painel_Ripado_Freijo.jpg" ou "Catalogo_Servicos_2025.pdf"). A IA utiliza o nome dos arquivos para entender qual conteúdo enviar quando o cliente solicitar.</li>
-                    <li><strong>Sincronização:</strong> Ao subir novos arquivos para a pasta ou renomear arquivos existentes, clique sempre no botão <strong>Sincronizar</strong> nesta tela para a IA catalogar as novidades.</li>
-                  </ul>
-                </div>
-              </div>
-            )}
-
-            {/* CONTEÚDO ABA: FLUXO VISUAL */}
-            {activeTab === 'fluxo' && (
-              <div className="animate-fade-in space-y-6 h-[400px] flex flex-col">
-                <div className="flex justify-between items-end">
-                  <div>
-                    <h3 className="font-bold text-gray-800">Mapeamento de Fluxo da Conversa</h3>
-                    <p className="text-sm text-gray-500">Desenhe os passos que a IA deve seguir durante a interação com o cliente.</p>
-                  </div>
-                  <button type="button" onClick={() => setIsWorkflowModalOpen(true)} className="flex items-center gap-2 bg-brand-green text-white font-bold py-2 px-4 rounded-md shadow-sm hover:bg-brand-green-dark transition-all">
-                    <Maximize2 size={16} /> Editar Fluxo
-                  </button>
-                </div>
-
-                {/* Preview do Canvas */}
-                <div className="flex-1 bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl relative overflow-hidden group">
-                  <div className="absolute inset-0 z-10 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer backdrop-blur-[1px]" onClick={() => setIsWorkflowModalOpen(true)}>
-                    <div className="bg-white px-6 py-3 rounded-full shadow-lg font-bold text-brand-green flex items-center gap-2">
-                      <Network size={20} /> Clique para expandir e editar
-                    </div>
-                  </div>
-                  <WorkflowPreview workflowJson={formData.workflow_json} />
-                </div>
-              </div>
-            )}
-
-            {/* CONTEÚDO ABA: NOTIFICAÇÕES */}
-            {activeTab === 'notifications' && (
-              <div className="animate-fade-in space-y-6">
-                <div>
-                  <label className={labelClass}>Instância WhatsApp</label>
-                  <select
-                    className={`${inputClass} w-full`}
-                    value={selectedWhatsappInstanceId || ''}
-                    onChange={(e) => setSelectedWhatsappInstanceId(Number(e.target.value) || null)}
-                  >
-                    <option value="">Selecione a instância</option>
-                    {whatsappInstances.map(inst => (
-                      <option key={inst.id} value={inst.id}>{inst.name || inst.instance_name || `#${inst.id}`}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="relative">
-                  <label className={labelClass}>Destino das Notificações (WhatsApp)</label>
-                  <div className="flex items-center gap-4">
-                    <div className="relative flex-grow" ref={dropdownRef}>
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                      <input
-                        type="text"
-                        placeholder="Pesquisar contato ou grupo..."
-                        value={destSearchTerm}
-                        onChange={(e) => {
-                          setDestSearchTerm(e.target.value);
-                          setIsDropdownOpen(true);
-                        }}
-                        onFocus={() => setIsDropdownOpen(true)}
-                        className={`${inputClass} pl-10 pr-16`}
-                      />
-                      <div className="absolute inset-y-0 right-0 flex items-center pr-2">
-                        <button
-                          type="button"
-                          onClick={() => setFormData(prev => ({ ...prev, notification_active: !prev.notification_active }))}
-                          title={formData.notification_active ? "Desativar Notificações" : "Ativar Notificações"}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand-green focus:ring-offset-2 ${formData.notification_active ? 'bg-brand-green' : 'bg-gray-200'}`}
-                        >
-                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${formData.notification_active ? 'translate-x-6' : 'translate-x-1'}`} />
-                        </button>
-                      </div>
-
-                      {/* Dropdown de Destinos */}
-                      {isDropdownOpen && (
-                        <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto custom-scrollbar divide-y divide-gray-100">
-                          {filteredDestinations.map(dest => {
-                            const isGroup = dest.remoteJid?.endsWith('@g.us');
-                            const isSelected = normalizeJid(formData.notification_destination) === normalizeJid(dest.remoteJid);
-                            return (
-                              <button
-                                key={dest.id || dest.remoteJid}
-                                type="button"
-                                onClick={() => {
-                                  const normalized = normalizeJid(dest.remoteJid);
-                                  setFormData(prev => ({ ...prev, notification_destination: normalized }));
-                                  setDestSearchTerm(normalized);
-                                  setIsDropdownOpen(false);
-                                }}
-                                className={`w-full flex items-center gap-3 p-3 text-left transition-colors hover:bg-gray-50 ${isSelected ? 'bg-green-50' : ''}`}
-                              >
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${isGroup ? 'bg-purple-100 text-purple-600' : 'bg-green-100 text-brand-green'}`}>
-                                  {isGroup ? <Users size={20} /> : <User size={20} />}
-                                </div>
-                                <div className="flex-grow min-w-0">
-                                  <p className={`text-sm font-semibold truncate ${isSelected ? 'text-brand-green-dark' : 'text-gray-800'}`}>
-                                    {dest.nome || dest.name || dest.subject || (isGroup ? "Grupo sem nome" : "Contato sem nome")}
-                                  </p>
-                                  <p className="text-xs text-gray-500 truncate">{dest.remoteJid || dest.whatsapp}</p>
-                                </div>
-                                {isSelected && <CheckCircle size={18} className="text-brand-green flex-shrink-0" />}
-                              </button>
-                            );
-                          })}
-
-                          {/* Opção Manual */}
-                          {manualJid && !filteredDestinations.some(d => normalizeJid(d.remoteJid || d.whatsapp) === manualJid) && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setFormData(prev => ({ ...prev, notification_destination: manualJid }));
-                                setDestSearchTerm(manualJid);
-                                setIsDropdownOpen(false);
-                              }}
-                              className={`w-full flex items-center gap-3 p-3 text-left transition-colors hover:bg-green-50 ${formData.notification_destination === manualJid ? 'bg-green-50' : ''}`}
-                            >
-                              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-green-100 text-brand-green">
-                                <Plus size={20} />
-                              </div>
-                              <div className="flex-grow min-w-0">
-                                <p className="text-sm font-semibold text-gray-800">Adicionar número manualmente</p>
-                                <p className="text-xs text-gray-500 truncate">{manualJid}</p>
-                              </div>
-                              {formData.notification_destination === manualJid && <CheckCircle size={18} className="text-brand-green flex-shrink-0" />}
-                            </button>
-                          )}
-
-                          {destinations.length === 0 && !manualJid && (
-                            <div className="p-8 text-center text-gray-500 italic text-sm">Nenhum contato carregado.</div>
-                          )}
-                          {destSearchTerm && filteredDestinations.length === 0 && !manualJid && (
-                            <div className="p-8 text-center text-gray-500 italic text-sm">Nenhum contato encontrado.</div>
-                          )}
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Status do Transbordo</label>
+                      <div onClick={() => setFormData(p => ({ ...p, notification_active: !p.notification_active }))} className={`h-14 px-6 rounded-2xl flex items-center justify-between cursor-pointer transition-all border-2 ${formData.notification_active ? 'bg-emerald-50 border-emerald-500' : 'bg-slate-50 border-slate-100'}`}>
+                        <span className="text-sm font-black text-slate-700">{formData.notification_active ? 'HABILITADO' : 'DESABILITADO'}</span>
+                        <div className={`w-10 h-6 rounded-full relative transition-all ${formData.notification_active ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                          <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-md transition-all ${formData.notification_active ? 'right-1' : 'left-1'}`} />
                         </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Instruções Notificações */}
-                <div className="p-4 bg-blue-50 rounded-lg border border-blue-100 text-sm text-gray-700 space-y-4 mt-6">
-                  <div className="flex items-center gap-2 font-semibold text-brand-green">
-                    <Info size={18} />
-                    <h4>Como funcionam as Notificações</h4>
-                  </div>
-                  <p className="text-gray-600">
-                    Ao habilitar esta opção, o sistema enviará alertas automáticos para o contato ou grupo selecionado sempre que a IA transferir um atendimento.
-                  </p>
-                  <ul className="list-disc list-inside space-y-2 text-gray-600">
-                    <li><strong>Destinos:</strong> É possível mandar as notificações tanto para um contato individual quanto para um grupo.</li>
-                    <li><strong>Contato não listado:</strong> Se não estiver aparecendo o contato desejado na busca, você pode digitar o seu número completo (com DDD) e adicionar manualmente. Lembre-se de salvar a configuração depois.</li>
-                  </ul>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'agenda' && (
-              <div className="animate-fade-in space-y-6">
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <label className={labelClass}>Integração com Google Agenda</label>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className={`flex-grow px-3 py-2 border rounded-md flex items-center justify-between gap-2 ${formData.is_calendar_connected ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-50 border-gray-300 text-gray-500'}`}>
-                      <div className="flex items-center gap-4">
-                        {formData.is_calendar_connected ? <Check size={18} /> : <Calendar size={18} />}
-                        <span className="text-sm font-medium">
-                          {formData.is_calendar_connected ? "Agenda conectada" : "Nenhuma agenda conectada"}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className="text-sm text-gray-600">Ativar Agenda na IA</span>
-                        <button
-                          type="button"
-                          onClick={() => setFormData(prev => ({ ...prev, is_calendar_active: !prev.is_calendar_active }))}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand-green focus:ring-offset-2 ${formData.is_calendar_active ? 'bg-brand-green' : 'bg-gray-200'}`}
-                        >
-                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${formData.is_calendar_active ? 'translate-x-6' : 'translate-x-1'}`} />
-                        </button>
                       </div>
                     </div>
-
-                    {formData.is_calendar_connected ? (
-                      <button type="button" onClick={handleDisconnectCalendar} className="flex items-center gap-2 bg-red-100 text-red-700 font-bold py-2 px-6 rounded-lg shadow-md hover:bg-red-200 transition-all">
-                        <Trash2 size={20} /> Desconectar
-                      </button>
-                    ) : (
-                      <button type="button" onClick={handleConnectCalendar} className="flex items-center gap-2 bg-brand-green text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-brand-green-dark transition-all">
-                        <LinkIcon size={20} /> Conectar
-                      </button>
+                  </div>
+                  <div className="relative" ref={dropdownRef}>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Destinatário do Alerta</label>
+                    <div className="relative">
+                      <input type="text" placeholder="Nome do gerente ou grupo do WhatsApp..." value={destSearchTerm} onChange={(e) => { setDestSearchTerm(e.target.value); setIsDropdownOpen(true); }} onFocus={() => setIsDropdownOpen(true)} className="config-input pl-12 pr-12" />
+                      {formData.notification_destination && <CheckCircle size={20} className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-500" />}
+                    </div>
+                    {isDropdownOpen && (
+                      <div className="absolute z-50 mt-4 w-full bg-white border border-slate-100 rounded-[2rem] shadow-2xl max-h-80 overflow-y-auto custom-scrollbar animate-in slide-in-from-top-2">
+                        {filteredDestinations.map(d => (
+                          <button key={d.remoteJid} onClick={() => { setFormData(p => ({ ...p, notification_destination: d.remoteJid })); setDestSearchTerm(d.name); setIsDropdownOpen(false); }} className="w-full flex items-center gap-4 p-5 hover:bg-emerald-50/50 transition-all text-left border-b border-slate-50 last:border-0">
+                            <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400">{d.remoteJid.includes('g.us') ? <Users size={18} /> : <User size={18} />}</div>
+                            <div className="flex-1 truncate">
+                              <p className="text-sm font-black text-slate-800 truncate">{d.name}</p>
+                              <p className="text-[10px] text-slate-400 font-bold uppercase truncate">{d.remoteJid}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
+              )}
 
-                {/* --- AGENDA LOGIC LAYERS --- */}
-                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                  <div className="p-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+              {activeTab === 'agenda' && (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-10">
+                  <div className="ds-card ai-gradient border-none p-10 flex flex-col md:flex-row justify-between items-center gap-8">
                     <div>
-                      <h3 className="font-bold text-gray-700 flex items-center gap-2">
-                        <Clock size={18} className="text-brand-green" />
-                        Horários de Atendimento
-                      </h3>
-                      <p className="text-xs text-gray-500 mt-1">Defina seu padrão semanal de disponibilidade.</p>
+                      <h3 className="text-2xl font-black text-white mb-2">Google Agenda</h3>
+                      <p className="text-emerald-100/70 text-sm font-medium">Permite que a IA verifique sua disponibilidade e marque reuniões automaticamente.</p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      {formData.is_calendar_connected ? (
+                        <button onClick={async () => { await api.post(`/google-contacts/calendar/${selectedConfig.id}/disconnect`); fetchData(); toast.success("Desconectado."); }} className="h-12 px-6 bg-white/10 text-white font-black text-[10px] uppercase tracking-widest rounded-xl hover:bg-white/20 transition-all flex items-center gap-2 border border-white/10 backdrop-blur-md">Desconectar</button>
+                      ) : (
+                        <button onClick={async () => { const res = await api.get(`/google-contacts/calendar/auth/url?redirect_uri=${encodeURIComponent(window.location.origin + window.location.pathname)}`); localStorage.setItem('pendingCalendarConfigId', selectedConfig.id); window.location.href = res.data.authorization_url; }} className="h-12 px-8 bg-white text-[#1b3d2f] font-black text-[10px] uppercase tracking-widest rounded-xl shadow-xl hover:bg-emerald-50 transition-all flex items-center gap-2">Conectar Agenda</button>
+                      )}
+                      <div className="flex items-center gap-3 bg-white/10 p-2 rounded-2xl border border-white/10">
+                        <span className="text-[10px] font-black text-white uppercase tracking-widest ml-2">Agenda na IA</span>
+                        <button onClick={() => setFormData(p => ({ ...p, is_calendar_active: !p.is_calendar_active }))} className={`w-10 h-6 rounded-full relative transition-all ${formData.is_calendar_active ? 'bg-emerald-400' : 'bg-white/20'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-md transition-all ${formData.is_calendar_active ? 'right-1' : 'left-1'}`} /></button>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="p-4">
-                    {/* CAMADA 1: PADRÃO SEMANAL */}
-                    <div className="space-y-2">
-                      {['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'].map(day => (
-                        <div key={day} className="flex items-start gap-3 py-2 border-b border-gray-100 last:border-0">
-                          <div className="w-24 pt-1.5 flex-shrink-0">
-                            <label className="flex items-center cursor-pointer">
-                              <div className="relative">
-                                <input type="checkbox" className="sr-only" checked={schedule[day]?.active || false} onChange={() => toggleDay(day)} />
-                                <div className={`block w-8 h-5 rounded-full transition-colors ${schedule[day]?.active ? 'bg-brand-green' : 'bg-gray-300'}`}></div>
-                                <div className={`dot absolute left-1 top-1 bg-white w-3 h-3 rounded-full transition-transform ${schedule[day]?.active ? 'transform translate-x-3' : ''}`}></div>
-                              </div>
-                              <span className="ml-2 text-sm font-medium text-gray-700">{dayLabels[day].split('-')[0]}</span>
-                            </label>
-                          </div>
-
-                          <div className="flex-1 flex flex-wrap gap-2 items-center">
-                            {!schedule[day]?.active ? (
-                              <span className="text-sm text-gray-400 italic py-1"></span>
-                            ) : (
-                              <>
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-10">
+                    <div className="ds-card border-none bg-slate-50/50">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Disponibilidade Semanal</h4>
+                      <div className="space-y-3">
+                        {['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'].map(day => (
+                          <div key={day} className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 bg-white rounded-2xl border border-slate-100">
+                            <div className="w-28 flex items-center gap-3">
+                              <button onClick={() => setSchedule(p => ({ ...p, [day]: { ...p[day], active: !p[day].active } }))} className={`w-10 h-6 rounded-full relative transition-all ${schedule[day]?.active ? 'bg-emerald-500' : 'bg-slate-200'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-md transition-all ${schedule[day]?.active ? 'right-1' : 'left-1'}`} /></button>
+                              <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">{dayLabels[day]}</span>
+                            </div>
+                            {schedule[day]?.active && (
+                              <div className="flex-1 flex flex-wrap gap-2">
                                 {schedule[day].blocks.map((block, idx) => (
-                                  <div key={idx} className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded border border-gray-200">
-                                    <input type="time" value={block.start} onChange={(e) => updateTimeBlock(day, idx, 'start', e.target.value)} className="bg-transparent text-sm outline-none w-20 text-center" />
-                                    <span className="text-gray-400 text-xs">-</span>
-                                    <input type="time" value={block.end} onChange={(e) => updateTimeBlock(day, idx, 'end', e.target.value)} className="bg-transparent text-sm outline-none w-20 text-center" />
-                                    <button type="button" onClick={() => removeTimeBlock(day, idx)} className="text-gray-400 hover:text-red-500 ml-1"><X size={14} /></button>
+                                  <div key={idx} className="flex items-center gap-2 bg-emerald-50/50 p-2 rounded-xl border border-emerald-100/50">
+                                    <input type="time" value={block.start} onChange={(e) => { const nb = [...schedule[day].blocks]; nb[idx].start = e.target.value; setSchedule(p => ({ ...p, [day]: { ...p[day], blocks: nb } })); }} className="bg-transparent text-xs font-black text-[#356854] outline-none w-16" />
+                                    <span className="text-[#356854]/40">—</span>
+                                    <input type="time" value={block.end} onChange={(e) => { const nb = [...schedule[day].blocks]; nb[idx].end = e.target.value; setSchedule(p => ({ ...p, [day]: { ...p[day], blocks: nb } })); }} className="bg-transparent text-xs font-black text-[#356854] outline-none w-16" />
+                                    <button onClick={() => { const nb = schedule[day].blocks.filter((_, i) => i !== idx); setSchedule(p => ({ ...p, [day]: { ...p[day], blocks: nb } })); }} className="text-emerald-400 hover:text-rose-500 transition-all"><X size={14} /></button>
                                   </div>
                                 ))}
-                                <button type="button" onClick={() => addTimeBlock(day)} className="p-1 text-brand-green hover:bg-green-50 rounded transition-colors" title="Adicionar intervalo">
-                                  <Plus size={18} />
-                                </button>
-                              </>
+                                <button onClick={() => setSchedule(p => ({ ...p, [day]: { ...p[day], blocks: [...p[day].blocks, { start: '09:00', end: '18:00' }] } }))} className="w-8 h-8 flex items-center justify-center bg-white border border-slate-100 rounded-lg text-emerald-500 hover:bg-emerald-50 transition-all"><Plus size={16} /></button>
+                              </div>
                             )}
                           </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-6">
+                      <div className="ds-card">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6">Regras de Agendamento</h4>
+                        <div className="grid grid-cols-2 gap-6">
+                          <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Duração (Min)</label><input type="number" value={eventRules.duration} onChange={(e) => setEventRules(p => ({ ...p, duration: parseInt(e.target.value) }))} className="config-input" /></div>
+                          <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Intervalo (Min)</label><input type="number" value={eventRules.increment} onChange={(e) => setEventRules(p => ({ ...p, increment: parseInt(e.target.value) }))} className="config-input" /></div>
                         </div>
-                      ))}
+                      </div>
                     </div>
                   </div>
                 </div>
-
-              </div>
-            )}
-          </div>
-
-          <div className="flex justify-end items-center gap-4 pt-6 mt-auto">
-            {selectedConfig && (<button type="button" onClick={() => handleDeleteClick(selectedConfig.id)} className="font-semibold text-red-600 hover:text-red-800 flex items-center gap-2 mr-auto mb-6"><Trash2 size={16} /> Excluir</button>)}
-            <button type="submit" disabled={isSaving} className="flex items-center gap-2 bg-brand-green text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-brand-green-dark transition-all disabled:bg-gray-400 disabled:shadow-none mb-6">
-              {isSaving ? <><Loader2 className="animate-spin" size={20} /> Salvando...</> : <><Save size={20} /> Salvar</>}
-            </button>
-          </div>
-        </form>
+              )}
+            </div>
+          </main>
+        </div>
       </div>
+
+      {deleteConfirmation.isOpen && (
+        <Modal onClose={() => setDeleteConfirmation({ isOpen: false, configId: null })} maxWidth="max-w-md">
+          <div className="p-10 text-center">
+            <div className="w-20 h-20 bg-rose-50 rounded-[2rem] flex items-center justify-center text-rose-500 mx-auto mb-6 shadow-sm"><AlertTriangle size={40} /></div>
+            <h3 className="text-2xl font-black text-slate-800 mb-2">Excluir Persona?</h3>
+            <p className="text-slate-400 text-sm font-medium mb-8">Esta ação irá apagar permanentemente todas as configurações e treinamentos desta persona.</p>
+            <div className="flex gap-4">
+              <button onClick={() => setDeleteConfirmation({ isOpen: false, configId: null })} className="flex-1 h-14 bg-slate-50 text-slate-400 font-black text-xs uppercase tracking-widest rounded-2xl hover:bg-slate-100 transition-all">Cancelar</button>
+              <button onClick={async () => { await api.delete(`/configs/${deleteConfirmation.configId}`); fetchData(); setDeleteConfirmation({ isOpen: false, configId: null }); toast.success("Excluído."); }} className="flex-1 h-14 bg-rose-500 text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-xl shadow-rose-900/10 hover:bg-rose-600 transition-all">Sim, Excluir</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {isWorkflowModalOpen && (
+        <WorkflowEditorModal
+          isOpen={isWorkflowModalOpen}
+          onClose={() => setIsWorkflowModalOpen(false)}
+          initialWorkflow={formData.workflow_json}
+          onSave={async (newWorkflow) => { setFormData(p => ({ ...p, workflow_json: newWorkflow })); await saveConfig({ workflow_json: newWorkflow }); setIsWorkflowModalOpen(false); }}
+        />
+      )}
     </div>
-    {/* MODAL DE CONSTRUÇÃO DE FLUXO */}
-    <WorkflowEditorModal
-      isOpen={isWorkflowModalOpen}
-      onClose={() => setIsWorkflowModalOpen(false)}
-      initialWorkflow={formData.workflow_json}
-      onSave={(currentWorkflow) => {
-        setFormData(prev => ({ ...prev, workflow_json: currentWorkflow }));
-      }}
-      onSaveAndPersist={(currentWorkflow) => saveConfig({ workflow_json: currentWorkflow })}
-    />
-    {deleteConfirmation.isOpen && (
-      <DeleteConfirmationModal onClose={() => setDeleteConfirmation({ isOpen: false, configId: null })} onConfirm={confirmDelete} />
-    )}
-  </div>
-);
+  );
 }
 
 export default Configs;

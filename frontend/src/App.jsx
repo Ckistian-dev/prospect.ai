@@ -50,9 +50,7 @@ function App() {
           <Route index element={<Navigate to="/dashboard" />} />
         </Route>
 
-        {/* Redirecionamentos Inteligentes */}
-        {/* Se tentar acessar /dashboard direto (link antigo), redireciona para a nova estrutura /app/dashboard se estiver logado */}
-        <Route path="/dashboard" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
+
 
         {/* Catch-all: Qualquer rota desconhecida vai para a Home ou Login */}
         <Route path="*" element={<Navigate to="/" />} />

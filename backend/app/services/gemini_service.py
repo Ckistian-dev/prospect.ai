@@ -337,10 +337,9 @@ class GeminiService:
         return context
 
     def _format_history_for_prompt(self, db_history: List[dict]) -> str:
-        """Formata o histórico de conversa em uma string simples e legível."""
+        """Formata o histórico de conversa em uma string detalhada e legível."""
         
         # --- LÓGICA DE RESET ---
-        # Filtra o histórico para enviar ao prompt apenas o que ocorreu APÓS o último '/reset'
         start_index = 0
         for i, msg in enumerate(db_history):
             content = str(msg.get("content", "")).strip()
@@ -350,32 +349,54 @@ class GeminiService:
         filtered_history = db_history[start_index:]
         
         history_lines = []
+        current_date = None
+        
         for msg in filtered_history:
-            # Define o remetente como 'ia' ou 'contato'
-            role = "IA" if msg.get("role") == "assistant" else "Contato"
-            content = str(msg.get("content", "")).strip()
-            content = content.replace('\n', '\\n')
-            
-            # Adiciona timestamp se disponível
-            timestamp = msg.get("timestamp")
-            if timestamp:
+            # Processamento de Timestamp
+            ts = msg.get("timestamp")
+            formatted_time = ""
+            msg_date = ""
+            if ts:
                 try:
-                    # Assume timestamp é uma string ISO
-                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    # Tenta converter de string ISO ou timestamp numérico
+                    if isinstance(ts, str):
+                        dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                    else:
+                        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                    
                     # Ajusta para Brasília (UTC-3)
                     dt_br = dt.astimezone(timezone(timedelta(hours=-3)))
-                    formatted_time = dt_br.strftime('%d/%m/%Y %H:%M:%S')
+                    formatted_time = dt_br.strftime('%H:%M:%S')
+                    msg_date = dt_br.strftime('%d/%m/%Y')
                 except (ValueError, TypeError):
-                    formatted_time = str(timestamp)
-                line = f"[{formatted_time}] {role}: {content}"
-            else:
-                line = f"{role}: {content}"
+                    formatted_time = str(ts)
             
-            # Adiciona a linha apenas se houver conteúdo
+            # Cabeçalho de Data (se mudou)
+            if msg_date and msg_date != current_date:
+                history_lines.append(f"\n--- Data: {msg_date} ---")
+                current_date = msg_date
+            
+            # Identificação do Remetente
+            role = "IA" if msg.get("role") == "assistant" else "Contato"
+            sender_name = msg.get("senderName") or ""
+            if sender_name and role == "Contato":
+                role = f"Contato ({sender_name})"
+            
+            content = str(msg.get("content", "")).strip()
+            msg_type = msg.get("type", "text")
+            
+            # Tratamento de Mídia
+            if msg_type != "text":
+                media_label = f"[{msg_type.upper()}]"
+                content = f"{media_label} {content}" if content else media_label
+            
+            # Substitui quebras de linha para manter o log limpo
+            content = content.replace('\n', ' \\n ')
+            
             if content:
+                line = f"[{formatted_time}] {role}: {content}"
                 history_lines.append(line)
         
-        # Se não houver histórico, retorna uma mensagem padrão
         if not history_lines:
             return "Nenhuma mensagem no histórico."
             
@@ -732,14 +753,15 @@ class GeminiService:
         question: str,
         start_date: Optional[datetime],
         end_date: Optional[datetime],
-        prospect_ids: Optional[List[int]] = None
+        prospect_ids: Optional[List[int]] = None,
+        use_all_contacts: bool = False
     ) -> Dict[str, Any]:
         """Usa a IA para analisar dados de prospecção com base em uma pergunta do usuário."""
         from app.crud import crud_prospect, crud_config
 
-        logger.info(f"Iniciando análise de dados de prospecção para user_id={user.id} com a pergunta: '{question[:100]}...'")
+        logger.info(f"Iniciando análise de dados de prospecção para user_id={user.id} (use_all_contacts={use_all_contacts}) com a pergunta: '{question[:100]}...'")
 
-        # Coletar dados relevantes
+        # Coletar dados relevantes de prospecção (campanhas)
         prospects = await crud_prospect.get_prospects_by_user(db, user_id=user.id)
         simplified_prospects = []
         for p in prospects:
@@ -763,14 +785,28 @@ class GeminiService:
                 "created_at": p.created_at.isoformat(), "contacts_summary": contacts_summary
             })
 
+        # Coletar dados de "Todos os Contatos" da Evolution se solicitado
+        evolution_context = ""
+        if use_all_contacts:
+            evolution_context = await self._get_evolution_contacts_context(
+                db, user, start_date=start_date, end_date=end_date, prospect_ids=prospect_ids
+            )
+
         analysis_prompt = {
-            "objetivo": "Você é um analista de vendas sênior. Analise os dados de prospecção fornecidos para responder à pergunta do usuário. Sua resposta DEVE ser um objeto JSON.",
+            "objetivo": "Você é um analista sênior. Sua tarefa é analisar os dados fornecidos e, especialmente para os contatos gerais do WhatsApp, fornecer um RESUMO das conversas, identificando temas, intenções e urgências. Sua resposta DEVE ser um objeto JSON.",
             "pergunta_usuario": question,
             "dados_contexto": {
                 "resumo_usuario": {"id": user.id, "email": user.email},
-                "prospeccoes_no_periodo": simplified_prospects,
+                "prospeccoes_campanhas": simplified_prospects,
+                "contatos_gerais_whatsapp": evolution_context,
                 "contexto_temporal": self._get_time_context().strip()
             },
+            "instrucoes_adicionais": (
+                "1. Foco Total no Conteúdo: Para 'contatos_gerais_whatsapp', ignore completamente a ausência de status ou campanhas. Foque 100% no TEXTO das mensagens. "
+                "2. Sumarização: Resuma os principais tópicos discutidos nos contatos mais ativos. "
+                "3. Identificação de Leads: Aponte quais contatos parecem ser oportunidades reais de venda ou suporte crítico com base no que disseram. "
+                "4. Diagnóstico: O diagnóstico deve refletir o que está acontecendo nas conversas, não a organização do CRM."
+            ),
             "formato_resposta_obrigatorio": {
                 "descricao": "Sua resposta DEVE ser um único objeto JSON válido. Siga a estrutura sugerida.",
                 "estrutura_sugerida": {
@@ -788,6 +824,104 @@ class GeminiService:
         
         response, _ = await self._generate_with_retry_async(json.dumps(analysis_prompt, ensure_ascii=False, cls=SetEncoder), db, user, force_json=True)
         return self._parse_json_response(response.text)
+
+    async def _get_evolution_contacts_context(
+        self, 
+        db: AsyncSession, 
+        user: models.User, 
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        prospect_ids: Optional[List[int]] = None,
+        limit: int = 150
+    ) -> str:
+        """Busca e resume contatos e mensagens da Evolution para dar contexto à IA."""
+        from app.services.whatsapp_service import get_whatsapp_service
+        ws = get_whatsapp_service()
+        
+        logger.info(f"Gerando contexto de contatos gerais. Filtro Data: {start_date} até {end_date}. Prospect IDs: {prospect_ids}")
+        
+        # Busca instâncias do usuário
+        stmt = select(models.WhatsappInstance).where(models.WhatsappInstance.user_id == user.id)
+        res = await db.execute(stmt)
+        instances = res.scalars().all()
+        
+        if not instances:
+            return "Nenhuma instância do WhatsApp vinculada encontrada."
+
+        # Se houver prospect_ids, pegamos os nomes das campanhas para filtrar
+        campaign_names = []
+        if prospect_ids:
+            stmt_camp = select(models.Prospect.nome_prospeccao).where(models.Prospect.id.in_(prospect_ids))
+            res_camp = await db.execute(stmt_camp)
+            campaign_names = res_camp.scalars().all()
+
+        all_context = []
+        for inst in instances:
+            if not inst.instance_id: continue
+            
+            # Busca os chats (fetch_chats já faz a correlação com as campanhas no DB local)
+            chats = await ws.fetch_chats(inst.instance_id, limit=limit, db=db, user_id=user.id)
+            
+            if not chats: continue
+
+            # Filtra os chats se houver campanhas selecionadas
+            if campaign_names:
+                chats = [c for c in chats if c.get('campanha') in campaign_names]
+            
+            if not chats: continue
+            
+            all_context.append(f"### INSTÂNCIA: {inst.instance_name}")
+            
+            # Para não sobrecarregar a IA, pegamos o histórico dos chats mais relevantes
+            # Mas com limite maior para "histórico completo" conforme solicitado
+            for i, chat in enumerate(chats[:50]): 
+                history_text = ""
+                try:
+                    # Busca o histórico respeitando o filtro de data do dashboard
+                    history = await ws.fetch_chat_history(
+                        inst.instance_name, 
+                        chat['remoteJid'], 
+                        count=100, 
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                    
+                    # FALLBACK: Se não houver mensagens no período mas o chat for relevante, 
+                    # pegamos as últimas 15 para dar contexto básico à IA.
+                    if not history:
+                        history = await ws.fetch_chat_history(inst.instance_name, chat['remoteJid'], count=15)
+                        history_text = self._format_history_for_prompt(history)
+                        if history_text != "Nenhuma mensagem no histórico.":
+                            history_text = f"(Fora do período selecionado)\n{history_text}"
+                    else:
+                        history_text = self._format_history_for_prompt(history)
+
+                except Exception as e:
+                    logger.warning(f"Erro ao buscar histórico para {chat['remoteJid']}: {e}")
+                
+                tipo_chat = "GRUPO" if chat.get('isGroup') else "INDIVIDUAL"
+                chat_info = f"- **{chat['name']}** ({chat['remoteJid']}) [{tipo_chat}]\n"
+                
+                # Só adiciona campanha/situação se forem valores reais e relevantes
+                campanha = chat.get('campanha')
+                situacao = chat.get('situacao')
+                if campanha and campanha not in ["Sem Campanha", "N/A"]:
+                    chat_info += f"  Campanha: {campanha}\n"
+                if situacao and situacao not in ["Sem Situação", "N/A"]:
+                    chat_info += f"  Situação: {situacao}\n"
+                
+                unread = chat.get('unreadCount', 0)
+                if unread > 0:
+                    chat_info += f"  Mensagens Não Lidas: {unread}\n"
+
+                if history_text and history_text != "Nenhuma mensagem no histórico.":
+                    # Indenta o histórico para melhor leitura da IA
+                    indented_history = history_text.replace('\n', '\n    ')
+                    chat_info += f"  Histórico Recente:\n    {indented_history}\n"
+                
+                all_context.append(chat_info)
+                
+        return "\n".join(all_context)
 
 _gemini_service_instance = None
 def get_gemini_service():

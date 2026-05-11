@@ -1,8 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, MessageSquareQuote, Bot, Settings, GitBranch, LogOut, Rocket, BluetoothConnectedIcon, Phone, Link, MessageSquareText } from 'lucide-react';
+import { 
+    LayoutDashboard, Users, Bot, GitBranch, 
+    LogOut, Rocket, Link, MessageSquareText, 
+    Settings, ChevronRight, Zap, Menu, X
+} from 'lucide-react';
 
-const Sidebar = ({ isSuperUser }) => {
+const Sidebar = memo(({ isSuperUser, isMobileMenuOpen, setIsMobileMenuOpen }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const navigate = useNavigate();
 
@@ -18,60 +22,111 @@ const Sidebar = ({ isSuperUser }) => {
         { icon: Bot, name: 'Contexto', path: '/configs' },
         { icon: Link, name: 'Conexão', path: '/whatsapp' },
         { icon: MessageSquareText, name: 'Mensagens', path: '/mensagens' },
-        { icon: Rocket, name: 'Principal', path: '/prospecting' },
+        { icon: Rocket, name: 'Campanhas', path: '/prospecting' },
     ];
 
     return (
         <aside 
-            className={`relative h-screen bg-brand-green-dark text-white p-4 flex flex-col transition-all duration-300 ease-in-out ${isExpanded ? 'w-64' : 'w-20'}`}
+            className={`
+                fixed inset-y-0 left-0 z-50 flex flex-col bg-[#12281f] border-r border-[#ffffff0a] transition-all duration-300 ease-in-out
+                lg:static lg:translate-x-0
+                ${isMobileMenuOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'}
+                ${isExpanded ? 'lg:w-64' : 'lg:w-[72px]'}
+            `}
             onMouseEnter={() => setIsExpanded(true)}
             onMouseLeave={() => setIsExpanded(false)}
         >
-            {/* MODIFICADO: Seção do Logo/Título */}
-            <div className="flex items-center mb-10" style={{ height: '40px' }}>
-                {/* Ícone 'P' - sempre presente, mas o texto ao lado depende do estado */}
-                <div className="bg-brand-green-light/20 w-12 h-12 flex items-center justify-center rounded-lg flex-shrink-0">
-                    <span className="font-bold text-2xl text-white">P</span>
+            {/* Background Texture/Overlay */}
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(53,104,84,0.15),transparent_70%)] pointer-events-none" />
+
+            {/* Logo Section */}
+            <div className="flex items-center h-16 px-4 shrink-0 overflow-hidden border-b border-[#ffffff0a] relative z-10">
+                <div className="w-10 h-10 flex items-center justify-center bg-gradient-to-br from-[#356854] to-[#1b3d2f] rounded-xl shadow-lg shadow-emerald-900/40 shrink-0 border border-[#ffffff10]">
+                    <Zap size={20} className="text-white fill-white/20" />
                 </div>
-                {/* Texto 'Prospect' - aparece suavemente ao expandir */}
-                <span className={`font-bold text-2xl whitespace-nowrap overflow-hidden transition-all duration-300 ${isExpanded ? 'w-auto opacity-100 ml-3' : 'w-0 opacity-0'}`}>
-                    rospectAI
+                <span className={`
+                    ml-3 font-black text-xl text-white tracking-tight transition-all duration-300 whitespace-nowrap
+                    ${isExpanded || isMobileMenuOpen ? 'opacity-100 max-w-full' : 'opacity-0 max-w-0'}
+                `}>
+                    Prospect<span className="text-[#4ade80]">AI</span>
                 </span>
+                
+                {isMobileMenuOpen && (
+                    <button onClick={() => setIsMobileMenuOpen(false)} className="ml-auto text-slate-400 hover:text-white lg:hidden">
+                        <X size={20} />
+                    </button>
+                )}
             </div>
             
-            {!isSuperUser ? (
-                <nav className="flex-1 flex flex-col space-y-2">
-                    {navItems.map(item => (
+            {/* Navigation */}
+            <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto custom-scrollbar overflow-x-hidden relative z-10">
+                {!isSuperUser && navItems.map(item => (
                     <NavLink
                         key={item.name}
                         to={item.path}
-                        className={({ isActive }) =>
-                            `flex items-center p-3 rounded-lg transition-colors duration-200 ${
-                            isActive ? 'bg-brand-green-light/30' : 'hover:bg-brand-green-light/20'
-                        }`
-                        }
+                        onClick={() => setIsMobileMenuOpen(false)}
+                        className={({ isActive }) => `
+                            flex items-center h-11 px-3 rounded-xl transition-all duration-200 group relative
+                            ${isActive 
+                                ? 'bg-[#356854]/30 text-white shadow-sm' 
+                                : 'text-[#a7f3d0]/60 hover:bg-[#ffffff08] hover:text-white'}
+                        `}
                     >
-                        <item.icon size={24} className="flex-shrink-0" />
-                        <span className={`ml-4 font-medium whitespace-nowrap overflow-hidden transition-all duration-200 ${isExpanded ? 'opacity-100 w-full' : 'opacity-0 w-0'}`}>
-                            {item.name}
-                        </span>
-                    </NavLink>
-                    ))}
-                </nav>
-            ) : (
-                <div className="flex-1" />
-            )}
+                        {({ isActive }) => (
+                            <>
+                                <item.icon size={20} className={`shrink-0 transition-transform duration-300 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
+                                <span className={`
+                                    ml-3 text-[13px] font-bold transition-all duration-300 whitespace-nowrap overflow-hidden
+                                    ${isExpanded || isMobileMenuOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0'}
+                                `}>
+                                    {item.name}
+                                </span>
+                                
+                                {isActive && (
+                                    <div className="absolute left-0 top-2 bottom-2 w-1 bg-[#4ade80] rounded-r-full shadow-[0_0_12px_rgba(74,222,128,0.5)]" />
+                                )}
 
-            <div className="border-t border-white/20 pt-4">
-                 <button onClick={handleLogout} className="flex items-center p-3 rounded-lg w-full hover:bg-brand-green-light/20 transition-colors duration-200">
-                    <LogOut size={24} className="flex-shrink-0" />
-                    <span className={`ml-4 font-medium whitespace-nowrap text-start overflow-hidden transition-all duration-200 ${isExpanded ? 'opacity-100 w-full' : 'opacity-0 w-0'}`}>
-                        Sair
+                                {/* Collapsed Tooltip */}
+                                {!isExpanded && !isMobileMenuOpen && (
+                                    <div className="fixed left-[80px] bg-[#12281f] text-white text-[11px] font-bold px-3 py-1.5 rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity shadow-2xl z-[100] whitespace-nowrap border border-[#ffffff10]">
+                                        {item.name}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </NavLink>
+                ))}
+            </nav>
+
+            {/* Footer / Logout */}
+            <div className="p-3 border-t border-[#ffffff0a] relative z-10">
+                <button 
+                    onClick={handleLogout} 
+                    className="flex items-center w-full h-11 px-3 rounded-xl text-[#fda4af]/60 hover:bg-rose-500/10 hover:text-rose-400 transition-all group relative"
+                >
+                    <LogOut size={20} className="shrink-0" />
+                    <span className={`
+                        ml-3 text-[13px] font-bold transition-all duration-300 whitespace-nowrap overflow-hidden
+                        ${isExpanded || isMobileMenuOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0'}
+                    `}>
+                        Sair do Sistema
                     </span>
+                    {!isExpanded && !isMobileMenuOpen && (
+                        <div className="fixed left-[80px] bg-rose-950 text-rose-100 text-[11px] font-bold px-3 py-1.5 rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity shadow-2xl z-[100] whitespace-nowrap border border-rose-900/30">
+                            Sair
+                        </div>
+                    )}
                 </button>
             </div>
+            
+            <style>{`
+                .custom-scrollbar::-webkit-scrollbar { width: 3px; }
+                .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+                .custom-scrollbar::-webkit-scrollbar-thumb { background: #35685450; border-radius: 10px; }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #35685480; }
+            `}</style>
         </aside>
     );
-};
+});
 
 export default Sidebar;

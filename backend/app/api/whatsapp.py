@@ -181,13 +181,61 @@ async def delete_instance(
     await crud_user.delete_whatsapp_instance(db, instance)
     return {"status": "deleted"}
 
+@router.get("/{instance_id}/contacts", summary="Listar contatos da instância (Evolution API direta)")
+async def list_instance_contacts(
+    instance_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
+):
+    """
+    Chama POST /chat/findContacts/{instance} da Evolution API para retornar
+    todos os contatos conhecidos da instância. Não requer acesso ao banco da Evolution.
+    """
+    instance = await crud_user.get_whatsapp_instance(db, instance_id, current_user.id)
+    if not instance or not instance.instance_id:
+        raise HTTPException(status_code=404, detail="Instância não encontrada ou não inicializada.")
+
+    contacts = await whatsapp_service.fetch_contacts_from_db(instance.instance_id)
+    return contacts
+
+
+@router.get("/{instance_id}/messages-api/{remote_jid:path}", summary="Buscar mensagens de um contato (Evolution API direta)")
+async def get_messages_from_api(
+    instance_id: int,
+    remote_jid: str,
+    count: int = Query(50, description="Quantidade de mensagens a retornar"),
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(dependencies.get_current_active_user),
+    whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
+):
+    """
+    Chama POST /chat/findMessages/{instance} da Evolution API para retornar
+    o histórico de mensagens de um JID específico.
+    """
+    instance = await crud_user.get_whatsapp_instance(db, instance_id, current_user.id)
+    if not instance or not instance.instance_id:
+        raise HTTPException(status_code=404, detail="Instância não encontrada ou não inicializada.")
+
+    # Busca histórico via Evolution DB
+    messages = await whatsapp_service.fetch_chat_history(
+        instance.instance_name, 
+        remote_jid, 
+        count=count, 
+        evolution_instance_id=instance.instance_id
+    )
+    # Formata para o padrão esperado
+    return [whatsapp_service.format_evolution_message(m) for m in reversed(messages)]
+
+
 @router.get("/{instance_id}/chats", summary="Listar conversas da instância (Evolution DB)")
 async def list_instance_chats(
     instance_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(dependencies.get_current_active_user),
     whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
-    limit: int = Query(100, description="Limite de conversas a retornar"),
+    limit: int = Query(20, description="Limite de conversas a retornar"),
+    offset: int = Query(0, description="Pular N conversas para paginação"),
 ):
     instance = await crud_user.get_whatsapp_instance(db, instance_id, current_user.id)
     if not instance or not instance.instance_id:
@@ -197,6 +245,7 @@ async def list_instance_chats(
     return await whatsapp_service.fetch_chats(
         instance.instance_id, 
         limit=limit, 
+        offset=offset,
         db=db, 
         user_id=current_user.id
     )

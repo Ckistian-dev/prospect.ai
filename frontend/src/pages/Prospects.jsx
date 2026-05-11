@@ -1,121 +1,93 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/axiosConfig';
-import { Play, Pause, Trash2, Edit, Loader2, Search, MessageSquare, ChevronDown, Table as TableIcon, AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Image as ImageIcon, Download } from 'lucide-react';
+import { Play, Pause, Trash2, Edit, Loader2, Search, MessageSquare, ChevronDown, Table as TableIcon, AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, Image as ImageIcon, Download, Target, Filter, Star, Phone, MoreVertical, Layout, Database, CheckCircle, Activity, User } from 'lucide-react';
 import toast from 'react-hot-toast';
+import PageLoader from '../components/common/PageLoader';
 
-// --- COMPONENTES INTERNOS DE MODAL ---
+// ─── DESIGN SYSTEM ──────────────────────────────────────────────────────────
+const DS_STYLE = `
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
+.prospects-page { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+.prospects-page h1, .prospects-page h2, .prospects-page h3, .prospects-page h4 { font-family: 'Plus Jakarta Sans', sans-serif; }
+.ds-surface { background: #ffffff; border-radius: 2.5rem; border: 1px solid rgba(0,0,0,0.05); box-shadow: 0 4px 30px rgba(0,0,0,0.02); }
+.ds-card { background: #ffffff; border-radius: 1.5rem; border: 1px solid rgba(0,0,0,0.05); transition: all 0.3s ease; }
+.status-pill { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 800; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+.lead-score-badge {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
+    font-size: 0.875rem;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+}
+.chat-bubble-ai { background: #356854; color: white; border-radius: 1.5rem 1.5rem 0.25rem 1.5rem; }
+.chat-bubble-user { background: #f1f5f9; color: #1e293b; border-radius: 1.5rem 1.5rem 1.5rem 0.25rem; }
+`;
 
-const Modal = ({ onClose, children }) => {
-    useEffect(() => {
-        const handleKeyDown = (event) => {
-            if (event.key === 'Escape') onClose();
-        };
-        document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [onClose]);
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 backdrop-blur-sm animate-fade-in" onClick={onClose}>
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 animate-fade-in-up" onClick={e => e.stopPropagation()}>
-                {children}
-            </div>
+const Modal = ({ onClose, children, maxWidth = "max-w-2xl" }) => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose}>
+        <div className={`bg-white w-full ${maxWidth} relative overflow-hidden animate-in zoom-in duration-300`} style={{ borderRadius: '2.5rem', boxShadow: '0 40px 100px rgba(0,0,0,0.25)' }} onClick={e => e.stopPropagation()}>
+            <button onClick={onClose} className="absolute top-8 right-8 w-10 h-10 flex items-center justify-center bg-slate-50 text-slate-400 hover:text-slate-600 rounded-xl transition-all z-10">✕</button>
+            {children}
         </div>
-    );
-};
+    </div>
+);
 
 const ImageMessage = ({ messageId, mimeType, fallbackContent }) => {
     const [imageUrl, setImageUrl] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
-
     useEffect(() => {
-        const fetchImage = async () => {
+        (async () => {
             try {
-                const response = await api.get(`/prospecting/messages/${messageId}/media`);
-                if (response.data.base64) {
-                    const base64 = response.data.base64;
-                    const src = base64.startsWith('data:') ? base64 : `data:${mimeType || 'image/jpeg'};base64,${base64}`;
-                    setImageUrl(src);
-                } else {
-                    setError(true);
-                }
-            } catch (err) {
-                setError(true);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchImage();
+                const res = await api.get(`/prospecting/messages/${messageId}/media`);
+                if (res.data.base64) setImageUrl(res.data.base64.startsWith('data:') ? res.data.base64 : `data:${mimeType || 'image/jpeg'};base64,${res.data.base64}`);
+                else setError(true);
+            } catch (err) { setError(true); }
+            finally { setLoading(false); }
+        })();
     }, [messageId, mimeType]);
-
-    if (loading) return <div className="flex items-center gap-2 text-gray-500 text-sm p-2"><Loader2 size={14} className="animate-spin" /> Carregando imagem...</div>;
-    if (error) return <p className="whitespace-pre-wrap text-sm text-gray-600 italic">{fallbackContent}</p>;
-
-    return (
-        <div className="space-y-1">
-            <img
-                src={imageUrl}
-                alt="Imagem da conversa"
-                className="rounded-lg max-w-full h-auto max-h-72 object-cover"
-            />
-        </div>
-    );
+    if (loading) return <div className="p-4 flex items-center gap-2 text-slate-400 text-[10px] font-bold uppercase tracking-widest"><Loader2 size={12} className="animate-spin" /> Carregando...</div>;
+    if (error) return <p className="text-xs text-slate-400 italic p-4">{fallbackContent}</p>;
+    return <img src={imageUrl} alt="" className="rounded-2xl w-full h-auto max-h-80 object-cover p-1 shadow-sm" />;
 };
 
 export const ConversationModal = ({ onClose, conversation, contactIdentifier }) => {
-    const chatContainerRef = useRef(null);
-
-    useEffect(() => {
-        if (chatContainerRef.current) {
-            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-        }
-    }, [conversation]);
-
+    const chatRef = useRef(null);
+    useEffect(() => { if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight; }, [conversation]);
     let messages = [];
-    try {
-        const parsedData = JSON.parse(conversation);
-        if (Array.isArray(parsedData)) {
-            messages = parsedData;
-        }
-    } catch (e) {
-    }
-
+    try { const parsed = JSON.parse(conversation); if (Array.isArray(parsed)) messages = parsed; } catch (e) { }
     return (
-        <Modal onClose={onClose}>
+        <Modal onClose={onClose} maxWidth="max-w-3xl">
             <div className="h-[80vh] flex flex-col">
-                <div className="p-4 border-b bg-gray-50 rounded-t-lg">
-                    <h2 className="text-lg font-semibold text-gray-800">Conversa com {contactIdentifier}</h2>
-                </div>
-                <div ref={chatContainerRef} className="flex-1 p-4 md:p-6 overflow-y-auto space-y-4 bg-[url('https://i.redd.it/qwd83nc4xxf41.jpg')] bg-cover bg-center">
-                    {messages.map((msg, index) => {
-                        const isAssistant = msg.role === 'assistant';
-                        // Detecta se é imagem pelo novo campo mediaType ou pelo padrão de texto antigo
-                        const isImage = msg.mediaType === 'image' || (msg.content && msg.content.includes('[Análise de Mídia]'));
-
+                <header className="p-10 bg-white border-b border-slate-50">
+                    <h2 className="text-2xl font-black text-slate-800 tracking-tight leading-none mb-2">Histórico de Atendimento</h2>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">{contactIdentifier}</p>
+                </header>
+                <div ref={chatRef} className="flex-1 overflow-y-auto p-10 space-y-6 bg-slate-50/30 custom-scrollbar">
+                    {messages.length > 0 ? messages.map((msg, i) => {
+                        const isAi = msg.role === 'assistant';
+                        const isImg = msg.mediaType === 'image' || (msg.content?.includes('[Análise de Mídia]'));
                         return (
-                            <div key={index} className={`flex items-end gap-2 w-full ${isAssistant ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`max-w-xs md:max-w-md p-3 rounded-2xl shadow-sm break-words ${isAssistant ? 'bg-[#005c4b] text-white rounded-br-none' : 'bg-white text-gray-800 rounded-bl-none'}`}>
-                                    {!isAssistant && msg.senderName && (
-                                        <div className="text-[11px] font-bold text-brand-green mb-1 opacity-80">
-                                            {msg.senderName}
-                                        </div>
-                                    )}
-                                    {isImage ? (
-                                        <ImageMessage messageId={msg.id} mimeType={msg.mimeType} fallbackContent={msg.content} />
-                                    ) : (
-                                        <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
-                                    )}
+                            <div key={i} className={`flex ${isAi ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`max-w-[85%] p-6 shadow-sm ${isAi ? 'chat-bubble-ai' : 'chat-bubble-user'}`}>
+                                    {!isAi && msg.senderName && <div className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-2">{msg.senderName}</div>}
+                                    {isImg ? <ImageMessage messageId={msg.id} mimeType={msg.mimeType} fallbackContent={msg.content} /> : <p className="text-sm font-medium leading-relaxed whitespace-pre-wrap">{msg.content}</p>}
+                                    <div className={`text-[9px] font-bold mt-2 text-right opacity-40 uppercase tracking-tight ${isAi ? 'text-white' : 'text-slate-400'}`}>
+                                        {new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </div>
                                 </div>
                             </div>
                         );
-                    })}
-                    {messages.length === 0 && (
-                        <div className="flex items-center justify-center h-full">
-                            <p className="text-center text-gray-500 bg-white/50 backdrop-blur-sm p-3 rounded-lg italic">
-                                Nenhum histórico de conversa.
-                            </p>
-                        </div>
+                    }) : (
+                        <div className="h-full flex flex-col items-center justify-center opacity-20"><MessageSquare size={64} className="mb-6" /><h3 className="text-sm font-black uppercase tracking-widest">Sem mensagens registradas</h3></div>
                     )}
                 </div>
             </div>
@@ -126,59 +98,51 @@ export const ConversationModal = ({ onClose, conversation, contactIdentifier }) 
 export const EditContactModal = ({ contact, statusOptions, onSave, onClose }) => {
     const [situacao, setSituacao] = useState(contact.situacao);
     const [observacoes, setObservacoes] = useState(contact.observacoes || '');
-
-    // Garante que a situação atual esteja na lista de opções para ser exibida corretamente
-    const availableOptions = statusOptions.includes(contact.situacao)
-        ? statusOptions
-        : [contact.situacao, ...statusOptions].filter(Boolean);
-
-    const handleSave = () => {
-        onSave(contact.id, { situacao, observacoes });
-        onClose();
-    };
-
     return (
-        <Modal onClose={onClose}>
-            <div className="p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Editar Contato</h3>
-                <div className="space-y-4">
+        <Modal onClose={onClose} maxWidth="max-w-xl">
+            <div className="p-10">
+                <header className="mb-10 text-center">
+                    <div className="w-20 h-20 bg-emerald-50 rounded-[2rem] flex items-center justify-center text-[#356854] mx-auto mb-6 shadow-sm"><User size={40} /></div>
+                    <h3 className="text-2xl font-black text-slate-800 tracking-tight leading-none mb-2">Qualificar Lead</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{contact.nome}</p>
+                </header>
+                <div className="space-y-8">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700">Situação</label>
-                        <select value={situacao} onChange={e => setSituacao(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm">
-                            {availableOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                        </select>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Estágio no Funil</label>
+                        <div className="relative">
+                            <select value={situacao} onChange={e => setSituacao(e.target.value)} className="h-14 w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 text-sm font-black text-slate-700 appearance-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500/30 transition-all outline-none">
+                                {statusOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                            </select>
+                            <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
+                        </div>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700">Observações</label>
-                        <textarea value={observacoes} onChange={e => setObservacoes(e.target.value)} rows="3" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm"></textarea>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Notas Estratégicas</label>
+                        <textarea value={observacoes} onChange={e => setObservacoes(e.target.value)} rows="5" className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-6 text-sm font-medium text-slate-700 focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500/30 transition-all outline-none resize-none" placeholder="Adicione observações sobre este lead..." />
                     </div>
                 </div>
-                <div className="mt-8 flex justify-end gap-4">
-                    <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition">Cancelar</button>
-                    <button type="button" onClick={handleSave} className="px-4 py-2 bg-brand-green text-white rounded-md hover:bg-brand-green-dark transition">Salvar Alterações</button>
-                </div>
+                <footer className="mt-10 flex gap-4">
+                    <button onClick={onClose} className="flex-1 h-14 bg-slate-50 text-slate-400 font-black text-xs uppercase tracking-widest rounded-2xl hover:bg-slate-100 transition-all">Cancelar</button>
+                    <button onClick={() => { onSave(contact.id, { situacao, observacoes }); onClose(); }} className="flex-1 h-14 bg-[#356854] text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-xl shadow-emerald-900/10 hover:bg-[#2d5847] transition-all">Salvar Qualificação</button>
+                </footer>
             </div>
         </Modal>
     );
 };
 
 export const DeleteConfirmationModal = ({ title, message, onConfirm, onClose }) => (
-    <Modal onClose={onClose}>
-        <div className="p-6 text-center">
-            <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
-                <AlertTriangle className="h-6 w-6 text-red-600" aria-hidden="true" />
-            </div>
-            <h3 className="mt-4 text-lg font-semibold text-gray-900">{title}</h3>
-            <p className="mt-2 text-sm text-gray-500" dangerouslySetInnerHTML={{ __html: message }} />
-            <div className="mt-6 flex justify-center gap-4">
-                <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition">Cancelar</button>
-                <button type="button" onClick={onConfirm} className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition">Sim, Remover</button>
+    <Modal onClose={onClose} maxWidth="max-w-md">
+        <div className="p-10 text-center">
+            <div className="mx-auto w-20 h-20 bg-rose-50 text-rose-500 rounded-[2rem] flex items-center justify-center mb-6 shadow-sm"><AlertTriangle size={40} /></div>
+            <h3 className="text-2xl font-black text-slate-800 mb-2">{title}</h3>
+            <p className="text-slate-400 text-sm font-medium mb-10 px-4" dangerouslySetInnerHTML={{ __html: message }} />
+            <div className="flex gap-4">
+                <button onClick={onClose} className="flex-1 h-14 bg-slate-50 text-slate-400 font-black text-xs uppercase tracking-widest rounded-2xl hover:bg-slate-100 transition-all">Cancelar</button>
+                <button onClick={onConfirm} className="flex-1 h-14 bg-rose-500 text-white font-black text-xs uppercase tracking-widest rounded-2xl shadow-xl shadow-rose-900/10 hover:bg-rose-600 transition-all">Sim, Remover</button>
             </div>
         </div>
     </Modal>
 );
-
-// --- COMPONENTE PRINCIPAL ---
 
 function Prospects() {
     const navigate = useNavigate();
@@ -186,336 +150,180 @@ function Prospects() {
     const [selectedProspect, setSelectedProspect] = useState(null);
     const [contacts, setContacts] = useState([]);
     const [filteredContacts, setFilteredContacts] = useState([]);
-
     const [isLoading, setIsLoading] = useState({ list: true, data: false });
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [isExporting, setIsExporting] = useState(false);
     const [minScore, setMinScore] = useState(0);
-
-    // --- Estado da Paginação ---
     const [currentPage, setCurrentPage] = useState(1);
-    const contactsPerPage = 10;
-
     const [modal, setModal] = useState({ type: null, data: null });
-
+    const contactsPerPage = 12;
     const statusOptions = ["Aguardando Início", "Aguardando Resposta", "Resposta Recebida", "Lead Qualificado", "Não Interessado", "Concluído", "Sem Whatsapp", "Falha no Envio", "Erro IA", "Conversa Manual", "Fechado", "Atendente Chamado"];
 
     const fetchProspectsList = useCallback(async (selectFirst = false) => {
-        setIsLoading(prev => ({ ...prev, list: true }));
+        setIsLoading(p => ({ ...p, list: true }));
         try {
-            const response = await api.get('/prospecting/');
-            const activeCampaigns = response.data.filter(p => p.status !== 'Concluído');
-            setProspectsList(activeCampaigns);
-
-            if (selectFirst && activeCampaigns.length > 0) {
-                setSelectedProspect(activeCampaigns[0]);
-            } else if (activeCampaigns.length === 0) {
-                setSelectedProspect(null);
-                setContacts([]);
-                setCurrentPage(1);
-            }
-        } catch (err) {
-            setError('Não foi possível carregar a lista de campanhas.');
-        } finally {
-            setIsLoading(prev => ({ ...prev, list: false }));
-        }
+            const res = await api.get('/prospecting/');
+            const actives = res.data.filter(p => p.status !== 'Concluído');
+            setProspectsList(actives);
+            if (selectFirst && actives.length > 0) setSelectedProspect(actives[0]);
+            else if (actives.length === 0) { setSelectedProspect(null); setContacts([]); }
+        } catch (e) { setError('Falha ao carregar campanhas.'); }
+        finally { setIsLoading(p => ({ ...p, list: false })); }
     }, []);
 
-    useEffect(() => {
-        fetchProspectsList(true);
-    }, [fetchProspectsList]);
-
     const fetchProspectData = useCallback(async () => {
-        if (!selectedProspect) {
-            setContacts([]);
-            setFilteredContacts([]);
-            setCurrentPage(1);
-            return;
-        };
-        setIsLoading(prev => ({ ...prev, data: true }));
-        setError('');
+        if (!selectedProspect) { setContacts([]); setFilteredContacts([]); return; }
+        setIsLoading(p => ({ ...p, data: true }));
         try {
-            const response = await api.get(`/prospecting/sheet/${selectedProspect.id}`);
-            const enrichedData = response.data.data.map(row => ({
-                ...row,
-                contactName: row.nome
-            }));
-            setContacts(enrichedData || []);
+            const res = await api.get(`/prospecting/sheet/${selectedProspect.id}`);
+            const data = res.data.data.map(row => ({ ...row, contactName: row.nome }));
+            setContacts(data || []);
             setCurrentPage(1);
-        } catch (err) {
-            setError(`Não foi possível carregar os dados de "${selectedProspect.nome_prospeccao}".`);
-            setContacts([]);
-        } finally {
-            setIsLoading(prev => ({ ...prev, data: false }));
-        }
+        } catch (e) { setContacts([]); }
+        finally { setIsLoading(p => ({ ...p, data: false })); }
     }, [selectedProspect]);
 
-    useEffect(() => {
-        if (selectedProspect) {
-            fetchProspectData(); // Busca inicial quando a campanha muda
-        }
-    }, [selectedProspect, fetchProspectData]);
-
-    const handleExportCSV = async () => {
-        if (!selectedProspect) return;
-        setIsExporting(true);
-        try {
-            const response = await api.get(`/prospecting/${selectedProspect.id}/export/csv`, {
-                responseType: 'blob',
-            });
-            const url = window.URL.createObjectURL(new Blob([response.data]));
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', `prospeccao_${selectedProspect.nome_prospeccao.replace(/\s+/g, '_')}.csv`);
-            document.body.appendChild(link);
-            link.click();
-            link.parentNode.removeChild(link);
-        } catch (err) {
-            toast.error("Erro ao exportar os dados da campanha.");
-        } finally {
-            setIsExporting(false);
-        }
-    };
+    useEffect(() => { fetchProspectsList(true); }, [fetchProspectsList]);
+    useEffect(() => { if (selectedProspect) fetchProspectData(); }, [selectedProspect, fetchProspectData]);
 
     useEffect(() => {
-        const lowercasedFilter = searchTerm.toLowerCase();
-        const filtered = contacts.filter(item => {
-            const matchesSearch = Object.values(item).some(value =>
-                String(value).toLowerCase().includes(lowercasedFilter)
-            );
+        const lower = searchTerm.toLowerCase();
+        setFilteredContacts(contacts.filter(item => {
+            const matchesSearch = Object.values(item).some(v => String(v).toLowerCase().includes(lower));
             const matchesScore = (item.lead_score || 0) >= minScore;
             return matchesSearch && matchesScore;
-        });
-        setFilteredContacts(filtered);
+        }));
         setCurrentPage(1);
     }, [searchTerm, minScore, contacts]);
 
-    const handleSaveContactEdit = async (contactId, updates) => {
-        try {
-            await api.put(`/prospecting/contacts/${contactId}`, updates);
-            setModal({ type: null, data: null });
-            fetchProspectData();
-            toast.success('Contato atualizado com sucesso!');
-        } catch (err) {
-            toast.error('Erro ao salvar as alterações do contato.');
-        }
-    };
-
-    const handleConfirmContactDelete = async (contactId) => {
-        try {
-            await api.delete(`/prospecting/contacts/${contactId}`);
-            setModal({ type: null, data: null });
-            fetchProspectData();
-            toast.success('Contato removido com sucesso!');
-        } catch (err) {
-            toast.error('Erro ao remover o contato da campanha.');
-        }
-    };
-
-    const getStatusClass = (status) => {
-        const baseClasses = "px-3 py-1 text-xs font-semibold rounded-full inline-block text-center min-w-[140px]";
-        const statusMap = {
-            'Resposta Recebida': "bg-blue-100 text-blue-800",
-            'Lead Qualificado': "bg-green-100 text-green-800",
-            'Concluído': "bg-green-100 text-green-800",
-            'Aguardando Resposta': "bg-yellow-100 text-yellow-800",
-            'Falha no Envio': "bg-red-200 text-red-800",
-            'Erro IA': "bg-red-200 text-red-800",
-            'Sem Whatsapp': "bg-gray-200 text-gray-700",
-            'Não Interessado': "bg-red-100 text-red-700",
-            'Aguardando Início': "bg-purple-100 text-purple-800",
-            'Conversa Manual': "bg-orange-100 text-orange-800",
-            'Fechado': "bg-emerald-100 text-emerald-800",
-            'Atendente Chamado': "bg-orange-500 text-white",
+    const getStatusClass = (s) => {
+        const map = {
+            'Resposta Recebida': "bg-sky-50 text-sky-600 border-sky-100",
+            'Lead Qualificado': "bg-emerald-50 text-emerald-600 border-emerald-100",
+            'Concluído': "bg-emerald-50 text-emerald-600 border-emerald-100",
+            'Aguardando Resposta': "bg-amber-50 text-amber-600 border-amber-100",
+            'Falha no Envio': "bg-rose-50 text-rose-600 border-rose-100",
+            'Erro IA': "bg-rose-50 text-rose-600 border-rose-100",
+            'Sem Whatsapp': "bg-slate-50 text-slate-400 border-slate-100",
+            'Não Interessado': "bg-rose-50 text-rose-600 border-rose-100",
+            'Aguardando Início': "bg-indigo-50 text-indigo-600 border-indigo-100",
+            'Conversa Manual': "bg-orange-50 text-orange-600 border-orange-100",
+            'Fechado': "bg-emerald-50 text-emerald-600 border-emerald-100",
+            'Atendente Chamado': "bg-[#356854] text-white border-[#356854]",
         };
-        return `${baseClasses} ${statusMap[status] || 'bg-gray-100 text-gray-600'}`;
+        return `status-pill px-3 py-1.5 rounded-xl border ${map[s] || 'bg-slate-50 text-slate-400 border-slate-100'}`;
     };
 
-    const getScoreColor = (score) => {
-        if (score >= 8) return "text-green-600 bg-green-50 border-green-200";
-        if (score >= 5) return "text-yellow-600 bg-yellow-50 border-yellow-200";
-        return "text-gray-500 bg-gray-50 border-gray-200";
-    };
-
-    // --- Lógica de Paginação ---
-    const indexOfLastContact = currentPage * contactsPerPage;
-    const indexOfFirstContact = indexOfLastContact - contactsPerPage;
-    const currentContacts = filteredContacts.slice(indexOfFirstContact, indexOfLastContact);
+    const currentContacts = filteredContacts.slice((currentPage - 1) * contactsPerPage, currentPage * contactsPerPage);
     const totalPages = Math.ceil(filteredContacts.length / contactsPerPage);
 
-    const paginate = (pageNumber) => {
-        if (pageNumber < 1 || pageNumber > totalPages) return;
-        setCurrentPage(pageNumber);
-    };
+    if (isLoading.list && prospectsList.length === 0) return <PageLoader message="Mapeando base de leads..." subMessage="Cruzando dados com motor de qualificação..." />;
 
     return (
-        <div className="p-6 md:p-10 bg-gray-50 min-h-screen">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-                <div>
-                    <h1 className="text-3xl font-bold text-gray-800">Contatos da Prospecção</h1>
-                    <p className="text-gray-500 mt-1">Gerencie os contatos de suas campanhas ativas.</p>
-                </div>
-                {selectedProspect && (
-                    <button
-                        onClick={handleExportCSV}
-                        disabled={isLoading.data || contacts.length === 0 || isExporting}
-                        className="flex items-center gap-2 bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-blue-300 shadow-md"
-                    >
-                        {isExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-                        Exportar CSV
-                    </button>
-                )}
-            </div>
+        <div className="prospects-page p-6 md:p-12 min-h-screen bg-[#f8fafc]">
+            <style>{DS_STYLE}</style>
+            <div className="max-w-[1600px] mx-auto flex flex-col gap-10">
+                <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+                    <div>
+                        <h1 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">Gestão de Leads <Activity size={24} className="text-[#356854]" /></h1>
+                        <p className="text-slate-400 mt-1.5 text-sm font-medium">Qualificação profunda e monitoramento de performance</p>
+                    </div>
+                    {selectedProspect && (
+                        <button onClick={async () => { setIsExporting(true); try { const res = await api.get(`/prospecting/${selectedProspect.id}/export/csv`, { responseType: 'blob' }); const url = window.URL.createObjectURL(new Blob([res.data])); const link = document.createElement('a'); link.href = url; link.setAttribute('download', `leads_${selectedProspect.nome_prospeccao.replace(/\s+/g, '_')}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link); } finally { setIsExporting(false); } }} disabled={isLoading.data || contacts.length === 0 || isExporting} className="h-14 px-8 bg-white text-slate-600 font-black text-[10px] uppercase tracking-widest rounded-2xl border border-slate-100 shadow-sm hover:bg-slate-50 transition-all flex items-center gap-2 disabled:opacity-30">
+                            {isExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} Exportar Leads
+                        </button>
+                    )}
+                </header>
 
-            <div className="bg-white p-6 rounded-xl shadow-md border border-gray-200">
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6 items-end">
-                    <div className="md:col-span-5">
-                        <label htmlFor="prospect-select" className="block text-sm font-medium text-gray-700 mb-2">
-                            Campanha Ativa:
-                        </label>
-                        <div className="relative">
-                            <select
-                                id="prospect-select"
-                                value={selectedProspect?.id || ''}
-                                onChange={(e) => {
-                                    const newSelected = prospectsList.find(p => p.id === parseInt(e.target.value));
-                                    setSelectedProspect(newSelected);
-                                }}
-                                disabled={isLoading.list || prospectsList.length === 0}
-                                className="w-full appearance-none bg-white border border-gray-300 rounded-lg py-2 px-4 pr-10 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"
-                            >
-                                {isLoading.list && <option>Carregando...</option>}
-                                {!isLoading.list && prospectsList.length === 0 && <option>Nenhuma campanha ativa</option>}
-                                {prospectsList.map(prospect => (
-                                    <option key={prospect.id} value={prospect.id}>{prospect.nome_prospeccao}</option>
-                                ))}
-                            </select>
-                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
-                                <ChevronDown size={20} />
+                <div className="ds-surface p-10 flex flex-col gap-10 border-none shadow-2xl shadow-slate-200/50">
+                    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-end">
+                        <div className="xl:col-span-3">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">Campanha</label>
+                            <div className="relative">
+                                <select value={selectedProspect?.id || ''} onChange={e => setSelectedProspect(prospectsList.find(p => p.id === parseInt(e.target.value)))} className="h-14 w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 text-sm font-black text-slate-700 appearance-none focus:ring-4 focus:ring-emerald-500/10 transition-all outline-none">
+                                    {prospectsList.map(p => <option key={p.id} value={p.id}>{p.nome_prospeccao}</option>)}
+                                </select>
+                                <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20} />
+                            </div>
+                        </div>
+                        <div className="xl:col-span-6 relative">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">Busca Rápida</label>
+                            <div className="relative">
+                                <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                                <input type="text" placeholder="Filtrar leads, WhatsApp ou estágio..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="h-14 w-full pl-14 pr-6 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:ring-4 focus:ring-emerald-500/10 transition-all" />
+                            </div>
+                        </div>
+                        <div className="xl:col-span-3">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">Score Mínimo</label>
+                            <div className="relative">
+                                <Star className="absolute left-6 top-1/2 -translate-y-1/2 text-amber-400" size={20} />
+                                <input type="number" min="0" max="10" value={minScore} onChange={e => setMinScore(Number(e.target.value))} className="h-14 w-full pl-14 pr-6 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-black text-slate-700 outline-none focus:ring-4 focus:ring-emerald-500/10 transition-all" />
                             </div>
                         </div>
                     </div>
-                    <div className="relative md:col-span-5">
-                        <label htmlFor="search-input" className="block text-sm font-medium text-gray-700 mb-2">
-                            Filtrar Contatos:
-                        </label>
-                        <Search className="absolute left-3 top-1/2 mt-3 -translate-y-1/2 text-gray-400" size={20} />
-                        <input
-                            id="search-input"
-                            type="text"
-                            placeholder="Pesquisar por nome, telefone, situação..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                        />
-                    </div>
-                    <div className="md:col-span-2">
-                        <label htmlFor="score-filter" className="block text-sm font-medium text-gray-700 mb-2">
-                            Score Mín.:
-                        </label>
-                        <input
-                            id="score-filter"
-                            type="number"
-                            min="0" max="10"
-                            value={minScore}
-                            onChange={(e) => setMinScore(Number(e.target.value))}
-                            className="w-full py-2 px-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                        />
-                    </div>
-                </div>
 
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                        <thead className="border-b-2 border-gray-200">
-                            <tr>
-                                <th className="p-4 text-sm font-semibold text-gray-600 uppercase">Nome</th>
-                                <th className="p-4 text-sm font-semibold text-gray-600 uppercase">WhatsApp</th>
-                                <th className="p-4 text-sm font-semibold text-gray-600 uppercase text-center">Score</th>
-                                <th className="p-4 text-sm font-semibold text-gray-600 uppercase">Situação</th>
-                                <th className="p-4 text-sm font-semibold text-gray-600 uppercase">Observações</th>
-                                <th className="p-4 text-sm font-semibold text-gray-600 uppercase text-center">Ações</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {isLoading.data ? (
-                                <tr><td colSpan="6" className="text-center p-8"><Loader2 size={32} className="animate-spin text-green-600 mx-auto" /></td></tr>
-                            ) : error ? (
-                                <tr><td colSpan="6" className="text-center p-8 text-red-500">{error}</td></tr>
-                            ) : currentContacts.length > 0 ? (
-                                currentContacts.map((row) => (
-                                    <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer" onDoubleClick={() => navigate('/mensagens', { state: { selectContactId: row.id } })}>
-                                        <td className="p-4 font-medium text-gray-800">{row.nome}</td>
-                                        <td className="p-4 text-gray-700">{row.whatsapp}</td>
-                                        <td className="p-4 text-center">
-                                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold border ${getScoreColor(row.lead_score || 0)}`}>
-                                                {row.lead_score || 0}
-                                            </span>
+                    <div className="overflow-x-auto custom-scrollbar">
+                        <table className="w-full text-left min-w-[1000px]">
+                            <thead>
+                                <tr className="border-b border-slate-50">
+                                    {['Identificação', 'WhatsApp', 'Qualificação', 'Situação', 'Resumo', 'Ações'].map((h, i) => (
+                                        <th key={i} className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">{h}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {isLoading.data ? (
+                                    <tr><td colSpan="6" className="text-center py-32"><Loader2 size={40} className="animate-spin text-emerald-500 mx-auto" /></td></tr>
+                                ) : currentContacts.length > 0 ? currentContacts.map((row) => (
+                                    <tr key={row.id} className="transition-all hover:bg-emerald-50/20 group cursor-pointer" onDoubleClick={() => navigate('/mensagens', { state: { selectContactId: row.id } })}>
+                                        <td className="px-8 py-6">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 font-black text-sm group-hover:bg-[#356854] group-hover:text-white transition-all">{(row.nome || '?')[0].toUpperCase()}</div>
+                                                <div className="text-sm font-black text-slate-800">{row.nome}</div>
+                                            </div>
                                         </td>
-                                        <td className="p-4"><span className={getStatusClass(row.situacao)}>{row.situacao}</span></td>
-                                        <td className="p-4 text-sm text-gray-600 max-w-screen-2xl" title={row.observacoes}>{row.observacoes}</td>
-                                        <td className="p-4 text-center">
-                                            <div className="flex justify-center items-center gap-2">
-                                                <button onClick={() => setModal({ type: 'conversation', data: row })} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors" title="Ver conversa"><MessageSquare size={18} /></button>
-                                                <button onClick={() => setModal({ type: 'edit_contact', data: row })} className="p-2 text-gray-500 hover:text-green-600 hover:bg-gray-100 rounded-full transition-colors" title="Editar Contato"><Edit size={18} /></button>
-                                                <button onClick={() => setModal({ type: 'delete_contact', data: row })} className="p-2 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded-full transition-colors" title="Remover Contato"><Trash2 size={18} /></button>
+                                        <td className="px-8 py-6 text-sm font-bold text-slate-500 tracking-tight">{row.whatsapp}</td>
+                                        <td className="px-8 py-6">
+                                            <div className={`lead-score-badge border ${row.lead_score >= 8 ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : row.lead_score >= 5 ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                                                {row.lead_score || 0}
+                                            </div>
+                                        </td>
+                                        <td className="px-8 py-6"><span className={getStatusClass(row.situacao)}>{row.situacao}</span></td>
+                                        <td className="px-8 py-6 max-w-xs"><p className="text-xs text-slate-400 font-medium italic truncate" title={row.observacoes}>{row.observacoes || 'Sem observações.'}</p></td>
+                                        <td className="px-8 py-6 text-right">
+                                            <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                                                <button onClick={() => setModal({ type: 'conversation', data: row })} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-100 text-slate-400 hover:text-[#356854] hover:border-emerald-100 rounded-xl transition-all shadow-sm"><MessageSquare size={18} /></button>
+                                                <button onClick={() => setModal({ type: 'edit_contact', data: row })} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-100 text-slate-400 hover:text-[#356854] hover:border-emerald-100 rounded-xl transition-all shadow-sm"><Edit size={18} /></button>
+                                                <button onClick={() => setModal({ type: 'delete_contact', data: row })} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-100 text-slate-400 hover:text-rose-500 hover:border-rose-100 rounded-xl transition-all shadow-sm"><Trash2 size={18} /></button>
                                             </div>
                                         </td>
                                     </tr>
-                                ))
-                            ) : (
-                                <tr>
-                                    <td colSpan="5" className="text-center py-10 text-gray-500">
-                                        <TableIcon className="mx-auto h-12 w-12 text-gray-400" />
-                                        <h3 className="mt-2 text-sm font-medium text-gray-900">Nenhum contato nesta campanha</h3>
-                                        <p className="mt-1 text-sm text-gray-500">Selecione uma campanha para ver os contatos.</p>
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-
-                {totalPages > 1 && (
-                    <div className="flex justify-between items-center mt-6">
-                        <span className="text-sm text-gray-500">Página {currentPage} de {totalPages} ({filteredContacts.length} contatos)</span>
-                        <div className="flex items-center gap-2">
-                            <button onClick={() => paginate(1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsLeft size={16} /></button>
-                            <button onClick={() => paginate(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronLeft size={16} /></button>
-                            <span className="px-2 text-sm text-gray-600 font-medium">{currentPage}</span>
-                            <button onClick={() => paginate(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronRight size={16} /></button>
-                            <button onClick={() => paginate(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsRight size={16} /></button>
-                        </div>
+                                )) : (
+                                    <tr><td colSpan="6" className="text-center py-40 opacity-20"><Target size={64} className="mx-auto mb-6" /><h3 className="text-sm font-black uppercase tracking-widest">Nenhum lead encontrado</h3></td></tr>
+                                )}
+                            </tbody>
+                        </table>
                     </div>
-                )}
 
+                    {totalPages > 1 && (
+                        <footer className="pt-10 border-t border-slate-50 flex justify-between items-center bg-white">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Página {currentPage} de {totalPages}</span>
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="w-10 h-10 flex items-center justify-center border border-slate-100 rounded-xl text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronsLeft size={18} /></button>
+                                <button onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1} className="w-10 h-10 flex items-center justify-center border border-slate-100 rounded-xl text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronLeft size={18} /></button>
+                                <div className="h-10 px-6 bg-emerald-50 rounded-xl flex items-center text-[#356854] font-black text-[10px] uppercase tracking-widest border border-emerald-100">{currentPage}</div>
+                                <button onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages} className="w-10 h-10 flex items-center justify-center border border-slate-100 rounded-xl text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronRight size={18} /></button>
+                                <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="w-10 h-10 flex items-center justify-center border border-slate-100 rounded-xl text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronsRight size={18} /></button>
+                            </div>
+                        </footer>
+                    )}
+                </div>
             </div>
 
-            {modal.type === 'conversation' && (
-                <ConversationModal
-                    onClose={() => setModal({ type: null, data: null })}
-                    conversation={modal.data.conversa}
-                    contactIdentifier={modal.data.contactName}
-                />
-            )}
-
-            {modal.type === 'edit_contact' && (
-                <EditContactModal
-                    contact={modal.data}
-                    statusOptions={statusOptions}
-                    onSave={handleSaveContactEdit}
-                    onClose={() => setModal({ type: null, data: null })}
-                />
-            )}
-
-            {modal.type === 'delete_contact' && (
-                <DeleteConfirmationModal
-                    title="Remover Contato"
-                    message={`Tem certeza que deseja remover o contato <strong class="text-gray-700">${modal.data?.nome}</strong> desta campanha?`}
-                    onConfirm={() => handleConfirmContactDelete(modal.data.id)}
-                    onClose={() => setModal({ type: null, data: null })}
-                />
-            )}
+            {modal.type === 'conversation' && <ConversationModal onClose={() => setModal({ type: null, data: null })} conversation={modal.data.conversa} contactIdentifier={modal.data.contactName} />}
+            {modal.type === 'edit_contact' && <EditContactModal contact={modal.data} statusOptions={statusOptions} onSave={async (cid, up) => { try { await api.put(`/prospecting/contacts/${cid}`, up); fetchProspectData(); toast.success('Lead qualificado!'); } catch (e) { toast.error('Erro ao salvar.'); } }} onClose={() => setModal({ type: null, data: null })} />}
+            {modal.type === 'delete_contact' && <DeleteConfirmationModal title="Remover Lead" message={`Deseja remover <strong>${modal.data?.nome}</strong> desta campanha?`} onConfirm={async () => { try { await api.delete(`/prospecting/contacts/${modal.data.id}`); fetchProspectData(); toast.success('Lead removido.'); setModal({ type: null, data: null }); } catch (e) { toast.error('Erro ao remover.'); } }} onClose={() => setModal({ type: null, data: null })} />}
         </div>
     );
 }

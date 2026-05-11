@@ -1,33 +1,35 @@
 import React from 'react';
 import { X } from 'lucide-react';
 
-// Esta é uma versão mais simples e flexível do Modal.
-// Ele não tem um 'title' próprio; o título virá do conteúdo (children).
-const Modal = ({ children, onClose }) => {
+const Modal = ({ children, onClose, maxWidth = "max-w-xl" }) => {
   return (
-    // Backdrop (fundo escuro)
-    <div 
-      className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4 animate-fade-in"
-      // Clicar no fundo fecha o modal
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4 md:p-10"
       onClick={onClose}
     >
-      {/* Conteúdo do Modal */}
-      <div 
-        className="bg-white rounded-xl shadow-2xl w-full max-w-md min-w-fit p-6 relative animate-fade-in-up"
-        // Impede que o clique dentro do modal se propague para o fundo e o feche
-        onClick={e => e.stopPropagation()} 
+      {/* Backdrop with sophisticated blur */}
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-500" />
+      
+      <div
+        className={`bg-[#f8fafc] w-full ${maxWidth} relative flex flex-col overflow-hidden animate-in fade-in zoom-in slide-in-from-bottom-8 duration-500 max-h-[calc(100vh-5rem)]`}
+        style={{ 
+          borderRadius: '2.5rem', 
+          boxShadow: '0 40px 100px -20px rgba(15,23,42,0.3)' 
+        }}
+        onClick={e => e.stopPropagation()}
       >
-        {/* Botão de Fechar no canto superior direito */}
-        <button 
+        {/* Subtle accent line at the top */}
+        <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-transparent via-[#356854]/40 to-transparent" />
+
+        <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-1 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600 transition-colors"
+          className="absolute top-8 right-8 w-11 h-11 flex items-center justify-center bg-white/80 backdrop-blur-md text-slate-400 hover:text-slate-900 rounded-2xl transition-all z-50 shadow-sm hover:shadow-md border border-white/50"
           aria-label="Fechar modal"
         >
-          <X size={24} />
+          <X size={20} />
         </button>
-        
-        {/* O conteúdo (nosso formulário ou a confirmação de exclusão) é renderizado aqui */}
-        <div>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
           {children}
         </div>
       </div>
@@ -36,4 +38,3 @@ const Modal = ({ children, onClose }) => {
 };
 
 export default Modal;
-

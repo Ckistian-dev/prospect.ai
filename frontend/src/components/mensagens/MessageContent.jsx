@@ -1,125 +1,229 @@
 import React from 'react';
-import { AlertTriangle, Download, Loader2, FileText, MapPin } from 'lucide-react';
+import { AlertTriangle, Download, Loader2, FileText, AlertCircle } from 'lucide-react';
+
 import AudioPlayer from './AudioPlayer';
 import ImageDisplayer from './ImageDisplayer';
 import VideoDisplayer from './VideoDisplayer';
+import StickerDisplayer from './StickerDisplayer';
+import { formatWhatsAppText } from '../../utils/formatters.jsx';
 
-const MessageContent = ({ msg, pcId, onViewMedia, onDownloadDocument, isDownloading }) => {
+const MessageContent = ({ msg, atendimentoId, onViewMedia, onDownloadDocument, isDownloading, onQuotedClick }) => {
+    const isAssistant = msg.role === 'assistant';
+
     if (msg.status === 'failed' || msg.status === 'error' || msg.type === 'error') {
         let errorMessage = 'Falha no envio';
-        if (msg.error_title) errorMessage = msg.error_title;
-        else if (msg.content) errorMessage = msg.content;
+        if (msg.error_title) {
+            errorMessage = msg.error_title;
+        } else if (msg.content) {
+            errorMessage = msg.content;
+        }
+
         const errorCode = msg.error_code ? ` (Cód: ${msg.error_code})` : '';
 
         return (
-            <div className="flex items-center gap-2 text-red-600">
-                <AlertTriangle size={16} />
-                <span className="text-sm">
-                    {errorMessage}{errorCode}
+            <div className={`flex items-start gap-3 p-4 rounded-2xl ${isAssistant ? 'bg-red-500/10 text-red-200' : 'bg-red-50 text-red-600'}`}>
+                <AlertCircle size={18} className="flex-shrink-0 mt-0.5" />
+                <div className="flex flex-col">
+                    <span className="text-[13px] font-bold executive-title uppercase tracking-wider">
+                        {errorMessage}{errorCode}
+                    </span>
                     {msg.type !== 'error' && msg.content && (
-                        <p className="text-xs text-gray-500 italic mt-1">Mensagem original: "{msg.content}"</p>
+                        <p className={`text-[11px] mt-1 opacity-80 italic`}>"{msg.content}"</p>
                     )}
-                </span>
+                </div>
             </div>
         );
     }
 
     const type = msg.type || 'text';
-    const hasMedia = msg.id && ['image', 'audio', 'document', 'video', 'location'].includes(type);
-    let displayText = msg.content || (hasMedia ? `[${type.toUpperCase()}]` : '');
+    const hasMedia = msg.media_id && ['image', 'audio', 'document', 'video', 'sticker'].includes(type);
+    let displayText = msg.content;
 
-    if (['image', 'video', 'location'].includes(type)) displayText = null;
+    if (hasMedia && !msg.is_template) {
+        if (!displayText || (displayText.startsWith('[') && displayText.toLowerCase().includes('enviado'))) {
+            displayText = null;
+        }
+    }
 
-    switch (type) {
-        case 'audio':
-            return (
-                <AudioPlayer
-                    instanceId={pcId}
-                    messageId={msg.id}
-                    transcription={displayText}
-                />
-            );
-        case 'image':
-            return (
-                <ImageDisplayer
-                    instanceId={pcId}
-                    messageId={msg.id}
-                    caption={displayText}
-                />
-            );
-        case 'video':
-            return (
-                <VideoDisplayer
-                    instanceId={pcId}
-                    messageId={msg.id}
-                    caption={displayText}
-                />
-            );
-        case 'document':
-            return (
-                <div className="space-y-2">
-                    <div className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg max-w-sm hover:bg-gray-100 transition-colors">
-                        <div className="bg-blue-100 p-2 rounded-full text-blue-600 flex-shrink-0">
-                            <FileText size={20} />
+    const renderQuotedMsg = () => {
+        let quoted = msg.quoted_msg;
+        let content = msg.content || '';
+
+        if (content.startsWith('[Mensagem Referenciada]:')) {
+            const regex = /\[Mensagem Referenciada\]: "(.*)"\n?([\s\S]*)/;
+            const match = content.match(regex);
+            if (match) {
+                if (!quoted) {
+                    quoted = { content: match[1] };
+                }
+                displayText = match[2].trim();
+            }
+        }
+
+        if (!quoted) return null;
+
+        const isQuotedAssistant = quoted.role === 'assistant';
+        const senderName = isQuotedAssistant ? 'Você' : 'Cliente';
+
+        return (
+            <div
+                onClick={() => onQuotedClick && quoted.id && onQuotedClick(quoted.id)}
+                className={`mb-3 p-3 rounded-xl border-l-4 flex flex-col gap-1 overflow-hidden select-none transition-all ${quoted.id ? 'cursor-pointer hover:brightness-110 active:scale-[0.98]' : ''
+                    } ${isAssistant
+                        ? 'bg-black/20 border-white/40'
+                        : 'bg-slate-100/80 border-brand-green'
+                    }`}
+            >
+                <span className={`text-[11px] font-black uppercase tracking-wider ${isAssistant ? 'text-white/90' : 'text-brand-green'
+                    }`}>
+                    {senderName}
+                </span>
+                <p className={`text-[12px] line-clamp-2 leading-snug italic opacity-80 ${isAssistant ? 'text-white' : 'text-slate-600'
+                    }`}>
+                    {formatWhatsAppText(quoted.content)}
+                </p>
+            </div>
+        );
+    };
+
+    const renderMediaOrText = () => {
+        const quotedView = renderQuotedMsg();
+
+        switch (type) {
+            case 'audio':
+                return (
+                    <div className="flex flex-col">
+                        {quotedView}
+                        <AudioPlayer
+                            atendimentoId={atendimentoId}
+                            mediaId={msg.media_id}
+                            transcription={displayText}
+                            isAssistant={isAssistant}
+                        />
+                    </div>
+                );
+
+            case 'image':
+                return (
+                    <div className="flex flex-col">
+                        {quotedView}
+                        <ImageDisplayer
+                            atendimentoId={atendimentoId}
+                            mediaId={msg.media_id}
+                            caption={msg.caption || null}
+                        />
+                    </div>
+                );
+
+            case 'video':
+                return (
+                    <div className="flex flex-col">
+                        {quotedView}
+                        <VideoDisplayer
+                            atendimentoId={atendimentoId}
+                            mediaId={msg.media_id}
+                            caption={msg.caption || null}
+                        />
+                    </div>
+                );
+
+            case 'sticker':
+                return (
+                    <div className="flex flex-col">
+                        {quotedView}
+                        <StickerDisplayer
+                            atendimentoId={atendimentoId}
+                            mediaId={msg.media_id}
+                        />
+                    </div>
+                );
+
+            case 'document':
+                return (
+                    <div className="flex flex-col space-y-3">
+                        {quotedView}
+                        <div className={`flex items-center gap-4 p-4 rounded-2xl transition-all border ${isAssistant
+                            ? 'bg-white/10 border-white/20 hover:bg-white/20'
+                            : 'bg-slate-50 border-slate-100 hover:bg-white hover:shadow-lg hover:shadow-slate-200/50'
+                            }`}>
+                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${isAssistant ? 'bg-white/20 text-white' : 'bg-brand-green text-white shadow-lg shadow-emerald-100'
+                                }`}>
+                                <FileText size={24} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className={`text-[13px] font-black executive-title truncate mb-0.5 ${isAssistant ? 'text-white' : 'text-slate-900'}`} title={msg.filename}>
+                                    {msg.filename || 'Documento Central'}
+                                </p>
+                                <p className={`text-[10px] font-bold uppercase tracking-widest ${isAssistant ? 'text-white/60' : 'text-slate-400'}`}>
+                                    {msg.mime_type ? msg.mime_type.split('/')[1] : 'ARQUIVO'}
+                                </p>
+                            </div>
+
+                            {hasMedia && (
+                                <button
+                                    type="button"
+                                    onClick={() => onDownloadDocument(msg.media_id, msg.filename)}
+                                    disabled={isDownloading}
+                                    className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${isAssistant
+                                        ? 'bg-white/20 text-white hover:bg-white'
+                                        : 'bg-white text-slate-400 hover:text-brand-green shadow-sm border border-slate-100'
+                                        } ${isDownloading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                    {isDownloading ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                                </button>
+                            )}
                         </div>
-                        <div className="flex-1 min-w-0 overflow-hidden">
-                            <p className="text-sm font-medium text-gray-900 truncate" title={msg.filename}>{msg.filename || 'Documento'}</p>
-                            <p className="text-xs text-gray-500 uppercase">{msg.mime_type ? msg.mime_type.split('/')[1] : 'ARQUIVO'}</p>
-                        </div>
-                        {hasMedia && (
-                            <button
-                                type="button" onClick={() => onDownloadDocument(msg.id, msg.filename)}
-                                disabled={isDownloading}
-                                className={`p-2 rounded-full text-gray-500 hover:text-blue-600 ${isDownloading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            >
-                                {isDownloading ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />}
-                            </button>
+                        {msg.caption && (
+                            <p className={`text-[15px] leading-relaxed font-medium mt-2 ${isAssistant ? 'text-white' : 'text-slate-700'}`}>
+                                {formatWhatsAppText(msg.caption)}
+                            </p>
                         )}
                     </div>
-                </div>
-            );
-        case 'location':
-            return (
-                <div className="flex flex-col gap-2 p-2 bg-gray-50 border border-gray-200 rounded-lg max-w-sm">
-                    {msg.thumbnail && (
-                        <img 
-                            src={`data:image/jpeg;base64,${msg.thumbnail}`} 
-                            alt="Localização" 
-                            className="w-full h-32 object-cover rounded-md"
-                        />
-                    )}
-                    <div className="flex items-center gap-2">
-                        <div className="bg-green-100 p-2 rounded-full text-green-600 flex-shrink-0">
-                            <MapPin size={20} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900">Localização</p>
-                            <a href={`https://www.google.com/maps/search/?api=1&query=${msg.latitude},${msg.longitude}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate block">
-                                Ver no Google Maps
-                            </a>
+                );
+
+            case 'sending':
+                return (
+                    <div className="flex flex-col">
+                        {quotedView}
+                        <div className="flex items-center gap-3 py-2">
+                            <Loader2 size={16} className="animate-spin text-white/60" />
+                            <span className="text-[12px] font-bold uppercase tracking-widest text-white/50">Enviando...</span>
                         </div>
                     </div>
+                );
+
+            case 'text':
+            default:
+                const defaultText = displayText || (msg.media_id ? `[Mídia não suportada: ${type}]` : '');
+                return (
+                    <div className="flex flex-col">
+                        {quotedView}
+                        <p className={`text-[15px] leading-relaxed font-medium ${isAssistant ? 'text-white' : 'text-slate-700'}`}>
+                            {formatWhatsAppText(defaultText) || '[Vazio]'}
+                        </p>
+                    </div>
+                );
+        }
+    };
+
+    return (
+        <div className="flex flex-col w-full">
+            {renderMediaOrText()}
+
+            {msg.buttons && msg.buttons.length > 0 && (
+                <div className={`mt-5 flex flex-col gap-2`}>
+                    {msg.buttons.map((btnText, idx) => (
+                        <div key={idx} className={`w-full p-4 text-[11px] font-black uppercase tracking-widest text-center rounded-2xl border transition-all cursor-pointer ${isAssistant
+                            ? 'bg-white/10 border-white/20 text-white hover:bg-white/20'
+                            : 'bg-slate-50 border-slate-100 text-slate-600 hover:bg-white hover:shadow-lg hover:text-brand-green'
+                            }`}>
+                            {btnText}
+                        </div>
+                    ))}
                 </div>
-            );
-        case 'sending':
-            return (
-                <div className="flex items-center gap-2 italic text-gray-500">
-                    <Loader2 size={16} className="animate-spin" />
-                    {msg.localUrl && msg.filename?.match(/\.(jpeg|jpg|png|webp)$/i) && (
-                        <img src={msg.localUrl} alt="preview" className="w-10 h-10 object-cover rounded mr-1" />
-                    )}
-                    {msg.localUrl && type === 'audio' && <audio src={msg.localUrl} controls className="h-8 w-40" />}
-                    {msg.localUrl && type === 'video' && <video src={msg.localUrl} controls muted className="h-20 w-32 rounded" />}
-                    <span>{msg.content || `Enviando ${msg.filename || 'mídia'}...`}</span>
-                </div>
-            );
-        case 'text':
-        default:
-            const defaultText = msg.content || (msg.id && !msg.role ? `[Mídia tipo '${type}' não suportada]` : '');
-            return (
-                <p className="whitespace-pre-wrap text-sm">{defaultText || '[Tipo de mensagem não suportado]'}</p>
-            );
-    }
+            )}
+        </div>
+    );
 }
 
 export default MessageContent;

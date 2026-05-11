@@ -2,11 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import api from '../../api/axiosConfig';
 
-const AudioPlayer = ({ instanceId, messageId, transcription }) => {
+const AudioPlayer = ({ atendimentoId, mediaId, transcription, isAssistant }) => {
     const [audioSrc, setAudioSrc] = useState(null);
     const [loadState, setLoadState] = useState('idle'); // 'idle', 'loading', 'loaded', 'error'
 
-    const playerRef = useRef(null);
+    const playerRef = useRef(null); 
     const audioBlobUrlRef = useRef(null);
 
     useEffect(() => {
@@ -28,7 +28,10 @@ const AudioPlayer = ({ instanceId, messageId, transcription }) => {
                     }
                 }
             },
-            { rootMargin: '0px', threshold: 0.1 }
+            {
+                rootMargin: '0px',
+                threshold: 0.1
+            }
         );
 
         if (playerRef.current) {
@@ -47,7 +50,12 @@ const AudioPlayer = ({ instanceId, messageId, transcription }) => {
 
         setLoadState('loading');
         try {
-            const response = await api.get(`/whatsapp/${instanceId}/media/${messageId}`, {
+            const isWhatsApp = String(atendimentoId).includes('-');
+            const endpoint = isWhatsApp 
+                ? `/whatsapp/${atendimentoId}/media/${mediaId}`
+                : `/atendimentos/${atendimentoId}/media/${mediaId}`;
+
+            const response = await api.get(endpoint, {
                 responseType: 'blob',
             });
             const blob = response.data;
@@ -62,19 +70,36 @@ const AudioPlayer = ({ instanceId, messageId, transcription }) => {
     };
 
     return (
-        <div ref={playerRef} className="space-y-2">
-            <div className="w-96 h-10">
+        <div
+            ref={playerRef}
+            className="space-y-2 p-1 rounded-xl transition-all duration-300 min-w-[260px] md:min-w-[300px] bg-white/50 backdrop-blur-sm shadow-sm"
+        >
+            <div className="w-full h-11 flex items-center">
                 {loadState === 'loading' || loadState === 'idle' ? (
-                    <div className="flex items-center justify-center h-10 bg-gray-100 rounded-full text-gray-500">
-                        <Loader2 size={18} className="animate-spin mr-2" />
-                        <span className="text-sm">A carregar áudio...</span>
+                    <div className="flex items-center justify-center w-full h-11 rounded-xl group bg-slate-100/50 text-slate-400">
+                        <Loader2 size={18} className="animate-spin mr-3 text-brand-green" />
+                        <span className="text-[11px] font-black uppercase tracking-widest">Carregando...</span>
                     </div>
                 ) : loadState === 'error' ? (
-                    <div className="flex items-center justify-center h-10 bg-red-100 text-red-600 rounded-full text-sm">Erro ao carregar</div>
+                    <div className="flex items-center justify-center w-full h-11 rounded-xl border border-red-100 bg-red-50 text-red-500 text-[11px] font-black uppercase tracking-widest">
+                        Falha no carregamento
+                    </div>
                 ) : (
-                    <audio src={audioSrc} controls className="w-full h-10" />
+                    <audio
+                        src={audioSrc}
+                        controls
+                        className="w-full h-9 audio-player-custom"
+                    />
                 )}
             </div>
+
+            {transcription && (
+                <div className={`pt-2 border-t ${isAssistant ? 'border-white/10' : 'border-slate-200/60'}`}>
+                    <p className={`text-[13px] leading-relaxed font-medium italic ${isAssistant ? 'text-white/90' : 'text-slate-600'}`}>
+                        "{transcription}"
+                    </p>
+                </div>
+            )}
         </div>
     );
 };

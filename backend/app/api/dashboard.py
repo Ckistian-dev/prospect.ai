@@ -51,6 +51,7 @@ async def analyze_data_with_ia(
     start_date_str = payload.get("start_date")
     end_date_str = payload.get("end_date")
     prospect_ids = payload.get("prospect_ids")
+    use_all_contacts = payload.get("use_all_contacts", False)
 
     if not question:
         raise HTTPException(status_code=400, detail="A pergunta é obrigatória.")
@@ -59,7 +60,13 @@ async def analyze_data_with_ia(
     end_date = datetime.fromisoformat(end_date_str) if end_date_str else None
 
     analysis = await gemini_service.analyze_prospecting_data(
-        db=db, user=current_user, question=question, start_date=start_date, end_date=end_date, prospect_ids=prospect_ids
+        db=db, 
+        user=current_user, 
+        question=question, 
+        start_date=start_date, 
+        end_date=end_date, 
+        prospect_ids=prospect_ids,
+        use_all_contacts=use_all_contacts
     )
 
     return {"analysis": analysis}

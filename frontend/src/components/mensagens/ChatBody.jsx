@@ -1,12 +1,19 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { format } from 'date-fns';
+import { Check, CheckCheck, AlertCircle, Clock, MessageSquare, Wand2, Loader2, Sparkles, Navigation } from 'lucide-react';
+import toast from 'react-hot-toast';
 import MessageContent from './MessageContent';
 
-const ChatBody = ({ mensagem, pcId, onViewMedia, onDownloadDocument, isDownloadingMedia }) => {
+const ChatBody = ({ mensagem, onViewMedia, onDownloadDocument, isDownloadingMedia }) => {
     const chatContainerRef = useRef(null);
     const [messages, setMessages] = useState([]);
+
     const prevAtendimentoIdRef = useRef(null);
     const userWasAtBottomRef = useRef(true);
+    const [highlightedMessageId, setHighlightedMessageId] = useState(null);
+
+    const prevMessagesLengthRef = useRef(0);
+    const initialScrollDoneRef = useRef(null);
 
     useEffect(() => {
         let parsedMessages = [];
@@ -19,7 +26,16 @@ const ChatBody = ({ mensagem, pcId, onViewMedia, onDownloadDocument, isDownloadi
         const chatElement = chatContainerRef.current;
         if (chatElement) {
             const { scrollTop, scrollHeight, clientHeight } = chatElement;
-            userWasAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 50;
+            const currentAtendimentoId = mensagem?.id;
+            const prevAtendimentoId = prevAtendimentoIdRef.current;
+            
+            // Se mudou o atendimento, resetamos o estado de "estava no fundo"
+            if (currentAtendimentoId !== prevAtendimentoId) {
+                userWasAtBottomRef.current = true;
+            } else {
+                // Senão, verificamos se o usuário ESTÁ no fundo no momento da atualização
+                userWasAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 150;
+            }
         } else {
             userWasAtBottomRef.current = true;
         }
@@ -31,11 +47,25 @@ const ChatBody = ({ mensagem, pcId, onViewMedia, onDownloadDocument, isDownloadi
         const chatElement = chatContainerRef.current;
         if (chatElement) {
             const currentAtendimentoId = mensagem?.id;
-            const prevAtendimentoId = prevAtendimentoIdRef.current;
-            const shouldScroll = currentAtendimentoId !== prevAtendimentoId || userWasAtBottomRef.current;
-
-            if (shouldScroll) chatElement.scrollTop = chatElement.scrollHeight;
+            
+            // Se mudou o atendimento, resetamos o controle do scroll inicial
+            if (currentAtendimentoId !== initialScrollDoneRef.current) {
+                // Se temos mensagens carregadas, fazemos o scroll
+                if (messages.length > 0) {
+                    const scrollTimeout = setTimeout(() => {
+                        chatElement.scrollTo({
+                            top: chatElement.scrollHeight,
+                            behavior: 'auto'
+                        });
+                        initialScrollDoneRef.current = currentAtendimentoId;
+                    }, 100);
+                    
+                    return () => clearTimeout(scrollTimeout);
+                }
+            }
+            
             prevAtendimentoIdRef.current = currentAtendimentoId;
+            prevMessagesLengthRef.current = messages.length;
         }
     }, [messages, mensagem?.id]);
 
@@ -43,39 +73,97 @@ const ChatBody = ({ mensagem, pcId, onViewMedia, onDownloadDocument, isDownloadi
         try {
             const date = (typeof timestamp === 'number') ? new Date(timestamp * 1000) : new Date(timestamp);
             const now = new Date();
-            if (format(date, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd')) return format(date, 'HH:mm');
+            if (format(date, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd')) {
+                return format(date, 'HH:mm');
+            }
             return format(date, 'HH:mm dd/MM/yy');
-        } catch { return ''; }
+        } catch {
+            return '';
+        }
     }
+
+    const handleScrollToMessage = (targetId) => {
+        if (!targetId) return;
+        const element = document.getElementById(`msg-${targetId}`);
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setHighlightedMessageId(targetId);
+            setTimeout(() => setHighlightedMessageId(null), 2000);
+        } else {
+            toast.error("Mensagem original não encontrada nesta conversa.");
+        }
+    };
 
     return (
         <div
             ref={chatContainerRef}
-            className="flex-1 p-4 md:p-6 overflow-y-auto space-y-3 bg-gray-100"
-            style={{
-                backgroundImage: `linear-gradient(rgba(243, 244, 246, 0.8), rgba(243, 244, 246, 0.9)), url('https://static.vecteezy.com/system/resources/previews/021/736/713/non_2x/doodle-lines-arrows-circles-and-curves-hand-drawn-design-elements-isolated-on-white-background-for-infographic-illustration-vector.jpg')`,
-                backgroundSize: 'cover', backgroundPosition: 'center', backgroundBlendMode: 'overlay'
-            }}
+            className="flex-1 p-4 md:p-6 overflow-y-auto overflow-x-hidden space-y-6 custom-scrollbar bg-slate-50/20"
         >
-            {messages.map((msg, idx) => {
+            {messages.map((msg, index) => {
                 const isAssistant = msg.role === 'assistant';
+                const nextMsg = messages[index + 1];
+                const isLastInGroup = !nextMsg || nextMsg.role !== msg.role;
+
                 return (
-                    <div key={msg.id || idx} className={`flex ${isAssistant ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`relative max-w-xs md:max-w-md py-2 px-3 rounded-lg shadow-sm break-words ${isAssistant ? 'bg-[#d9fdd3] text-gray-800' : 'bg-white text-gray-800'}`}>
-                            {mensagem.isGroup && !isAssistant && msg.senderName && (
-                                <div className="text-[11px] font-bold text-brand-green mb-1 opacity-80">
-                                    {msg.senderName}
+                    <div
+                        key={msg.id}
+                        className={`flex flex-col transition-all duration-500 ${isAssistant ? 'items-end' : 'items-start'} ${isLastInGroup ? 'mb-4' : 'mb-1'}`}
+                    >
+                        <div
+                            id={`msg-${msg.id}`}
+                            className={`relative max-w-[78%] md:max-w-[70%] transition-all duration-300 ${isAssistant ? 'chat-bubble-user' : 'chat-bubble-ia shadow-sm border border-white/40'
+                                } ${highlightedMessageId === msg.id ? 'highlight-message' : ''}`}
+                        >
+                            {msg.is_template && (
+                                <div className={`text-[10px] font-black uppercase tracking-widest mb-3 flex items-center gap-2 pb-2 border-b ${isAssistant ? 'border-white/20 text-white/80' : 'border-slate-100 text-brand-green'}`}>
+                                    <Sparkles size={12} /> Template Inteligente
                                 </div>
                             )}
-                            <MessageContent msg={msg} pcId={pcId || mensagem.id} onViewMedia={onViewMedia} onDownloadDocument={onDownloadDocument} isDownloading={isDownloadingMedia} />
-                            <span className="text-xs text-gray-400 float-right ml-2 mt-1">{formatTimestamp(msg.timestamp)}</span>
+
+                            {mensagem.isGroup && !isAssistant && (msg.senderName || msg.participant) && (
+                                <div className="text-[11px] font-bold text-emerald-600/80 mb-1.5 pb-1 border-b border-slate-100/50">
+                                    ~ {msg.senderName || (msg.participant ? msg.participant.split('@')[0] : 'Desconhecido')}
+                                </div>
+                            )}
+
+                            <MessageContent
+                                msg={msg}
+                                atendimentoId={mensagem.id}
+                                onViewMedia={onViewMedia}
+                                onDownloadDocument={onDownloadDocument}
+                                isDownloading={isDownloadingMedia}
+                                onQuotedClick={handleScrollToMessage}
+                            />
+
+                            <div className={`flex items-center gap-2 mt-3 ${isAssistant ? 'justify-end text-white/60' : 'justify-start text-slate-400'}`}>
+                                {msg.is_ai && (
+                                    <span className={`text-[9px] font-black uppercase flex items-center gap-1 ${isAssistant ? 'text-white/80' : 'text-brand-green'}`}>
+                                        <Wand2 size={10} /> IA
+                                    </span>
+                                )}
+                                <span className="text-[10px] font-bold uppercase tracking-tight">{formatTimestamp(msg.timestamp)}</span>
+                                {isAssistant && (
+                                    <div className="flex items-center">
+                                        {msg.type === 'sending' && <Loader2 size={12} className="animate-spin" />}
+                                        {msg.status === 'sent' && <Check size={14} />}
+                                        {msg.status === 'delivered' && <CheckCheck size={14} />}
+                                        {msg.status === 'read' && <CheckCheck size={16} className="text-cyan-300 drop-shadow-[0_0_2px_rgba(0,0,0,0.5)]" />}
+                                        {msg.status === 'failed' && <AlertCircle size={14} className="text-red-300" title={msg.error_title || "Falha no envio"} />}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 );
             })}
             {messages.length === 0 && (
-                <div className="flex items-center justify-center h-full">
-                    <p className="text-center text-gray-600 bg-white/70 backdrop-blur-sm p-3 rounded-lg italic">Nenhuma mensagem neste contato.</p>
+                <div className="flex flex-col items-center justify-center h-full opacity-40">
+                    <div className="w-20 h-20 rounded-[2rem] bg-slate-100 flex items-center justify-center mb-4">
+                        <MessageSquare size={32} className="text-slate-300" />
+                    </div>
+                    <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">
+                        Início da Transmissão
+                    </p>
                 </div>
             )}
         </div>

@@ -1,79 +1,117 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../api/axiosConfig';
-import { Plus, Play, Pause, Trash2, Edit, Loader2, MessageSquare, Clock, AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from 'lucide-react';
+import { 
+    Plus, Play, Pause, Trash2, Edit, Loader2, MessageSquare, Clock, 
+    AlertTriangle, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight,
+    Zap, Activity, Target, Shield, ArrowRight, Settings, Filter, MoreVertical, Layout, Database, CheckCircle
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import CreateProspectingModal from '../components/prospecting/CreateProspectingModal';
-import { ConversationModal, EditContactModal, DeleteConfirmationModal } from './Prospects'; // Reutilizando os modais
+import { ConversationModal, EditContactModal, DeleteConfirmationModal } from './Prospects';
+import PageLoader from '../components/common/PageLoader';
 
-// --- Componentes Internos ---
+// ─── DESIGN SYSTEM ──────────────────────────────────────────────────────────
+const DS_STYLE = `
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
+.main-prospecting-page { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+.main-prospecting-page h1, .main-prospecting-page h2, .main-prospecting-page h3, .main-prospecting-page h4 { font-family: 'Plus Jakarta Sans', sans-serif; }
+.ds-surface { background: #ffffff; border-radius: 2rem; border: 1px solid rgba(0,0,0,0.05); box-shadow: 0 4px 20px rgba(0,0,0,0.03); }
+.ds-card { background: #ffffff; border-radius: 1.5rem; border: 1px solid rgba(0,0,0,0.05); padding: 1.5rem; transition: all 0.3s ease; }
+.sidebar-item { border-radius: 1.25rem; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); border: 1px solid transparent; }
+.sidebar-item.active { background: #356854; color: white; border-color: #356854; box-shadow: 0 15px 30px rgba(53, 104, 84, 0.2); }
+.sidebar-item:not(.active):hover { background: #f1f5f9; border-color: #e2e8f0; }
+.status-pill { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 800; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+.campaign-btn {
+    height: 4rem;
+    border-radius: 1.25rem;
+    font-weight: 800;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+}
+`;
+
 const CampaignSkeleton = () => (
-  <li className="p-3 rounded-lg flex justify-between items-center bg-white animate-pulse border border-gray-100">
-    <div className="h-5 bg-gray-200 rounded w-3/5"></div>
-    <div className="h-5 bg-gray-200 rounded-full w-1/5"></div>
-  </li>
+  <div className="p-6 rounded-2xl flex items-center gap-4 bg-white animate-pulse border border-slate-100">
+    <div className="w-12 h-12 bg-slate-100 rounded-xl"></div>
+    <div className="flex-1 space-y-3">
+        <div className="h-4 bg-slate-100 rounded w-3/4"></div>
+        <div className="h-2 bg-slate-100 rounded w-1/4"></div>
+    </div>
+  </div>
 );
+
+const StatusBadge = ({ status, active }) => {
+    const configs = {
+        'Em Andamento': active ? 'bg-white/20 text-white border-white/20' : 'bg-emerald-50 text-emerald-600 border-emerald-100',
+        'Pendente': active ? 'bg-white/20 text-white border-white/20' : 'bg-amber-50 text-amber-600 border-amber-100',
+        'Concluído': active ? 'bg-white/20 text-white border-white/20' : 'bg-slate-50 text-slate-400 border-slate-100',
+        'Parado': active ? 'bg-white/20 text-white border-white/20' : 'bg-rose-50 text-rose-600 border-rose-100',
+    };
+    return (
+        <span className={`status-pill px-3 py-1 rounded-lg border ${configs[status] || 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+            {status}
+        </span>
+    );
+};
 
 const ActivityLogTable = ({ logData, onOpenConversation, onOpenEditContact, isLoading }) => {
   const getStatusClass = (status) => {
-    const baseClasses = "px-2 py-1 text-xs font-medium rounded-full inline-block text-center";
     const statusMap = {
-        'Resposta Recebida': "bg-blue-100 text-blue-800",
-        'Lead Qualificado': "bg-green-100 text-green-800",
-        'Concluído': "bg-green-100 text-green-800",
-        'Aguardando Resposta': "bg-yellow-100 text-yellow-800",
-        'Falha no Envio': "bg-red-200 text-red-800",
-        'Erro IA': "bg-red-200 text-red-800",
-        'Sem Whatsapp': "bg-gray-200 text-gray-700",
-        'Não Interessado': "bg-red-100 text-red-700",
-        'Aguardando Início': "bg-purple-100 text-purple-800",
-        'Conversa Manual': "bg-orange-100 text-orange-800",
-        'Fechado': "bg-emerald-100 text-emerald-800",
-        'Atendente Chamado': "bg-orange-500 text-white",
+        'Resposta Recebida': "bg-sky-50 text-sky-600 border-sky-100",
+        'Lead Qualificado': "bg-emerald-50 text-emerald-600 border-emerald-100",
+        'Concluído': "bg-emerald-50 text-emerald-600 border-emerald-100",
+        'Aguardando Resposta': "bg-amber-50 text-amber-600 border-amber-100",
+        'Falha no Envio': "bg-rose-50 text-rose-600 border-rose-100",
+        'Erro IA': "bg-rose-50 text-rose-600 border-rose-100",
+        'Sem Whatsapp': "bg-slate-50 text-slate-400 border-slate-100",
+        'Não Interessado': "bg-rose-50 text-rose-600 border-rose-100",
+        'Aguardando Início': "bg-indigo-50 text-indigo-600 border-indigo-100",
+        'Conversa Manual': "bg-orange-50 text-orange-600 border-orange-100",
+        'Fechado': "bg-emerald-50 text-emerald-600 border-emerald-100",
+        'Atendente Chamado': "bg-[#356854] text-white border-[#356854]",
     };
-    return `${baseClasses} ${statusMap[status] || 'bg-gray-100 text-gray-600'}`;
+    return `status-pill px-3 py-1.5 rounded-xl border ${statusMap[status] || 'bg-slate-50 text-slate-400 border-slate-100'}`;
   };
 
-  const formatTime = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  };
-
-  if (isLoading) {
-    return (
-      <div className="space-y-2 p-2 animate-pulse">
-        {[...Array(5)].map((_, i) => (
-          <div key={i} className="h-8 bg-gray-200 rounded w-full"></div>
-        ))}
-      </div>
-    );
-  }
+  if (isLoading) return <div className="space-y-4 p-8">{[...Array(6)].map((_, i) => <div key={i} className="h-20 bg-slate-50 rounded-[1.5rem] animate-pulse border border-slate-100"></div>)}</div>;
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
-        <thead className="border-b-2 border-gray-200">
-          <tr>
-            <th className="p-3 font-semibold text-gray-600">Contato</th>
-            <th className="p-3 font-semibold text-gray-600">Situação</th>
-            <th className="p-3 font-semibold text-gray-600">Observações</th>
-            <th className="p-3 font-semibold text-gray-600 text-center">Ações</th>
+    <div className="overflow-x-auto custom-scrollbar">
+      <table className="w-full text-left min-w-[800px]">
+        <thead>
+          <tr className="border-b border-slate-50">
+            {['Contato Interagindo', 'Situação IA', 'Insight do Agente', 'Ações'].map((h, i) => (
+                <th key={i} className="px-12 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{h}</th>
+            ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-slate-50">
           {logData.map((item, index) => (
-            <tr key={index} className="border-b border-gray-100 hover:bg-gray-50">
-              <td className="p-3">
-                <div className="font-medium text-gray-800">{item.contact_name}</div>
-                <div className="text-gray-500 flex items-center gap-1"><Clock size={12} /> {formatTime(item.updated_at)}</div>
+            <tr key={index} className="group hover:bg-emerald-50/20 transition-all">
+              <td className="px-12 py-6">
+                <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 font-bold group-hover:bg-emerald-500 group-hover:text-white transition-all">{(item.contact_name || '?')[0].toUpperCase()}</div>
+                    <div>
+                        <div className="text-sm font-black text-slate-800">{item.contact_name}</div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight mt-1">{new Date(item.updated_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} • Sincronizado</div>
+                    </div>
+                </div>
               </td>
-              <td className="p-3"><span className={getStatusClass(item.situacao)}>{item.situacao}</span></td>
-              <td className="p-3 text-gray-600 max-w-xs truncate" title={item.observacoes}>{item.observacoes || '-'}</td>
-              <td className="p-3 text-center">
-                <div className="flex justify-center items-center gap-1">
-                  <button onClick={() => onOpenConversation(item)} className="p-2 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors" title="Ver conversa">
-                    <MessageSquare size={16} />
-                  </button>
-                  <button onClick={() => onOpenEditContact(item)} className="p-2 text-gray-500 hover:text-green-600 hover:bg-gray-100 rounded-full transition-colors" title="Editar Contato"><Edit size={16} /></button>
+              <td className="px-12 py-6"><span className={getStatusClass(item.situacao)}>{item.situacao}</span></td>
+              <td className="px-12 py-6 max-w-xs"><p className="text-xs text-slate-400 font-medium italic truncate" title={item.observacoes}>{item.observacoes || 'Nenhum insight disponível.'}</p></td>
+              <td className="px-12 py-6">
+                <div className="flex justify-end items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                  <button onClick={() => onOpenConversation(item)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-100 text-slate-400 hover:text-[#356854] hover:border-emerald-100 rounded-xl transition-all shadow-sm"><MessageSquare size={18} /></button>
+                  <button onClick={() => onOpenEditContact(item)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-100 text-slate-400 hover:text-[#356854] hover:border-emerald-100 rounded-xl transition-all shadow-sm"><Edit size={18} /></button>
                 </div>
               </td>
             </tr>
@@ -84,7 +122,6 @@ const ActivityLogTable = ({ logData, onOpenConversation, onOpenEditContact, isLo
   );
 };
 
-// --- Componente Principal ---
 function MainProspecting() {
   const [prospects, setProspects] = useState([]);
   const [selectedProspect, setSelectedProspect] = useState(null);
@@ -95,407 +132,185 @@ function MainProspecting() {
   const logIntervalRef = useRef(null);
   const campaignsIntervalRef = useRef(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState({ isOpen: false, prospect: null });
-
-  // Estado unificado para modais
   const [modal, setModal] = useState({ type: null, data: null });
-  const statusOptions = ["Aguardando Início", "Aguardando Resposta", "Resposta Recebida", "Lead Qualificado", "Não Interessado", "Concluído", "Sem Whatsapp", "Falha no Envio", "Erro IA", "Conversa Manual", "Fechado", "Atendente Chamado"];
-
-  // --- Estado da Paginação ---
   const [currentPage, setCurrentPage] = useState(1);
-  const logsPerPage = 10;
+  const [loadingStates, setLoadingStates] = useState({ campaigns: true, log: false });
+  const [actionLoading, setActionLoading] = useState({ start: false, stop: false, delete: false });
+  const logsPerPage = 12;
 
-  const [loadingStates, setLoadingStates] = useState({
-    campaigns: true,
-    log: false,
-  });
+  const fetchData = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoadingStates(p => ({ ...p, campaigns: true }));
+    try {
+      const res = await api.get('/prospecting/');
+      setProspects(res.data);
+      if (!selectedProspect && res.data.length > 0) setSelectedProspect(res.data[0]);
+    } catch (e) {} finally { setLoadingStates(p => ({ ...p, campaigns: false })); }
+  }, [selectedProspect]);
 
-  const [actionLoading, setActionLoading] = useState({
-    start: false,
-    stop: false,
-    delete: false,
-  });
-
-  const stopLogPolling = useCallback(() => {
-    if (logIntervalRef.current) {
-      clearInterval(logIntervalRef.current);
-      logIntervalRef.current = null;
-    }
-  }, []);
-
-  const stopCampaignsPolling = useCallback(() => {
-    if (campaignsIntervalRef.current) {
-      clearInterval(campaignsIntervalRef.current);
-      campaignsIntervalRef.current = null;
-    }
-  }, []);
-
-  const fetchActivityLog = useCallback(async (prospectId, isSilent = false) => {
+  const fetchLogs = useCallback(async (prospectId, isSilent = false) => {
     if (!prospectId) return;
-
-    if (!isSilent) {
-      setLoadingStates(prev => ({ ...prev, log: true }));
-    }
+    if (!isSilent) setLoadingStates(p => ({ ...p, log: true }));
     try {
-      const response = await api.get(`/prospecting/${prospectId}/activity-log`);
-      setActivityLog(response.data);
-      // O status da campanha será atualizado ao buscar a lista de prospecções
-      // ou ao selecionar uma nova campanha.
-    } catch (error) {
-      stopLogPolling();
-    } finally {
-      if (!isSilent) {
-        setLoadingStates(prev => ({ ...prev, log: false }));
-      }
-    }
-  }, [stopLogPolling]);
-  
-  const fetchProspects = useCallback(async (isSilent = false) => {
-    if (!isSilent) {
-      setLoadingStates(prev => ({ ...prev, campaigns: true }));
-    }
-    try {
-      const response = await api.get('/prospecting/');
-      const prospectsData = response.data;
-      setProspects(prospectsData);
-      return prospectsData;
-    } catch (error) {
-      return [];
-    } finally {
-      if (!isSilent) {
-        setLoadingStates(prev => ({ ...prev, campaigns: false }));
-      }
-    }
+      const res = await api.get(`/prospecting/${prospectId}/activity-log`);
+      setActivityLog(res.data);
+    } catch (e) {} finally { setLoadingStates(p => ({ ...p, log: false })); }
   }, []);
 
-  const startPolling = useCallback(() => {
-    stopLogPolling();
-    if (selectedProspect) {
-      logIntervalRef.current = setInterval(() => fetchActivityLog(selectedProspect.id, true), 5000);
-    }
-  }, [selectedProspect, fetchActivityLog, stopLogPolling]);
-
-  // Initial load and campaigns polling
   useEffect(() => {
-    const init = async () => {
-      const data = await fetchProspects(false);
-      if (data.length > 0) {
-        setSelectedProspect(prev => prev || data[0]);
-      }
-    };
-    init();
+    fetchData();
+    campaignsIntervalRef.current = setInterval(() => fetchData(true), 10000);
+    return () => clearInterval(campaignsIntervalRef.current);
+  }, [fetchData]);
 
-    campaignsIntervalRef.current = setInterval(() => {
-      fetchProspects(true);
-    }, 5000);
-
-    return () => {
-      stopCampaignsPolling();
-      stopLogPolling();
-    };
-  }, [fetchProspects, stopCampaignsPolling, stopLogPolling]);
-  
-  // Sync selectedProspect with updated list
   useEffect(() => {
     if (selectedProspect) {
-      const updated = prospects.find(p => p.id === selectedProspect.id);
-      if (updated && (updated.status !== selectedProspect.status || updated.nome_prospeccao !== selectedProspect.nome_prospeccao)) {
-        setSelectedProspect(updated);
-        setCurrentStatus(updated.status);
-      }
-    } else if (prospects.length > 0 && !loadingStates.campaigns) {
-      setSelectedProspect(prospects[0]);
-    } else if (prospects.length === 0 && !loadingStates.campaigns) {
-      setSelectedProspect(null);
-      setActivityLog([]);
-      setCurrentStatus('Pendente');
-    }
-  }, [prospects, loadingStates.campaigns]);
-
-  // Fetch logs when selection changes (manual or initial)
-  useEffect(() => {
-    if (selectedProspect) {
-      fetchActivityLog(selectedProspect.id, false);
+      fetchLogs(selectedProspect.id);
       setCurrentStatus(selectedProspect.status);
-      setCurrentPage(1);
+      if (selectedProspect.status === 'Em Andamento') {
+        logIntervalRef.current = setInterval(() => fetchLogs(selectedProspect.id, true), 5000);
+      } else {
+        clearInterval(logIntervalRef.current);
+      }
     }
-  }, [selectedProspect?.id, fetchActivityLog]); // Use ID to avoid re-fetching on status update only (logs polling handles updates)
+    return () => clearInterval(logIntervalRef.current);
+  }, [selectedProspect, fetchLogs]);
 
-  useEffect(() => {
-    stopLogPolling();
-    if (selectedProspect && currentStatus === 'Em Andamento') {
-      startPolling();
-    }
-    return () => stopLogPolling();
-  }, [selectedProspect, currentStatus, startPolling, stopLogPolling]);
-  
-  /*useEffect(() => {
-    if (selectedProspect && log.status) {
-      setProspects(prevProspects => 
-        prevProspects.map(p => 
-          p.id === selectedProspect.id ? { ...p, status: log.status } : p
-        )
-      );
-    }
-  }, [log.status, selectedProspect]);*/
-
-  const handleStart = async () => {
+  const handleAction = async (action) => {
     if (!selectedProspect) return;
-    setActionLoading(prev => ({ ...prev, start: true }));
+    setActionLoading(p => ({ ...p, [action]: true }));
     try {
-      await api.post(`/prospecting/${selectedProspect.id}/start`);
-      await fetchProspects(true); 
-    } catch (error) {
-      toast.error(`Erro ao iniciar: ${error.response?.data?.detail || 'Erro desconhecido'}`);
-    } finally {
-      setActionLoading(prev => ({ ...prev, start: false }));
-    }
-  };
-
-  const handleStop = async () => {
-    if (!selectedProspect) return;
-    setActionLoading(prev => ({ ...prev, stop: true }));
-    try {
-      await api.post(`/prospecting/${selectedProspect.id}/stop`);
-      await fetchProspects(true);
-    } catch (error) {
-      toast.error(`Erro ao parar: ${error.response?.data?.detail || 'Erro desconhecido'}`);
-    } finally {
-      setActionLoading(prev => ({ ...prev, stop: false }));
-    }
-  };
-  
-  const handleDeleteClick = () => {
-    if (!selectedProspect) return;
-    setDeleteConfirmation({ isOpen: true, prospect: selectedProspect });
+      await api.post(`/prospecting/${selectedProspect.id}/${action}`);
+      const res = await api.get('/prospecting/');
+      setProspects(res.data);
+      const updated = res.data.find(p => p.id === selectedProspect.id);
+      if (updated) { setSelectedProspect(updated); setCurrentStatus(updated.status); }
+      toast.success(action === 'start' ? 'Prospecção iniciada!' : 'Prospecção pausada.');
+    } catch (e) { toast.error('Falha na operação.'); }
+    finally { setActionLoading(p => ({ ...p, [action]: false })); }
   };
 
   const confirmDelete = async () => {
-    const prospect = deleteConfirmation.prospect;
-    if (!prospect) return;
-    setActionLoading(prev => ({ ...prev, delete: true }));
+    if (!deleteConfirmation.prospect) return;
+    setActionLoading(p => ({ ...p, delete: true }));
     try {
-      await api.delete(`/prospecting/${prospect.id}`);
-      const updatedProspects = prospects.filter(p => p.id !== prospect.id);
-      setProspects(updatedProspects);
-      toast.success('Campanha excluída com sucesso!');
-    } catch (error) {
-      toast.error(`Erro ao excluir: ${error.response?.data?.detail || 'Erro desconhecido'}`);
-    } finally {
-      setActionLoading(prev => ({ ...prev, delete: false }));
-      setDeleteConfirmation({ isOpen: false, prospect: null });
-    }
+      await api.delete(`/prospecting/${deleteConfirmation.prospect.id}`);
+      toast.success('Campanha excluída.');
+      const res = await api.get('/prospecting/');
+      setProspects(res.data);
+      setSelectedProspect(res.data[0] || null);
+    } catch (e) { toast.error('Erro ao excluir.'); }
+    finally { setActionLoading(p => ({ ...p, delete: false })); setDeleteConfirmation({ isOpen: false, prospect: null }); }
   };
 
-  const handleSelectProspect = (prospect) => {
-    if (selectedProspect?.id === prospect.id) return;
-    setSelectedProspect(prospect);
-    setCurrentStatus(prospect.status);
-  }
-
-  const handleOpenCreateModal = () => {
-    setEditingProspect(null);
-    setIsModalOpen(true);
-  };
-
-  const handleOpenEditModal = (prospect) => {
-    if (prospect.status === 'Em Andamento') {
-      toast.error('Pare a campanha antes de editá-la.');
-      return;
-    }
-    setEditingProspect(prospect);
-    setIsModalOpen(true);
-  };
-
-  const handleSuccess = (updatedOrNewProspect) => {
-    if (editingProspect) {
-      setProspects(prev => prev.map(p => p.id === updatedOrNewProspect.id ? { ...p, ...updatedOrNewProspect } : p));
-      setSelectedProspect(updatedOrNewProspect);
-    } else {
-      setProspects(prev => [updatedOrNewProspect, ...prev]);
-      setSelectedProspect(updatedOrNewProspect);
-    }
-    setEditingProspect(null);
-    setIsModalOpen(false);
-  };
-
-  const handleOpenEditContact = (logItem) => {
-    // CORREÇÃO: O modal de edição precisa do ID da relação (prospect_contact_id) para a API.
-    // O modal usa a propriedade 'id' para fazer a chamada.
-    const contactDataForModal = { ...logItem, id: logItem.prospect_contact_id };
-    setModal({ type: 'edit_contact', data: contactDataForModal });
-  };
-
-  const handleSaveContactEdit = async (contactId, updates) => {
-    try {
-      await api.put(`/prospecting/contacts/${contactId}`, updates);
-      setModal({ type: null, data: null });
-      fetchActivityLog(selectedProspect.id, true); // Atualiza o log silenciosamente
-      toast.success('Contato atualizado com sucesso!');
-    } catch (err) {
-      toast.error('Erro ao salvar as alterações do contato.');
-    }
-  };
-
-  const isRunning = currentStatus === 'Em Andamento';
-  const isAnyActionLoading = actionLoading.start || actionLoading.stop || actionLoading.delete;
-
-  // --- Lógica de Paginação ---
-  const indexOfLastLog = currentPage * logsPerPage;
-  const indexOfFirstLog = indexOfLastLog - logsPerPage;
-  const currentLogs = activityLog.slice(indexOfFirstLog, indexOfLastLog);
+  const currentLogs = activityLog.slice((currentPage - 1) * logsPerPage, currentPage * logsPerPage);
   const totalPages = Math.ceil(activityLog.length / logsPerPage);
 
-  const paginate = (pageNumber) => {
-      if (pageNumber < 1 || pageNumber > totalPages) return;
-      setCurrentPage(pageNumber);
-  };
+  if (loadingStates.campaigns && prospects.length === 0) return <PageLoader message="Acessando torre de controle..." subMessage="Sincronizando logs de atividade do WhatsApp..." />;
 
   return (
-    <div className="p-4 md:p-8 bg-gray-50 h-full flex flex-col">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-800">Prospecção Principal</h1>
-          <p className="text-gray-500 mt-1">Crie, gerencie e execute suas campanhas de prospecção.</p>
-        </div>
-        <button
-          onClick={handleOpenCreateModal}
-          className="mt-4 md:mt-0 flex items-center gap-2 bg-brand-green text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-brand-green-dark transition-all duration-300"
-        >
-          <Plus size={20} />
-          Nova Prospecção
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 flex-1 min-h-0">
-        <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg border flex flex-col">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">Campanhas</h2>
-          <div className="flex-grow overflow-y-auto pr-2">
-            <ul className="space-y-2">
-              {loadingStates.campaigns ? (
-                Array.from({ length: 5 }).map((_, index) => <CampaignSkeleton key={index} />)
-              ) : prospects.length > 0 ? (
-                prospects.map(p => (
-                  <li key={p.id} className={`relative rounded-lg flex justify-between items-center group transition-all duration-200 ${selectedProspect?.id === p.id ? 'bg-brand-green text-white font-semibold shadow-sm' : 'hover:bg-gray-100'}`}>
-                    <button
-                      onClick={() => handleSelectProspect(p)}
-                      className="flex-grow text-left p-3 flex items-center"
-                    >
-                      <span className="truncate pr-2">{p.nome_prospeccao}</span>
-                      <span className={`text-xs px-2 py-1 rounded-full shrink-0 ${selectedProspect?.id === p.id ? 'bg-white/30 text-white' : 'bg-gray-200 text-gray-700'}`}>
-                        {p.status}
-                      </span>
-                    </button>
-                    <div className="relative pr-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenEditModal(p);
-                        }}
-                        className={`p-2 rounded-full transition-colors ${selectedProspect?.id === p.id ? 'hover:bg-white/20' : 'hover:bg-gray-200'}`}
-                        title="Editar Campanha"
-                      >
-                        <Edit size={20} />
-                      </button>
-                    </div>
-                  </li>
-                ))
-              ) : (
-                <p className="text-center text-gray-500 pt-8">Nenhuma campanha criada ainda.</p>
-              )}
-            </ul>
+    <div className="main-prospecting-page p-6 md:p-12 min-h-screen bg-[#f8fafc]">
+      <style>{DS_STYLE}</style>
+      <div className="max-w-[1600px] mx-auto flex flex-col gap-12">
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+          <div>
+            <h1 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">Painel de Prospecção <Zap size={24} className="text-[#356854]" /></h1>
+            <p className="text-slate-400 mt-1.5 text-sm font-medium">Controle de disparos inteligentes e monitoramento real-time</p>
           </div>
-          <div className="mt-auto pt-6 border-t">
-            <h3 className="text-lg font-semibold text-gray-700 mb-4">Controles da Campanha</h3>
-            {selectedProspect ? (
-              <div className="space-y-3">
-                <div className="flex gap-4">
-                  <button onClick={handleStart} disabled={isAnyActionLoading || isRunning || currentStatus === 'Concluído' || loadingStates.log} className="flex-1 flex items-center justify-center gap-2 bg-green-500 text-white font-bold py-3 rounded-lg shadow-md hover:bg-green-600 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
-                    {actionLoading.start ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
-                    {actionLoading.start ? 'Iniciando...' : 'Iniciar'}
-                  </button>
-                  <button onClick={handleStop} disabled={isAnyActionLoading || !isRunning || loadingStates.log} className="flex-1 flex items-center justify-center gap-2 bg-orange-500 text-white font-bold py-3 rounded-lg shadow-md hover:bg-orange-600 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
-                    {actionLoading.stop ? <Loader2 size={18} className="animate-spin" /> : <Pause size={18} />}
-                    {actionLoading.stop ? 'Parando...' : 'Parar'}
-                  </button>
-                </div>
-                <button onClick={handleDeleteClick} disabled={isAnyActionLoading || isRunning || loadingStates.log} className="w-full flex items-center justify-center gap-2 bg-red-600 text-white font-semibold py-2 rounded-lg shadow-md hover:bg-red-700 transition-all disabled:bg-gray-400 disabled:cursor-not-allowed">
-                  {actionLoading.delete ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16}/>}
-                  {actionLoading.delete ? 'Excluindo...' : 'Excluir Campanha'}
-                </button>
-              </div>
-            ) : <p className="text-center text-gray-500">Selecione uma campanha.</p>}
-          </div>
-        </div>
+          <button onClick={() => { setEditingProspect(null); setIsModalOpen(true); }} className="h-14 px-8 bg-[#356854] text-white font-black text-xs uppercase tracking-[0.1em] rounded-2xl shadow-xl shadow-emerald-900/10 hover:bg-[#2d5847] transition-all flex items-center gap-3">
+            <Plus size={20} /> Criar Campanha
+          </button>
+        </header>
 
-        <div className="lg:col-span-3 bg-white rounded-xl shadow-lg p-6 flex flex-col border min-h-0">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">Log de Atividades Recentes</h2>
-          {selectedProspect ? (
-            <>
-              <div className="flex-grow overflow-y-auto">
-                <ActivityLogTable 
-                  logData={currentLogs} 
-                  isLoading={loadingStates.log && !logIntervalRef.current}
-                  onOpenConversation={(item) => setModal({ type: 'conversation', data: { conversa: item.conversa, contactName: item.contact_name }})}
-                  onOpenEditContact={handleOpenEditContact}
-                />
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-12">
+          {/* Sidebar */}
+          <aside className="xl:col-span-4 flex flex-col gap-8">
+            <div className="ds-surface p-12 flex flex-col min-h-[750px]">
+              <div className="flex items-center justify-between mb-8">
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Campanhas Ativas</h3>
+                  <div className="h-6 px-3 bg-slate-50 text-slate-400 font-black text-[10px] rounded-lg flex items-center">{prospects.length}</div>
               </div>
-              {totalPages > 1 && (
-                <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-200">
-                    <span className="text-sm text-gray-500">Página {currentPage} de {totalPages} ({activityLog.length} registros)</span>
-                    <div className="flex items-center gap-1">
-                        <button onClick={() => paginate(1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsLeft size={16} /></button>
-                        <button onClick={() => paginate(currentPage - 1)} disabled={currentPage === 1} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronLeft size={16} /></button>
-                        <span className="px-2 text-sm text-gray-600 font-medium">{currentPage}</span>
-                        <button onClick={() => paginate(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronRight size={16} /></button>
-                        <button onClick={() => paginate(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-md hover:bg-gray-100 disabled:opacity-50"><ChevronsRight size={16} /></button>
-                    </div>
-                </div>
+              
+              <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar max-h-[550px]">
+                {loadingStates.campaigns ? Array.from({ length: 4 }).map((_, i) => <CampaignSkeleton key={i} />) : 
+                 prospects.map(p => (
+                  <div key={p.id} onClick={() => { setSelectedProspect(p); setCurrentStatus(p.status); }} className={`sidebar-item group p-6 cursor-pointer ${selectedProspect?.id === p.id ? 'active' : ''}`}>
+                      <div className="flex justify-between items-start gap-4">
+                          <div className="flex-grow overflow-hidden">
+                              <h3 className="font-black text-sm tracking-tight truncate mb-2">{p.nome_prospeccao}</h3>
+                              <StatusBadge status={p.status} active={selectedProspect?.id === p.id} />
+                          </div>
+                          <button onClick={(e) => { e.stopPropagation(); if (p.status === 'Em Andamento') return toast.error('Pause a campanha para editar.'); setEditingProspect(p); setIsModalOpen(true); }} className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${selectedProspect?.id === p.id ? 'bg-white/10 text-white' : 'text-slate-300 hover:text-emerald-500 hover:bg-emerald-50'}`}>
+                              <Edit size={16} />
+                          </button>
+                      </div>
+                  </div>
+                ))}
+              </div>
+
+              {selectedProspect && (
+                  <div className="mt-10 pt-8 border-t border-slate-50 space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                          <button onClick={() => handleAction('start')} disabled={actionLoading.start || currentStatus === 'Em Andamento' || currentStatus === 'Concluído'} className="campaign-btn bg-emerald-500 text-white shadow-xl shadow-emerald-500/10 hover:bg-emerald-600 disabled:opacity-30">
+                              {actionLoading.start ? <Loader2 size={20} className="animate-spin" /> : <Play size={20} />} Iniciar
+                          </button>
+                          <button onClick={() => handleAction('stop')} disabled={actionLoading.stop || currentStatus !== 'Em Andamento'} className="campaign-btn bg-rose-500 text-white shadow-xl shadow-rose-500/10 hover:bg-rose-600 disabled:opacity-30">
+                              {actionLoading.stop ? <Loader2 size={20} className="animate-spin" /> : <Pause size={20} />} Pausar
+                          </button>
+                      </div>
+                      <button onClick={() => setDeleteConfirmation({ isOpen: true, prospect: selectedProspect })} disabled={currentStatus === 'Em Andamento'} className="w-full h-14 flex items-center justify-center gap-2 text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-rose-500 transition-all disabled:opacity-20"><Trash2 size={16} /> Excluir Permanentemente</button>
+                  </div>
               )}
-            </>
-          ) : ( 
-            <div className="flex items-center justify-center h-full">
-              <p className="text-gray-500">Selecione uma campanha para ver o log.</p>
             </div>
-          )}
+          </aside>
+
+          {/* Main Monitor */}
+          <main className="xl:col-span-8 flex flex-col gap-12">
+            <div className="ds-surface overflow-hidden border-none shadow-2xl shadow-slate-200/50 flex flex-col min-h-[750px]">
+              <div className="p-12 border-b border-slate-50 bg-white sticky top-0 z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+                <div>
+                  <h2 className="text-xl font-black text-slate-800 flex items-center gap-3">Log de Monitoramento <Activity size={20} className="text-emerald-500" /></h2>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Status de processamento em tempo real</p>
+                </div>
+                <div className={`px-4 py-2 rounded-xl flex items-center gap-3 border ${currentStatus === 'Em Andamento' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>
+                    <div className={`w-2.5 h-2.5 rounded-full ${currentStatus === 'Em Andamento' ? 'bg-emerald-500 animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-slate-300'}`} />
+                    <span className="text-[10px] font-black uppercase tracking-widest">{currentStatus === 'Em Andamento' ? 'Torre Ativa' : 'Sistema Standby'}</span>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-hidden">
+                {selectedProspect ? (
+                  <ActivityLogTable 
+                      logData={currentLogs} 
+                      isLoading={loadingStates.log && !logIntervalRef.current}
+                      onOpenConversation={(item) => setModal({ type: 'conversation', data: { conversa: item.conversa, contactName: item.contact_name }})}
+                      onOpenEditContact={(item) => setModal({ type: 'edit_contact', data: { ...item, id: item.prospect_contact_id }})}
+                  />
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center p-20 opacity-20"><Layout size={64} className="mb-6" /><h3 className="text-sm font-black uppercase tracking-widest">Selecione uma campanha</h3></div>
+                )}
+              </div>
+
+              {totalPages > 1 && (
+                <footer className="p-8 border-t border-slate-50 bg-white flex justify-between items-center">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Página {currentPage} de {totalPages}</span>
+                    <div className="flex items-center gap-3">
+                        <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="w-10 h-10 flex items-center justify-center border border-slate-100 rounded-xl text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronsLeft size={18} /></button>
+                        <button onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1} className="w-10 h-10 flex items-center justify-center border border-slate-100 rounded-xl text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronLeft size={18} /></button>
+                        <div className="h-10 px-6 bg-emerald-50 rounded-xl flex items-center text-[#356854] font-black text-[10px] uppercase tracking-widest border border-emerald-100">{currentPage}</div>
+                        <button onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages} className="w-10 h-10 flex items-center justify-center border border-slate-100 rounded-xl text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronRight size={18} /></button>
+                        <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="w-10 h-10 flex items-center justify-center border border-slate-100 rounded-xl text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronsRight size={18} /></button>
+                    </div>
+                </footer>
+              )}
+            </div>
+          </main>
         </div>
       </div>
       
-      {isModalOpen && (
-        <CreateProspectingModal 
-          prospectToEdit={editingProspect}
-          onClose={() => {
-            setIsModalOpen(false);
-            setEditingProspect(null);
-          }}
-          onSuccess={handleSuccess}
-        />
-      )}
-
-      {modal.type === 'conversation' && (
-        <ConversationModal
-          onClose={() => setModal({ type: null, data: null })}
-          conversation={modal.data.conversa}
-          contactIdentifier={modal.data.contactName}
-        />
-      )}
-
-      {modal.type === 'edit_contact' && (
-        <EditContactModal
-          contact={modal.data}
-          statusOptions={statusOptions}
-          onSave={handleSaveContactEdit}
-          onClose={() => setModal({ type: null, data: null })}
-        />
-      )}
-
-            {deleteConfirmation.isOpen && (
-                <DeleteConfirmationModal
-                    title="Excluir Campanha"
-                    message={`Tem certeza que deseja excluir a campanha "<strong>${deleteConfirmation.prospect?.nome_prospeccao}</strong>"? Esta ação não pode ser desfeita.`}
-                    onConfirm={confirmDelete}
-                    onClose={() => setDeleteConfirmation({ isOpen: false, prospect: null })}
-                />
-            )}
+      {isModalOpen && <CreateProspectingModal prospectToEdit={editingProspect} onClose={() => { setIsModalOpen(false); setEditingProspect(null); }} onSuccess={(res) => { fetchData(true); setIsModalOpen(false); }} />}
+      {modal.type === 'conversation' && <ConversationModal onClose={() => setModal({ type: null, data: null })} conversation={modal.data.conversa} contactIdentifier={modal.data.contactName} />}
+      {modal.type === 'edit_contact' && <EditContactModal contact={modal.data} statusOptions={["Aguardando Início", "Aguardando Resposta", "Resposta Recebida", "Lead Qualificado", "Não Interessado", "Concluído", "Sem Whatsapp", "Falha no Envio", "Erro IA", "Conversa Manual", "Fechado", "Atendente Chamado"]} onSave={async (id, up) => { await api.put(`/prospecting/contacts/${id}`, up); fetchLogs(selectedProspect.id, true); setModal({ type: null, data: null }); toast.success('Atualizado!'); }} onClose={() => setModal({ type: null, data: null })} />}
+      {deleteConfirmation.isOpen && <DeleteConfirmationModal title="Excluir Campanha" message={`Deseja mesmo excluir "<strong>${deleteConfirmation.prospect?.nome_prospeccao}</strong>"?`} onConfirm={confirmDelete} onClose={() => setDeleteConfirmation({ isOpen: false, prospect: null })} />}
     </div>
   );
 }

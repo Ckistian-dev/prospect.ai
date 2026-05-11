@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import toast from 'react-hot-toast';
-import { Loader2, MoreVertical } from 'lucide-react';
+import { Loader2, Search, Database, MoreHorizontal } from 'lucide-react';
 import MediaModal from '../components/mensagens/MediaModal';
 import ProfileSidebar from '../components/mensagens/ProfileSidebar';
 import SearchAndFilter from '../components/mensagens/SearchAndFilter';
@@ -10,15 +10,144 @@ import ContactItem from '../components/mensagens/ContactItem';
 import ChatBody from '../components/mensagens/ChatBody';
 import ChatFooter from '../components/mensagens/ChatFooter';
 import ChatPlaceholder from '../components/mensagens/ChatPlaceholder';
+import PageLoader from '../components/common/PageLoader';
+import FilterPopover from '../components/mensagens/FilterPopover';
 
-const getTextColorForBackground = (hexColor) => '#FFFFFF';
+// ─── DESIGN SYSTEM ──────────────────────────────────────────────────────────
+const DS_STYLE = `
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@200;300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+    :root {
+        --ds-bg: #f0fdf4;
+        --ds-surface: rgba(255, 255, 255, 0.6);
+        --ds-accent: #356854;
+        --ds-text-main: #064e3b;
+        --ds-text-muted: #6b7280;
+        --ds-radius-lg: 3rem;
+        --ds-shadow-premium: 0 25px 50px -12px rgba(53, 104, 84, 0.12);
+    }
+
+    .mensagens-loft {
+        font-family: 'Inter', sans-serif;
+        background: white;
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        display: flex;
+        z-index: 10;
+    }
+
+    .contact-list-container {
+        background: white;
+        border-right: 1px solid #f1f5f9 !important;
+        border-radius: 0;
+        box-shadow: none;
+        margin: 0;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .chat-center-card {
+        background: #f8fafc;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        position: relative;
+    }
+
+    .chat-bubble-user {
+        background: linear-gradient(135deg, #356854, #2a5242);
+        color: white;
+        border-radius: 1.5rem 1.5rem 0.2rem 1.5rem;
+        padding: 0.85rem 1.1rem;
+        box-shadow: 0 10px 15px -3px rgba(53, 104, 84, 0.2);
+        font-size: 0.9rem;
+        line-height: 1.5;
+    }
+
+    .chat-bubble-ia {
+        background: white;
+        color: var(--ds-text-main);
+        border-radius: 1.5rem 1.5rem 1.5rem 0.2rem;
+        padding: 0.85rem 1.1rem;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        font-size: 0.9rem;
+        line-height: 1.5;
+        border: 1px solid rgba(255, 255, 255, 0.8);
+    }
+
+    .editorial-label {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        text-transform: uppercase;
+        letter-spacing: 0.15em;
+        font-weight: 800;
+        font-size: 0.65rem;
+        color: var(--ds-text-muted);
+    }
+
+    .executive-title {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-weight: 900;
+        letter-spacing: -0.02em;
+    }
+
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.2); border: 2px solid transparent; background-clip: padding-box; }
+
+    .animate-fade-in { animation: fadeIn 0.5s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    .animate-fade-in-up { animation: fadeInUp 0.5s ease-out; }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    
+    .footer-loft {
+        padding: 1.5rem;
+        background: transparent;
+    }
+`;
 
 function Mensagens() {
     const location = useLocation();
-    const [mensagens, setAtendimentos] = useState([]);
+
+    // ── State ─────────────────────────────────────────────────────────────────
     const [instances, setInstances] = useState([]);
-    const [filteredAtendimentos, setFilteredAtendimentos] = useState([]);
+    const [contacts, setContacts] = useState([]);
+    const [filteredContacts, setFilteredContacts] = useState([]);
+    const [selectedContact, setSelectedContact] = useState(null);
+    const [messages, setMessages] = useState([]);
     const [currentUser, setCurrentUser] = useState(null);
+
+    const [isLoadingContacts, setIsLoadingContacts] = useState(true);
+    const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+    const [error, setError] = useState('');
+    const [searchTerm, setSearchTerm] = useState('');
+    const [activeButtonGroup, setActiveButtonGroup] = useState('atendimentos');
+    const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
+    const [limit] = useState(50);
+
+    const [modalMedia, setModalMedia] = useState(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isDownloadingMedia, setIsDownloadingMedia] = useState(false);
+    const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState(false);
+    const [headerImgError, setHeaderImgError] = useState(false);
+
+    const [sendingQueue, setSendingQueue] = useState({});
+    const [isProcessing, setIsProcessing] = useState({});
+    const messagesPollingRef = useRef(null);
+    const selectedContactIdRef = useRef(null);
+
     const [statusOptions] = useState([
         { nome: "Aguardando Início", cor: "#a855f7" },
         { nome: "Aguardando Resposta", cor: "#eab308" },
@@ -33,506 +162,491 @@ function Mensagens() {
         { nome: "Fechado", cor: "#059669" },
         { nome: "Atendente Chamado", cor: "#f97316" }
     ]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState('');
-    const [searchTerm, setSearchTerm] = useState('');
-    const [activeButtonGroup, setActiveButtonGroup] = useState('atendimentos');
-    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
-    const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
-    const [statusFilters, setStatusFilters] = useState(null);
-    const [tagFilters, setTagFilters] = useState(null);
-    const [timeStart, setTimeStart] = useState(null);
-    const [timeEnd, setTimeEnd] = useState(null);
-    const [selectedAtendimento, setSelectedAtendimento] = useState(null);
-    const [limit, setLimit] = useState(20);
-    const [modalMedia, setModalMedia] = useState(null);
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [isFetchingMore, setIsFetchingMore] = useState(false);
+
+    const [isLoadingMoreContacts, setIsLoadingMoreContacts] = useState(false);
+    const [offset, setOffset] = useState(0);
     const [hasMore, setHasMore] = useState(true);
-    const [isDownloadingMedia, setIsDownloadingMedia] = useState(false);
-    const currentBlobUrl = useRef(null);
-    const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState(false);
-    const [headerImgError, setHeaderImgError] = useState(false);
-    const sidebarRef = useRef(null);
-    const [allTags, setAllTags] = useState([]);
-    const loaderRef = useRef(null);
-    const [sendingQueue, setSendingQueue] = useState({});
-    const [isProcessing, setIsProcessing] = useState({});
-    const isFirstLoad = useRef(true);
 
-    // Busca inicial de instâncias
-    useEffect(() => {
-        const fetchInstances = async () => {
-            try {
-                const res = await api.get('/whatsapp/');
-                setInstances(res.data);
-            } catch (err) {
-                console.error("Erro ao carregar instâncias:", err);
-            }
-        };
-        fetchInstances();
-    }, []);
-
-    const fetchData = useCallback(async (isInitialLoad = false, isLoadMore = false) => {
-        if (isInitialLoad) setIsLoading(true);
-        if (isLoadMore) setIsFetchingMore(true);
+    // ── 1. Carrega instâncias + usuário e depois carrega contatos ─────────────
+    const loadContacts = useCallback(async (currentOffset = 0, append = false) => {
+        if (currentOffset === 0) {
+            setIsLoadingContacts(true);
+        } else {
+            setIsLoadingMoreContacts(true);
+        }
 
         try {
-            const [userRes, instancesRes] = await Promise.all([
-                api.get('/auth/me'),
-                api.get('/whatsapp/')
-            ]);
-            setCurrentUser(userRes.data);
-            setInstances(instancesRes.data);
+            let activeInstances = instances;
+            if (!activeInstances || activeInstances.length === 0) {
+                const [userRes, instancesRes] = await Promise.all([
+                    api.get('/auth/me'),
+                    api.get('/whatsapp/')
+                ]);
+                setCurrentUser(userRes.data);
+                activeInstances = instancesRes.data.filter(inst => inst.is_active);
+                setInstances(activeInstances);
+            }
 
-            const activeInstances = instancesRes.data.filter(inst => inst.is_active);
-            const allChats = [];
-            let someInstanceHasMore = false;
+            const newContacts = [];
+            let someInstanceMightHaveMore = false;
 
-            const chatPromises = activeInstances.map(async (inst) => {
+            await Promise.all(activeInstances.map(async (inst) => {
                 try {
-                    const chatsRes = await api.get(`/whatsapp/${inst.id}/chats`, { params: { limit } });
-                    if (chatsRes.data.length === limit) someInstanceHasMore = true;
+                    const limitPerRequest = 20;
+                    const chatsRes = await api.get(`/whatsapp/${inst.id}/chats?limit=${limitPerRequest}&offset=${currentOffset}`);
+                    const chats = chatsRes.data || [];
 
-                    return chatsRes.data.map(chat => ({
-                        id: `${inst.id}-${chat.remoteJid}`,
-                        remoteJid: chat.remoteJid,
+                    if (chats.length === limitPerRequest) {
+                        someInstanceMightHaveMore = true;
+                    }
+
+                    const normalized = chats.map(c => ({
+                        id: `${inst.id}-${c.remoteJid}`,
+                        remoteJid: c.remoteJid,
                         instanceId: inst.id,
-                        instanceName: inst.name,
-                        nome_contato: chat.name,
-                        profilePicUrl: chat.profilePicUrl,
-                        whatsapp: chat.remoteJid.split('@')[0],
-                        isGroup: chat.isGroup,
-                        status: chat.status,
-                        situacao: chat.situacao,
-                        campanha: chat.campanha,
-                        prospect_contact_id: chat.prospect_contact_id,
-                        observacoes: chat.observacoes,
-                        updated_at: new Date(chat.timestamp * 1000).toISOString(),
-                        last_message_ts: chat.timestamp * 1000,
-                        conversa: JSON.stringify([{
-                            role: chat.fromMe ? 'assistant' : 'user',
-                            senderName: chat.lastMessageSender,
-                            content: chat.lastMessage,
-                            timestamp: chat.timestamp
-                        }])
+                        instanceName: inst.instance_name || inst.name,
+                        nome_contato: c.name || c.remoteJid.split('@')[0],
+                        profilePicUrl: c.profilePicUrl,
+                        whatsapp: c.remoteJid.split('@')[0],
+                        isGroup: c.isGroup || c.remoteJid.includes('@g.us'),
+                        situacao: c.situacao || null,
+                        campanha: c.campanha || null,
+                        prospect_contact_id: c.prospect_contact_id || null,
+                        observacoes: c.observacoes || null,
+                        conversa: '[]',
+                        lastMessage: c.lastMessage || null,
+                        timestamp: c.timestamp || 0,
+                        last_message_ts: c.timestamp || 0,
+                        unreadCount: c.unreadCount || 0,
+                        updated_at: null,
                     }));
+
+                    newContacts.push(...normalized);
                 } catch (err) {
-                    console.error(`Erro ao buscar chats para instância ${inst.name}:`, err);
-                    return [];
+                    console.warn(`Falha ao carregar conversas da instância ${inst.id}`, err);
                 }
-            });
+            }));
 
-            const results = await Promise.all(chatPromises);
-            results.forEach(chats => allChats.push(...chats));
+            setHasMore(someInstanceMightHaveMore);
 
-            setAtendimentos(prevAtendimentos => {
-                const prevMap = new Map(prevAtendimentos.map(at => [at.id, at]));
-                let hasChanges = false;
+            setContacts(prev => {
+                const combined = append ? [...prev, ...newContacts] : newContacts;
+                const uniqueMap = new Map();
 
-                allChats.forEach(incomingChat => {
-                    const existingChat = prevMap.get(incomingChat.id);
-                    
-                    if (!existingChat) {
-                        // Novo chat
-                        prevMap.set(incomingChat.id, incomingChat);
-                        hasChanges = true;
+                combined.forEach(c => {
+                    if (uniqueMap.has(c.id)) {
+                        const existing = uniqueMap.get(c.id);
+                        uniqueMap.set(c.id, {
+                            ...c,
+                            // Mantém o histórico de mensagens se ele já existir localmente
+                            conversa: (existing.conversa && existing.conversa !== '[]') ? existing.conversa : c.conversa,
+                            unreadCount: Math.max(existing.unreadCount || 0, c.unreadCount || 0)
+                        });
                     } else {
-                        // Atualizar chat existente
-                        // Preservar a conversa local se tiver mensagens sendo enviadas
-                        let conversaToKeep = incomingChat.conversa;
-                        if (existingChat.conversa && existingChat.conversa.includes('"type":"sending"')) {
-                            conversaToKeep = existingChat.conversa;
-                        }
-
-                        const updatedChat = { ...existingChat, ...incomingChat, conversa: conversaToKeep };
-
-                        // Só atualiza o estado se houver mudança real
-                        if (
-                            existingChat.last_message_ts !== updatedChat.last_message_ts ||
-                            existingChat.status !== updatedChat.status ||
-                            existingChat.situacao !== updatedChat.situacao ||
-                            existingChat.conversa !== updatedChat.conversa
-                        ) {
-                            prevMap.set(incomingChat.id, updatedChat);
-                            hasChanges = true;
-                        }
+                        uniqueMap.set(c.id, c);
                     }
                 });
 
-                if (!hasChanges && prevAtendimentos.length === prevMap.size) {
-                    return prevAtendimentos;
-                }
-
-                const updatedArray = Array.from(prevMap.values());
-                updatedArray.sort((a, b) => b.last_message_ts - a.last_message_ts);
-                return updatedArray;
+                return Array.from(uniqueMap.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
             });
-
-            setHasMore(someInstanceHasMore);
-            setError('');
         } catch (err) {
-            console.error("Erro ao carregar dados:", err);
-            if (isInitialLoad) setError('Não foi possível carregar os dados.');
+            setError('Falha ao conectar com servidor de mensagens.');
         } finally {
-            if (isInitialLoad) setIsLoading(false);
-            if (isLoadMore) setIsFetchingMore(false);
+            setIsLoadingContacts(false);
+            setIsLoadingMoreContacts(false);
+        }
+    }, [instances]);
+
+    useEffect(() => {
+        loadContacts(offset, offset > 0);
+    }, [offset, loadContacts]);
+
+    const handleScrollContacts = (e) => {
+        const { scrollTop, scrollHeight, clientHeight } = e.target;
+        if (scrollHeight - scrollTop <= clientHeight + 50) {
+            if (!isLoadingContacts && !isLoadingMoreContacts && hasMore) {
+                setOffset(prev => prev + 20);
+            }
+        }
+    };
+
+    // ── 2. Carrega mensagens quando um contato é selecionado ──────────────────
+    const loadMessages = useCallback(async (contact, showLoading = true) => {
+        if (!contact) return;
+        if (showLoading) setIsLoadingMessages(true);
+        try {
+            const res = await api.get(
+                `/whatsapp/${contact.instanceId}/messages-api/${encodeURIComponent(contact.remoteJid)}`,
+                { params: { count: 1000 } }
+            );
+
+            // Segurança: Ignora se o usuário já trocou de contato
+            if (selectedContactIdRef.current !== contact.id) return;
+
+            const fetched = res.data || [];
+            const latestMsg = fetched.length > 0 ? fetched[fetched.length - 1] : null;
+            const nc = JSON.stringify(fetched);
+
+            setMessages(fetched);
+            setSelectedContact(prev => prev ? { ...prev, conversa: nc } : prev);
+
+            setContacts(prev => {
+                const updated = prev.map(c => {
+                    if (c.id === contact.id) {
+                        return {
+                            ...c,
+                            conversa: nc,
+                            lastMessage: latestMsg ? latestMsg.content : c.lastMessage,
+                            timestamp: latestMsg ? latestMsg.timestamp : c.timestamp
+                        };
+                    }
+                    return c;
+                });
+                // Mantém a lista sempre ordenada pelos mais recentes
+                return [...updated].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            });
+        } catch (e) {
+            // silencioso
+        } finally {
+            if (showLoading && selectedContactIdRef.current === contact.id) {
+                setIsLoadingMessages(false);
+            }
         }
     }, [limit]);
 
+    // Quando seleciona um contato: para polling anterior, carrega mensagens, inicia novo polling
+    const handleSelectContact = useCallback((contact) => {
+        setSelectedContact(contact);
+        selectedContactIdRef.current = contact.id;
+        setHeaderImgError(false);
+        setIsProfileSidebarOpen(false);
+        setMessages([]);
+
+        if (messagesPollingRef.current) clearInterval(messagesPollingRef.current);
+
+        loadMessages(contact, true);
+
+        messagesPollingRef.current = setInterval(() => {
+            loadMessages(contact, false);
+        }, 5000);
+    }, [loadMessages]);
+
+    // Limpa polling ao desmontar
     useEffect(() => {
-        let isMounted = true;
-        let timeoutId;
-        const poll = async () => {
-            if (!document.hidden) await fetchData(false);
-            if (isMounted) timeoutId = setTimeout(poll, 10000);
+        return () => {
+            if (messagesPollingRef.current) clearInterval(messagesPollingRef.current);
         };
+    }, []);
 
-        const initial = isFirstLoad.current;
-        const loadMore = !initial && limit > 20;
-
-        fetchData(initial, loadMore).then(() => {
-            isFirstLoad.current = false;
-            if (isMounted) timeoutId = setTimeout(poll, 10000);
-        });
-        return () => { isMounted = false; clearTimeout(timeoutId); };
-    }, [fetchData, limit]);
-
-    // Handle selection from navigation state
+    // ── 3. Navegação por parâmetro de rota ────────────────────────────────────
     useEffect(() => {
-        if (location.state?.selectContactId && mensagens.length > 0) {
-            const atendimento = mensagens.find(at => at.prospect_contact_id === location.state.selectContactId);
-            if (atendimento) {
-                setSelectedAtendimento(atendimento);
+        if (location.state?.selectContactId && contacts.length > 0) {
+            const found = contacts.find(c => c.prospect_contact_id === location.state.selectContactId);
+            if (found) {
+                handleSelectContact(found);
                 setActiveButtonGroup('bot_ia');
             }
             window.history.replaceState({}, document.title);
         }
-    }, [location.state, mensagens]);
+    }, [location.state, contacts, handleSelectContact]);
 
-    // Infinite Scroll Observer
+    // ── 4. Filtro de contatos ──────────────────────────────────────────────────
     useEffect(() => {
-        if (isLoading || isFetchingMore || !hasMore) return;
+        setFilteredContacts(contacts.filter(c => {
+            const matches =
+                (c.nome_contato || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (c.whatsapp || '').includes(searchTerm) ||
+                (c.lastMessage || '').toLowerCase().includes(searchTerm.toLowerCase());
 
-        const observer = new IntersectionObserver((entries) => {
-            if (entries[0].isIntersecting) {
-                setLimit(prev => prev + 20);
-            }
-        }, { threshold: 0.1 });
+            if (!matches) return false;
 
-        const currentLoader = loaderRef.current;
-        if (currentLoader) observer.observe(currentLoader);
-        return () => { if (currentLoader) observer.unobserve(currentLoader); };
-    }, [isLoading, isFetchingMore, hasMore]);
+            // Debug para entender por que contatos individuais podem estar sumindo
+            const isBotIA = !!(c.campanha || c.situacao);
+            const isGroup = c.isGroup || (c.remoteJid && c.remoteJid.includes('@g.us'));
 
-    useEffect(() => {
-        const handler = setTimeout(() => setDebouncedSearchTerm(searchTerm), 500);
-        return () => clearTimeout(handler);
-    }, [searchTerm]);
+            // Se estiver na aba Atendimentos, mostra quem NÃO é Bot IA
+            // Se estiver na aba Bot IA, mostra quem É Bot IA
+            const shouldShow = activeButtonGroup === 'bot_ia' ? isBotIA : !isBotIA;
 
-    // Busca mensagens quando um chat é selecionado
-    useEffect(() => {
-        if (!selectedAtendimento) return;
-        const currentId = selectedAtendimento.id;
-        const instanceId = selectedAtendimento.instanceId;
-        const remoteJid = selectedAtendimento.remoteJid;
-
-        setHeaderImgError(false);
-
-        const fetchMessages = async () => {
-            try {
-                const res = await api.get(`/whatsapp/${instanceId}/messages/${remoteJid}`);
-                
-                setSelectedAtendimento(prev => {
-                    if (prev?.id !== currentId) return prev;
-                    
-                    const fetchedMessages = res.data;
-                    const prevMessages = JSON.parse(prev.conversa || '[]');
-                    
-                    // Preserva as mensagens locais otimistas (status enviando/erro ou IDs locais)
-                    const localMessages = prevMessages.filter(msg => 
-                        String(msg.id).startsWith('local-') || msg.type === 'sending' || msg.type === 'error'
-                    );
-
-                    // Junta o que veio da API com o que está pendente localmente
-                    const mergedMessages = [...fetchedMessages, ...localMessages];
-                    mergedMessages.sort((a, b) => a.timestamp - b.timestamp);
-
-                    const newConversa = JSON.stringify(mergedMessages);
-                    
-                    if (prev.conversa === newConversa) return prev;
-                    
-                    // Sincroniza também a lista principal para não ser sobrescrita pelo fetchData
-                    setAtendimentos(listaPrev => listaPrev.map(at => 
-                        at.id === currentId ? { ...at, conversa: newConversa } : at
-                    ));
-
-                    return { ...prev, conversa: newConversa };
-                });
-            } catch (err) {
-                console.error("Erro ao carregar mensagens:", err);
-            }
-        };
-
-        fetchMessages();
-
-        const intervalId = setInterval(() => {
-            if (!document.hidden) fetchMessages();
-        }, 5000);
-
-        return () => clearInterval(intervalId);
-    }, [selectedAtendimento?.id]);
-
-    useEffect(() => {
-        const filtered = mensagens.filter(at => {
-            const matchesSearch = at.nome_contato?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                  at.whatsapp?.includes(searchTerm);
-            
-            if (!matchesSearch) return false;
-
-            if (activeButtonGroup === 'atendimentos') {
-                return !at.campanha && !at.situacao;
-            }
-            return !!(at.campanha || at.situacao);
-        });
-        setFilteredAtendimentos(filtered);
-    }, [mensagens, searchTerm, activeButtonGroup]);
-
-    const handleViewMedia = async (mediaId, type, filename) => {
-        if (!selectedAtendimento || isDownloadingMedia) return;
-        if (currentBlobUrl.current) URL.revokeObjectURL(currentBlobUrl.current);
-        setIsDownloadingMedia(true);
-        try {
-            const response = await api.get(`/whatsapp/${selectedAtendimento.instanceId}/media/${mediaId}`, { responseType: 'blob', timeout: 60000 });
-            const blobUrl = URL.createObjectURL(response.data);
-            currentBlobUrl.current = blobUrl;
-            setModalMedia({ url: blobUrl, type, filename });
-            setIsModalOpen(true);
-        } catch (error) {
-            console.error("Erro ao carregar mídia:", error);
-            toast.error("Não foi possível carregar a mídia.");
-        } finally {
-            setIsDownloadingMedia(false);
-        }
-    };
-
-    const handleDownloadDocument = async (mediaId, filename) => {
-        if (!selectedAtendimento || isDownloadingMedia) return;
-        setIsDownloadingMedia(true);
-        try {
-            const response = await api.get(`/whatsapp/${selectedAtendimento.instanceId}/media/${mediaId}`, { responseType: 'blob', timeout: 60000 });
-            const blobUrl = URL.createObjectURL(response.data);
-            const link = document.createElement('a');
-            link.href = blobUrl;
-            link.download = filename || 'documento';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(blobUrl);
-        } catch (error) {
-            console.error("Erro ao baixar documento:", error);
-            toast.error("Não foi possível baixar o documento.");
-        } finally {
-            setIsDownloadingMedia(false);
-        }
-    };
-
-    const addOptimisticMessage = (atendimentoId, msg) => {
-        if (selectedAtendimento?.id === atendimentoId) {
-            setSelectedAtendimento(prev => {
-                const conversa = JSON.parse(prev.conversa || '[]');
-                conversa.push(msg);
-                const newConversa = JSON.stringify(conversa);
-                
-                setAtendimentos(listaPrev => listaPrev.map(at => 
-                    at.id === atendimentoId ? { ...at, conversa: newConversa } : at
-                ));
-
-                return { ...prev, conversa: newConversa };
-            });
-        }
-    };
-
-    const handleUpdateAtendimento = useCallback(async (atendimentoId, updates) => {
-        try {
-            if (updates.status) {
-                const atendimento = mensagens.find(at => at.id === atendimentoId);
-                if (atendimento && atendimento.prospect_contact_id) {
-                    await api.put(`/prospecting/contacts/${atendimento.prospect_contact_id}`, { situacao: updates.status });
-                    toast.success('Situação atualizada!');
-                }
-            }
-
-            setAtendimentos(prev => prev.map(at => 
-                at.id === atendimentoId ? { ...at, ...updates, situacao: updates.status || at.situacao } : at
-            ));
-            if (selectedAtendimento?.id === atendimentoId) {
-                setSelectedAtendimento(prev => ({ ...prev, ...updates, situacao: updates.status || prev.situacao }));
-            }
-        } catch (err) {
-            console.error("Erro ao atualizar atendimento:", err);
-            toast.error("Erro ao atualizar situação.");
-        }
-    }, [selectedAtendimento, mensagens]);
-
-    const setMessageToError = useCallback((atendimentoId, msgId, errorMessage) => {
-        setAtendimentos(prev => prev.map(at => {
-            if (at.id === atendimentoId) {
-                const conversa = JSON.parse(at.conversa || '[]');
-                const updatedConversa = conversa.map(msg => 
-                    msg.id === msgId ? { ...msg, type: 'error', status: 'error', content: errorMessage } : msg
-                );
-                const updatedAt = { ...at, conversa: JSON.stringify(updatedConversa) };
-                if (selectedAtendimento?.id === atendimentoId) setSelectedAtendimento(updatedAt);
-                return updatedAt;
-            }
-            return at;
+            return shouldShow;
         }));
-    }, [selectedAtendimento]);
 
+    }, [contacts, searchTerm, activeButtonGroup]);
+
+    // ── 5. Envio de mensagens ──────────────────────────────────────────────────
+    const handleSendMessage = (text) => {
+        if (!selectedContact) return;
+        const oid = `local-${Date.now()}`;
+        const msg = { id: oid, role: 'assistant', type: 'sending', content: text, timestamp: Math.floor(Date.now() / 1000) };
+
+        setMessages(prev => [...prev, msg]);
+        setSelectedContact(prev => {
+            if (!prev) return prev;
+            const c = JSON.parse(prev.conversa || '[]');
+            c.push(msg);
+            const nc = JSON.stringify(c);
+
+            setContacts(l => {
+                const updated = l.map(at =>
+                    at.id === prev.id
+                        ? { ...at, conversa: nc, lastMessage: text, timestamp: msg.timestamp }
+                        : at
+                );
+                return [...updated].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            });
+
+            return { ...prev, conversa: nc };
+        });
+
+        setSendingQueue(p => ({
+            ...p,
+            [selectedContact.id]: [...(p[selectedContact.id] || []), {
+                id: oid,
+                instanceId: selectedContact.instanceId,
+                remoteJid: selectedContact.remoteJid,
+                payload: { text }
+            }]
+        }));
+    };
+
+    // Processa fila de envio
     useEffect(() => {
-        Object.keys(sendingQueue).forEach(atendimentoId => {
-            const queue = sendingQueue[atendimentoId] || [];
-            if (queue.length > 0 && !isProcessing[atendimentoId]) {
-                setIsProcessing(prev => ({ ...prev, [atendimentoId]: true }));
-                const itemToProcess = queue[0];
-                const processItem = async () => {
+        Object.keys(sendingQueue).forEach(aid => {
+            if (sendingQueue[aid]?.length > 0 && !isProcessing[aid]) {
+                setIsProcessing(p => ({ ...p, [aid]: true }));
+                const item = sendingQueue[aid][0];
+                (async () => {
                     try {
-                        if (itemToProcess.type === 'text') {
-                            await api.post(`/whatsapp/${itemToProcess.instanceId}/send`, {
-                                remoteJid: itemToProcess.remoteJid,
-                                text: itemToProcess.payload.text
-                            });
-                        } else if (itemToProcess.type === 'media') {
-                            const formData = new FormData();
-                            formData.append('file', itemToProcess.payload.file, itemToProcess.payload.filename);
-                            formData.append('remoteJid', itemToProcess.remoteJid);
-                            formData.append('mediaType', itemToProcess.payload.mediaType);
-
-                            await api.post(`/whatsapp/${itemToProcess.instanceId}/send-media`, formData, {
-                                headers: { 'Content-Type': 'multipart/form-data' }
-                            });
-                        }
-                        
-                        const res = await api.get(`/whatsapp/${itemToProcess.instanceId}/messages/${itemToProcess.remoteJid}`);
-                        const newConversa = JSON.stringify(res.data);
-                        setAtendimentos(prev => prev.map(at => 
-                            at.id === atendimentoId ? { ...at, conversa: newConversa } : at
-                        ));
-                        setSelectedAtendimento(prev => {
-                            if (prev?.id !== atendimentoId) return prev;
-                            return { ...prev, conversa: newConversa };
+                        await api.post(`/whatsapp/${item.instanceId}/send`, {
+                            remoteJid: item.remoteJid,
+                            text: item.payload.text
                         });
-                    } catch (error) {
-                        setMessageToError(atendimentoId, itemToProcess.id, error.response?.data?.detail || "Falha no envio.");
+                        const res = await api.get(
+                            `/whatsapp/${item.instanceId}/messages-api/${encodeURIComponent(item.remoteJid)}`,
+                            { params: { count: limit } }
+                        );
+                        const fetched = res.data || [];
+                        const nc = JSON.stringify(fetched);
+                        setMessages(fetched);
+                        setContacts(p => p.map(at => at.id === aid ? { ...at, conversa: nc } : at));
+                        setSelectedContact(p => p?.id === aid ? { ...p, conversa: nc } : p);
+                    } catch (e) {
+                        toast.error("Falha ao enviar mensagem.");
                     } finally {
-                        if (itemToProcess.payload?.localUrl) URL.revokeObjectURL(itemToProcess.payload.localUrl);
-                        setSendingQueue(prev => ({ ...prev, [atendimentoId]: (prev[atendimentoId] || []).slice(1) }));
-                        setIsProcessing(prev => ({ ...prev, [atendimentoId]: false }));
+                        setSendingQueue(p => ({ ...p, [aid]: p[aid].slice(1) }));
+                        setIsProcessing(p => ({ ...p, [aid]: false }));
                     }
-                };
-                processItem();
+                })();
             }
         });
-    }, [sendingQueue, isProcessing, setMessageToError]);
+    }, [sendingQueue, isProcessing, limit]);
 
-    const handleSendMessage = (text) => {
-        if (!selectedAtendimento) return;
-        const optimisticId = `local-${Date.now()}`;
-        addOptimisticMessage(selectedAtendimento.id, { id: optimisticId, role: 'assistant', type: 'sending', content: text, timestamp: Math.floor(Date.now() / 1000) });
-        setSendingQueue(prev => ({ ...prev, [selectedAtendimento.id]: [...(prev[selectedAtendimento.id] || []), { id: optimisticId, type: 'text', instanceId: selectedAtendimento.instanceId, remoteJid: selectedAtendimento.remoteJid, payload: { text } }] }));
-    };
+    // ── Render ────────────────────────────────────────────────────────────────
+    if (isLoadingContacts && !currentUser) {
+        return <PageLoader message="Sincronizando central de mensagens..." subMessage="Carregando contatos via Evolution API..." />;
+    }
 
-    const handleSendMedia = (file, type, filename) => {
-        if (!selectedAtendimento) return;
-        const optimisticId = `local-${Date.now()}`;
-        const localUrl = URL.createObjectURL(file);
-        addOptimisticMessage(selectedAtendimento.id, { id: optimisticId, role: 'assistant', type: 'sending', content: `Enviando ${type}...`, localUrl, filename, timestamp: Math.floor(Date.now() / 1000) });
-        setSendingQueue(prev => ({ ...prev, [selectedAtendimento.id]: [...(prev[selectedAtendimento.id] || []), { id: optimisticId, type: 'media', instanceId: selectedAtendimento.instanceId, remoteJid: selectedAtendimento.remoteJid, payload: { file, mediaType: type, filename, localUrl } }] }));
-    };
-
-    if (isLoading && !currentUser) return <div className="flex h-screen items-center justify-center">Carregando...</div>;
-    if (error) return <div className="flex h-screen items-center justify-center text-red-600">{error}</div>;
-
-    const hasActiveFilters = !!(statusFilters || tagFilters || timeStart || timeEnd);
+    const chatBodyContact = selectedContact
+        ? { ...selectedContact, conversa: JSON.stringify(messages) }
+        : null;
 
     return (
-        <div className="flex h-[93vh] bg-white">
-            <aside className="w-full md:w-[30%] lg:w-[25%] flex flex-col border-r border-gray-200 relative">
-                <SearchAndFilter
-                    searchTerm={searchTerm} setSearchTerm={setSearchTerm}
-                    activeButtonGroup={activeButtonGroup} toggleFilter={setActiveButtonGroup}
-                    onFilterIconClick={() => setIsFilterPopoverOpen(!isFilterPopoverOpen)}
-                    hasActiveFilters={hasActiveFilters}
-                />
-                <div className="flex-1 overflow-y-auto">
-                    {isLoading && mensagens.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full"><Loader2 className="animate-spin" /></div>
-                    ) : (
+        <div className="mensagens-loft">
+            <style>{DS_STYLE}</style>
+
+            {/* Sidebar de Contatos */}
+            <aside className="contact-list-container w-full md:w-[450px] z-20">
+                <header className="flex-shrink-0">
+                    <SearchAndFilter
+                        searchTerm={searchTerm}
+                        setSearchTerm={setSearchTerm}
+                        activeButtonGroup={activeButtonGroup}
+                        toggleFilter={setActiveButtonGroup}
+                        onFilterIconClick={() => setIsFilterPopoverOpen(!isFilterPopoverOpen)}
+                        hasActiveFilters={false}
+                    />
+                </header>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-10 space-y-1" onScroll={handleScrollContacts}>
+                    {isLoadingContacts ? (
+                        <div className="flex flex-col items-center justify-center py-20 opacity-40">
+                            <Loader2 size={32} className="animate-spin mb-3 text-emerald-600" />
+                            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Carregando contatos...</p>
+                        </div>
+                    ) : filteredContacts.length > 0 ? (
                         <>
-                            {filteredAtendimentos.slice(0, limit).map(at => (
+                            {filteredContacts.map(c => (
                                 <ContactItem
-                                    key={at.id} mensagem={at} isSelected={selectedAtendimento?.id === at.id}
-                                    onSelect={setSelectedAtendimento} statusOptions={statusOptions}
-                                    onUpdateStatus={handleUpdateAtendimento} getTextColorForBackground={getTextColorForBackground}
+                                    key={c.id}
+                                    mensagem={c}
+                                    isSelected={selectedContact?.id === c.id}
+                                    onSelect={handleSelectContact}
+                                    statusOptions={statusOptions}
+                                    onUpdateStatus={() => { }}
+                                    getTextColorForBackground={() => '#fff'}
                                 />
                             ))}
-                            {hasMore && (
-                                <div ref={loaderRef} className="p-6 flex justify-center">
-                                    {(isFetchingMore || isLoading) ? (
-                                        <Loader2 className="animate-spin text-brand-green" size={24} />
-                                    ) : (
-                                        <div className="h-1" />
-                                    )}
+                            {isLoadingMoreContacts && (
+                                <div className="flex justify-center py-4">
+                                    <Loader2 size={24} className="animate-spin text-emerald-600" />
                                 </div>
                             )}
                         </>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-20 opacity-20">
+                            <Search size={48} className="mb-4" />
+                            <p className="text-[11px] font-black uppercase tracking-widest">Vazio</p>
+                        </div>
                     )}
                 </div>
             </aside>
-            <main className="flex-1 flex min-h-0">
-                {selectedAtendimento ? (
+
+            {/* Central de Chat */}
+            <main className="chat-center-card relative min-w-0">
+                {selectedContact ? (
                     <>
-                        <div className="flex-1 flex flex-col min-h-0">
-                            <header className="flex-shrink-0 flex items-center p-3 bg-white border-b border-gray-200">
-                                {selectedAtendimento.profilePicUrl && !headerImgError ? (
-                                    <img 
-                                        src={selectedAtendimento.profilePicUrl} 
-                                        alt="" 
-                                        className="w-10 h-10 rounded-full mr-3 object-cover"
-                                        onError={() => setHeaderImgError(true)}
-                                    />
-                                ) : (
-                                    <div className="w-10 h-10 rounded-full mr-3 bg-gray-300 flex items-center justify-center font-bold text-white">
-                                        {(selectedAtendimento.nome_contato || '??').substring(0, 2).toUpperCase()}
+                        <header className="flex-shrink-0 flex items-center h-20 px-8 bg-white/40 backdrop-blur-xl border-b border-white/40 sticky top-0 z-10">
+                            <div className="flex items-center gap-4 flex-1">
+                                <div className="relative group cursor-pointer" onClick={() => setIsProfileSidebarOpen(true)}>
+                                    {selectedContact.profilePicUrl && !headerImgError ? (
+                                        <img
+                                            src={selectedContact.profilePicUrl}
+                                            alt=""
+                                            className="w-12 h-12 rounded-2xl object-cover shadow-lg border-2 border-white group-hover:scale-105 transition-transform"
+                                            onError={() => setHeaderImgError(true)}
+                                        />
+                                    ) : (
+                                        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 flex items-center justify-center font-black text-white text-lg group-hover:scale-105 transition-transform">
+                                            {(selectedContact.nome_contato || '??').substring(0, 1).toUpperCase()}
+                                        </div>
+                                    )}
+                                    <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full"></div>
+                                </div>
+                                <div className="cursor-pointer" onClick={() => setIsProfileSidebarOpen(true)}>
+                                    <h3 className="executive-title text-[15px] text-slate-900 leading-none mb-1">
+                                        {selectedContact.nome_contato || selectedContact.whatsapp}
+                                    </h3>
+                                    <div className="flex items-center gap-3">
+                                        {isLoadingMessages ? (
+                                            <span className="flex items-center gap-1.5 text-[9px] font-black text-amber-500 uppercase tracking-widest">
+                                                <Loader2 size={10} className="animate-spin" /> Carregando...
+                                            </span>
+                                        ) : (
+                                            <span className="flex items-center gap-1.5 text-[9px] font-black text-emerald-500 uppercase tracking-widest">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                {messages.length} mensagens
+                                            </span>
+                                        )}
+                                        <span className="h-2 w-[1px] bg-slate-200"></span>
+                                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                                            <Database size={10} /> {selectedContact.instanceName}
+                                        </span>
                                     </div>
-                                )}
-                                <h2 className="text-md font-semibold">{selectedAtendimento.nome_contato || selectedAtendimento.whatsapp}</h2>
-                                <button onClick={() => setIsProfileSidebarOpen(!isProfileSidebarOpen)} className="ml-auto p-2"><MoreVertical /></button>
-                            </header>
-                            <ChatBody
-                                mensagem={selectedAtendimento} onViewMedia={handleViewMedia}
-                                onDownloadDocument={handleDownloadDocument} isDownloadingMedia={isDownloadingMedia}
-                            />
-                            <ChatFooter onSendMessage={handleSendMessage} onSendMedia={handleSendMedia} />
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setIsProfileSidebarOpen(!isProfileSidebarOpen)}
+                                    className="w-10 h-10 flex items-center justify-center bg-white/50 hover:bg-white text-slate-400 hover:text-brand-green rounded-xl transition-all shadow-sm border border-white"
+                                >
+                                    <MoreHorizontal size={20} />
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="flex-1 overflow-hidden flex flex-col bg-slate-50/30">
+                            {isLoadingMessages ? (
+                                <div className="flex-1 flex items-center justify-center">
+                                    <div className="flex flex-col items-center gap-3 opacity-40">
+                                        <Loader2 size={32} className="animate-spin text-emerald-600" />
+                                        <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Carregando mensagens...</p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <ChatBody
+                                    mensagem={chatBodyContact}
+                                    onViewMedia={async (mid, type, fname) => {
+                                        setIsDownloadingMedia(true);
+                                        try {
+                                            const res = await api.get(`/whatsapp/${selectedContact.instanceId}/media/${mid}`, { responseType: 'blob' });
+                                            setModalMedia({ url: URL.createObjectURL(res.data), type, filename: fname });
+                                            setIsModalOpen(true);
+                                        } catch (e) {
+                                            toast.error("Erro ao carregar mídia.");
+                                        } finally {
+                                            setIsDownloadingMedia(false);
+                                        }
+                                    }}
+                                    onDownloadDocument={async (mid, fname) => {
+                                        setIsDownloadingMedia(true);
+                                        try {
+                                            const res = await api.get(`/whatsapp/${selectedContact.instanceId}/media/${mid}`, { responseType: 'blob' });
+                                            const url = URL.createObjectURL(res.data);
+                                            const link = document.createElement('a');
+                                            link.href = url;
+                                            link.download = fname || 'documento';
+                                            document.body.appendChild(link);
+                                            link.click();
+                                            document.body.removeChild(link);
+                                            URL.revokeObjectURL(url);
+                                        } catch (e) {
+                                            toast.error("Erro ao baixar documento.");
+                                        } finally {
+                                            setIsDownloadingMedia(false);
+                                        }
+                                    }}
+                                    isDownloadingMedia={isDownloadingMedia}
+                                />
+                            )}
+
+                            <ChatFooter onSendMessage={handleSendMessage} onSendMedia={() => { }} />
                         </div>
+
                         {isProfileSidebarOpen && (
-                            <div ref={sidebarRef} className="w-full md:w-80 border-l border-gray-200 bg-gray-50">
+                            <div className="absolute inset-y-0 right-0 w-[380px] bg-white/95 backdrop-blur-2xl border-l border-white/40 shadow-2xl z-30 animate-fade-in-up">
                                 <ProfileSidebar
-                                    atendimento={selectedAtendimento} onClose={() => setIsProfileSidebarOpen(false)}
-                                    statusOptions={statusOptions} getTextColorForBackground={getTextColorForBackground}
+                                    atendimento={chatBodyContact}
+                                    onClose={() => setIsProfileSidebarOpen(false)}
+                                    statusOptions={statusOptions}
+                                    getTextColorForBackground={() => '#fff'}
                                     isOpen={isProfileSidebarOpen}
-                                    onUpdateStatus={handleUpdateAtendimento}
+                                    onUpdateStatus={() => { }}
                                 />
                             </div>
                         )}
                     </>
-                ) : <ChatPlaceholder />}
+                ) : (
+                    <ChatPlaceholder />
+                )}
             </main>
+
             <MediaModal
-                isOpen={isModalOpen} onClose={() => setIsModalOpen(false)}
-                mediaUrl={modalMedia?.url} mediaType={modalMedia?.type} filename={modalMedia?.filename}
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                mediaUrl={modalMedia?.url}
+                mediaType={modalMedia?.type}
+                filename={modalMedia?.filename}
             />
+
+            {isFilterPopoverOpen && (
+                <FilterPopover
+                    isOpen={isFilterPopoverOpen}
+                    onClose={() => setIsFilterPopoverOpen(false)}
+                    statusOptions={statusOptions}
+                    allTags={[]}
+                    selectedStatus={null}
+                    onStatusChange={() => { }}
+                    selectedTags={null}
+                    onTagChange={() => { }}
+                    onClearFilters={() => { }}
+                    limit={limit}
+                    onLimitChange={() => { }}
+                    timeStart={null}
+                    onTimeStartChange={() => { }}
+                    timeEnd={null}
+                    onTimeEndChange={() => { }}
+                />
+            )}
         </div>
     );
 }

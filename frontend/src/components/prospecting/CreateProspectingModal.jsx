@@ -1,7 +1,63 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../../api/axiosConfig';
 import Modal from '../Modal';
-import { Loader2, Check, ChevronDown, Clock, Bell } from 'lucide-react';
+import { 
+  Loader2, Check, ChevronDown, Clock, Bell, Target, 
+  MessageSquare, Layout, Sparkles, Smartphone, Save, X 
+} from 'lucide-react';
+
+const DS_STYLE = `
+.modal-input {
+  width: 100%;
+  height: 3.5rem;
+  padding: 0 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 1.25rem;
+  background: #ffffff;
+  border: 1.5px solid #edf2f7;
+  color: #1e293b;
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.modal-input:focus {
+  border-color: #356854;
+  box-shadow: 0 0 0 4px rgba(53,104,84,0.08);
+}
+.modal-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #94a3b8;
+  margin-bottom: 0.75rem;
+  margin-left: 0.5rem;
+}
+.dropdown-btn {
+  width: 100%;
+  height: 3.5rem;
+  padding: 0 1.25rem;
+  background: #ffffff;
+  border: 1.5px solid #edf2f7;
+  border-radius: 1.25rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.2s;
+}
+.dropdown-btn:hover {
+  border-color: #e2e8f0;
+}
+.premium-toggle {
+  height: 1.5rem;
+  width: 2.75rem;
+  border-radius: 1rem;
+  position: relative;
+  transition: all 0.3s;
+  cursor: pointer;
+}
+`;
 
 function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
   const isEditMode = Boolean(prospectToEdit);
@@ -161,7 +217,6 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
     try {
       let contact_ids_to_process = [];
       if (formData.categorias_selecionadas.length > 0) {
-        // Busca todos os contatos com um limite muito alto para garantir a filtragem correta de toda a base
         const allContactsResponse = await api.get('/contacts/?limit=1000000');
 
         const filteredContacts = allContactsResponse.data.filter(contact =>
@@ -236,181 +291,270 @@ function CreateProspectingModal({ onClose, onSuccess, prospectToEdit }) {
   };
 
   return (
-    <Modal onClose={onClose}>
-      <form onSubmit={handleSubmit}>
-        <h2 className="text-2xl font-bold mb-6 text-gray-800">
-          {isEditMode ? 'Editar Campanha' : 'Criar Nova Prospecção'}
-        </h2>
-
-        {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert">{error}</div>}
-
-        {isLoading ? (
-          <div className="flex justify-center items-center h-48"><Loader2 className="animate-spin text-brand-green" size={32} /></div>
-        ) : (
-          <div className="space-y-6">
-            <div>
-              <label htmlFor="nome_prospeccao" className="block text-sm font-medium text-gray-600 mb-1">Nome da Campanha</label>
-              <input type="text" name="nome_prospeccao" value={formData.nome_prospeccao} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green" placeholder='Prospecção de Clientes' />
+    <Modal onClose={onClose} maxWidth="max-w-2xl">
+      <style>{DS_STYLE}</style>
+      <div className="flex flex-col h-full">
+        {/* Header Section */}
+        <header className="px-10 py-10 pr-24 bg-white border-b border-slate-100 relative overflow-hidden shrink-0">
+          <div className="absolute top-0 right-0 p-12 opacity-[0.03] pointer-events-none text-slate-900">
+            <Target size={180} />
+          </div>
+          <div className="relative z-10">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-[#356854]">
+                {isEditMode ? <Layout size={20} /> : <Target size={20} />}
+              </div>
+              <h2 className="text-2xl font-black text-slate-800 tracking-tight">
+                {isEditMode ? 'Editar Campanha' : 'Nova Prospecção'}
+              </h2>
             </div>
+            <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] ml-[52px]">
+              {isEditMode ? 'Ajuste de Parâmetros Operacionais' : 'Configuração de Torre de Disparo'}
+            </p>
+          </div>
+        </header>
 
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-600 mb-1">
-                  {isEditMode ? 'Adicionar Contatos de Novas Categorias' : 'Categorias dos Contatos'}
-                </label>
-                <div className="relative" ref={categoryDropdownRef}>
-                  <button
-                    type="button"
-                    onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-left flex justify-between items-center focus:outline-none focus:ring-2 focus:ring-brand-green"
-                  >
-                    <span className="text-gray-700 truncate">{getCategoryButtonText()}</span>
-                    <ChevronDown size={20} className={`text-gray-400 transition-transform ${isCategoryDropdownOpen ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {isCategoryDropdownOpen && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                      {categories.length > 0 ? (
-                        <div className="p-2 space-y-1">
-                          {categories.map(cat => (
-                            <label key={cat} className="flex items-center space-x-3 cursor-pointer p-2 rounded-md hover:bg-gray-100">
-                              <input
-                                type="checkbox"
-                                checked={formData.categorias_selecionadas.includes(cat)}
-                                onChange={() => handleCategoryChange(cat)}
-                                className="h-4 w-4 rounded border-gray-300 text-brand-green focus:ring-brand-green"
-                              />
-                              <span className="text-gray-700">{cat}</span>
-                            </label>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="p-4 text-sm text-gray-500">Nenhuma categoria encontrada.</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="config_id" className="block text-sm font-medium text-gray-600 mb-1">Modelo de Mensagem</label>
-                <select name="config_id" value={formData.config_id} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green" disabled={configs.length === 0}>
-                  {configs.map(conf => <option key={conf.id} value={conf.id}>{conf.nome_config}</option>)}
-                </select>
-              </div>
+        {/* Content Area */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#f8fafc] px-10 py-8 space-y-10">
+          {error && (
+            <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center gap-3 text-rose-600 text-sm font-bold animate-in fade-in slide-in-from-top-2">
+              <Bell size={18} /> {error}
             </div>
+          )}
 
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-600 mb-1">
-                  Instâncias de Envio (WhatsApp)
-                </label>
-                <div className="relative" ref={instanceDropdownRef}>
-                  <button
-                    type="button"
-                    onClick={() => setIsInstanceDropdownOpen(!isInstanceDropdownOpen)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-left flex justify-between items-center focus:outline-none focus:ring-2 focus:ring-brand-green"
-                  >
-                    <span className="text-gray-700 truncate">{getInstanceButtonText()}</span>
-                    <ChevronDown size={20} className={`text-gray-400 transition-transform ${isInstanceDropdownOpen ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {isInstanceDropdownOpen && (
-                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                      {whatsappInstances.length > 0 ? (
-                        <div className="p-2 space-y-1">
-                          {whatsappInstances.map(inst => (
-                            <label key={inst.id} className="flex items-center space-x-3 cursor-pointer p-2 rounded-md hover:bg-gray-100">
-                              <input
-                                type="checkbox"
-                                checked={(formData.whatsapp_instance_ids || []).includes(inst.id)}
-                                onChange={() => handleInstanceChange(inst.id)}
-                                className="h-4 w-4 rounded border-gray-300 text-brand-green focus:ring-brand-green"
-                              />
-                              <span className="text-gray-700">{inst.name}</span>
-                            </label>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="p-4 text-sm text-gray-500">Nenhuma instância conectada.</p>
-                      )}
-                    </div>
-                  )}
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-20 gap-4 opacity-40">
+              <Loader2 className="animate-spin text-[#356854]" size={40} />
+              <p className="text-[10px] font-black uppercase tracking-widest">Sincronizando Opções...</p>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-10 pb-8">
+              {/* Basic Info Section */}
+              <section className="space-y-6">
+                <div className="flex items-center gap-3 px-2">
+                  <div className="w-1.5 h-6 bg-[#356854] rounded-full" />
+                  <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-[0.15em]">Identificação e Alvo</h4>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Selecione quais números enviarão as mensagens desta campanha.</p>
-              </div>
+                
+                <div className="grid gap-6">
+                  <div>
+                    <label className="modal-label">Nome da Campanha</label>
+                    <input 
+                      type="text" 
+                      name="nome_prospeccao" 
+                      value={formData.nome_prospeccao} 
+                      onChange={handleChange} 
+                      required 
+                      className="modal-input" 
+                      placeholder='Ex: Leads Qualificados Maio' 
+                    />
+                  </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="horario_inicio" className="flex items-center gap-2 text-sm font-medium text-gray-600 mb-1">
-                    <Clock size={14} /> Início do Expediente
-                  </label>
-                  <input type="time" name="horario_inicio" value={formData.horario_inicio} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green" />
-                </div>
-                <div>
-                  <label htmlFor="horario_fim" className="flex items-center gap-2 text-sm font-medium text-gray-600 mb-1">
-                    <Clock size={14} /> Fim do Expediente
-                  </label>
-                  <input type="time" name="horario_fim" value={formData.horario_fim} onChange={handleChange} className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green" />
-                </div>
-              </div>
-              <p className="text-xs text-gray-500 -mt-4">
-                O agente só enviará mensagens iniciais e follow-ups dentro do expediente. Deixe em branco para operar 24h.
-              </p>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600 mb-2">Configuração de Follow-up</label>
-                <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg border">
-                  <button type="button" onClick={() => setFollowupEnabled(!followupEnabled)} className={`w-6 h-6 rounded flex items-center justify-center transition-colors ${followupEnabled ? 'bg-green-600' : 'bg-gray-300'}`}>
-                    {followupEnabled && <Check size={16} className="text-white" />}
-                  </button>
-                  <span className="text-gray-700">Ativar follow-up automático</span>
-                </div>
-
-                {followupEnabled && (
-                  <div className="mt-2 grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <label htmlFor="followup_value" className="block text-xs font-medium text-gray-500 mb-1">Intervalo</label>
-                      <input
-                        type="number"
-                        id="followup_value"
-                        value={followupValue}
-                        onChange={(e) => setFollowupValue(e.target.value)}
-                        min="1"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green"
-                      />
+                      <label className="modal-label">Categorias de Contato</label>
+                      <div className="relative" ref={categoryDropdownRef}>
+                        <button
+                          type="button"
+                          onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
+                          className={`dropdown-btn ${isCategoryDropdownOpen ? 'border-[#356854] ring-4 ring-[#356854]/5' : ''}`}
+                        >
+                          <span className="text-sm font-bold text-slate-700 truncate">{getCategoryButtonText()}</span>
+                          <ChevronDown size={18} className={`text-slate-400 transition-transform ${isCategoryDropdownOpen ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {isCategoryDropdownOpen && (
+                          <div className="absolute z-[100] w-full mt-3 bg-white border border-slate-100 rounded-2xl shadow-2xl p-3 space-y-1 max-h-60 overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-top-2">
+                            {categories.length > 0 ? (
+                              categories.map(cat => (
+                                <button
+                                  key={cat}
+                                  type="button"
+                                  onClick={() => handleCategoryChange(cat)}
+                                  className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${formData.categorias_selecionadas.includes(cat) ? 'bg-emerald-50 text-[#356854]' : 'hover:bg-slate-50 text-slate-600'}`}
+                                >
+                                  <span className="text-xs font-bold">{cat}</span>
+                                  {formData.categorias_selecionadas.includes(cat) && <Check size={14} />}
+                                </button>
+                              ))
+                            ) : (
+                              <p className="p-4 text-xs text-slate-400 font-bold text-center">Nenhuma categoria...</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
+
                     <div>
-                      <label htmlFor="followup_unit" className="block text-xs font-medium text-gray-500 mb-1">Unidade</label>
-                      <select
-                        id="followup_unit"
-                        value={followupUnit}
-                        onChange={(e) => setFollowupUnit(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-green"
-                      >
-                        <option value="minutes">Minutos</option>
-                        <option value="hours">Horas</option>
-                        <option value="days">Dias</option>
-                      </select>
+                      <label className="modal-label">Modelo de Mensagem (Persona)</label>
+                      <div className="relative">
+                        <select 
+                          name="config_id" 
+                          value={formData.config_id} 
+                          onChange={handleChange} 
+                          required 
+                          className="modal-input appearance-none pr-12"
+                          disabled={configs.length === 0}
+                        >
+                          {configs.map(conf => <option key={conf.id} value={conf.id}>{conf.nome_config}</option>)}
+                        </select>
+                        <ChevronDown size={18} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                      </div>
                     </div>
                   </div>
-                )}
-                <p className="text-xs text-gray-500 mt-1">Se ativado, o agente enviará uma nova mensagem após o período de inatividade.</p>
-              </div>
-            </div>
-          </div>
-        )}
-        <div className="flex justify-end gap-4 mt-8">
-          <button type="button" onClick={onClose} disabled={isSaving} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition">Cancelar</button>
-          <button type="submit" disabled={isSaving || isLoading || (!isEditMode && formData.categorias_selecionadas.length === 0)} className="px-4 py-2 bg-brand-green text-white rounded-md hover:bg-brand-green-dark transition flex items-center gap-2 disabled:bg-brand-green-light disabled:cursor-not-allowed">
-            {isSaving && <Loader2 className="animate-spin" size={18} />}
-            {isSaving ? 'Salvando...' : (isEditMode ? 'Salvar Alterações' : 'Criar Campanha')}
-          </button>
+                </div>
+              </section>
+
+              {/* Channels Section */}
+              <section className="space-y-6">
+                <div className="flex items-center gap-3 px-2">
+                  <div className="w-1.5 h-6 bg-emerald-500 rounded-full" />
+                  <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-[0.15em]">Canais de Saída</h4>
+                </div>
+
+                <div className="ds-card bg-white p-6 border border-slate-100 rounded-[2rem]">
+                  <label className="modal-label">Instâncias WhatsApp</label>
+                  <div className="relative" ref={instanceDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => setIsInstanceDropdownOpen(!isInstanceDropdownOpen)}
+                      className={`dropdown-btn ${isInstanceDropdownOpen ? 'border-[#356854] ring-4 ring-[#356854]/5' : ''}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Smartphone size={16} className="text-slate-400" />
+                        <span className="text-sm font-bold text-slate-700 truncate">{getInstanceButtonText()}</span>
+                      </div>
+                      <ChevronDown size={18} className={`text-slate-400 transition-transform ${isInstanceDropdownOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {isInstanceDropdownOpen && (
+                      <div className="absolute z-[100] w-full mt-3 bg-white border border-slate-100 rounded-2xl shadow-2xl p-3 space-y-1 max-h-60 overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-top-2">
+                        {whatsappInstances.length > 0 ? (
+                          whatsappInstances.map(inst => (
+                            <button
+                              key={inst.id}
+                              type="button"
+                              onClick={() => handleInstanceChange(inst.id)}
+                              className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${formData.whatsapp_instance_ids?.includes(inst.id) ? 'bg-emerald-50 text-[#356854]' : 'hover:bg-slate-50 text-slate-600'}`}
+                            >
+                              <span className="text-xs font-bold">{inst.name}</span>
+                              {formData.whatsapp_instance_ids?.includes(inst.id) && <Check size={14} />}
+                            </button>
+                          ))
+                        ) : (
+                          <p className="p-4 text-xs text-slate-400 font-bold text-center">Nenhuma instância conectada.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              {/* Schedule and Followup Section */}
+              <section className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3 px-2">
+                    <div className="w-1.5 h-6 bg-amber-500 rounded-full" />
+                    <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-[0.15em]">Expediente</h4>
+                  </div>
+                  
+                  <div className="p-6 bg-white rounded-[2rem] border border-slate-100 space-y-6">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[9px] font-black uppercase text-slate-400 mb-2 block ml-2">Início</label>
+                        <div className="relative">
+                          <Clock size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
+                          <input type="time" name="horario_inicio" value={formData.horario_inicio} onChange={handleChange} className="modal-input !h-12 !pl-10 !text-xs" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-black uppercase text-slate-400 mb-2 block ml-2">Término</label>
+                        <div className="relative">
+                          <Clock size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
+                          <input type="time" name="horario_fim" value={formData.horario_fim} onChange={handleChange} className="modal-input !h-12 !pl-10 !text-xs" />
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-bold leading-relaxed px-2 italic">A IA respeitará estes horários para envios e follow-ups automáticos.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3 px-2">
+                    <div className="w-1.5 h-6 bg-indigo-500 rounded-full" />
+                    <h4 className="text-[11px] font-black text-slate-800 uppercase tracking-[0.15em]">Follow-up IA</h4>
+                  </div>
+
+                  <div className="p-6 bg-white rounded-[2rem] border border-slate-100 space-y-6">
+                    <div className="flex items-center justify-between px-2">
+                      <div className="flex items-center gap-3">
+                        <Sparkles size={16} className="text-indigo-500" />
+                        <span className="text-sm font-bold text-slate-700">Retomada Automática</span>
+                      </div>
+                      <div 
+                        onClick={() => setFollowupEnabled(!followupEnabled)} 
+                        className={`premium-toggle ${followupEnabled ? 'bg-indigo-500' : 'bg-slate-200'}`}
+                      >
+                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${followupEnabled ? 'right-1' : 'left-1'}`} />
+                      </div>
+                    </div>
+
+                    {followupEnabled && (
+                      <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-2">
+                        <input
+                          type="number"
+                          value={followupValue}
+                          onChange={(e) => setFollowupValue(e.target.value)}
+                          min="1"
+                          className="modal-input !h-12 !text-xs"
+                        />
+                        <div className="relative">
+                          <select
+                            value={followupUnit}
+                            onChange={(e) => setFollowupUnit(e.target.value)}
+                            className="modal-input !h-12 !text-xs appearance-none"
+                          >
+                            <option value="minutes">Minutos</option>
+                            <option value="hours">Horas</option>
+                            <option value="days">Dias</option>
+                          </select>
+                          <ChevronDown size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-[10px] text-slate-400 font-bold leading-relaxed px-2 italic">Reengajamento inteligente após inatividade do lead.</p>
+                  </div>
+                </div>
+              </section>
+
+              {/* Hidden trigger to handle form submission */}
+              <button type="submit" className="hidden" id="modal-submit-trigger" />
+            </form>
+          )}
         </div>
-      </form>
 
+        {/* Footer Section */}
+        <footer className="px-10 py-8 bg-white border-t border-slate-100 flex items-center justify-between shrink-0">
+          <button 
+            type="button" 
+            onClick={onClose} 
+            disabled={isSaving} 
+            className="h-14 px-8 text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-slate-600 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button 
+            type="button" 
+            onClick={() => document.getElementById('modal-submit-trigger').click()}
+            disabled={isSaving || isLoading || (!isEditMode && formData.categorias_selecionadas.length === 0)} 
+            className="h-14 px-10 bg-[#356854] text-white font-black text-xs uppercase tracking-[0.2em] rounded-2xl shadow-xl shadow-emerald-900/10 hover:bg-[#2d5847] transition-all flex items-center gap-3 disabled:opacity-50"
+          >
+            {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+            {isSaving ? 'Processando...' : (isEditMode ? 'Salvar Alterações' : 'Criar Campanha')}
+          </button>
+        </footer>
+      </div>
     </Modal>
-
   );
 }
 
