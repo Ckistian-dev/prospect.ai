@@ -371,6 +371,19 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
                     )}
 
                     <div className="space-y-8">
+                        <div className="flex items-center justify-between p-6 bg-slate-50/50 rounded-3xl border border-slate-100">
+                            <div>
+                                <h4 className="text-xs font-black text-slate-800 uppercase tracking-tight">Status da Instância</h4>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Habilitar ou desabilitar o processamento automático</p>
+                            </div>
+                            <button
+                                onClick={() => setFormData(prev => ({ ...prev, is_active: !prev.is_active }))}
+                                className={`w-14 h-8 rounded-full transition-all relative ${formData.is_active ? 'bg-[#356854]' : 'bg-slate-200'}`}
+                            >
+                                <div className={`absolute top-1 w-6 h-6 bg-white rounded-full transition-all ${formData.is_active ? 'left-7' : 'left-1'} shadow-sm`} />
+                            </button>
+                        </div>
+
                         <div>
                             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Identificação Interna</label>
                             <input type="text" name="name" value={formData.name} onChange={handleFormChange} className="admin-form-input" placeholder="Ex: Vendas Matriz" />
@@ -491,7 +504,7 @@ const InstanceModal = ({ instance, onClose, onSave, onDelete }) => {
     );
 };
 
-const InstanceRow = ({ instance, onEdit }) => {
+const InstanceRow = ({ instance, onEdit, onToggle }) => {
     const [statusInfo, setStatusInfo] = useState({ status: 'loading' });
     const [googleStatus, setGoogleStatus] = useState('loading');
 
@@ -542,6 +555,13 @@ const InstanceRow = ({ instance, onEdit }) => {
             </div>
 
             <div className="lg:col-span-2 flex justify-center lg:justify-end gap-3 w-full lg:w-auto">
+                <button
+                    onClick={() => onToggle(instance)}
+                    className={`w-16 h-16 flex items-center justify-center border rounded-[1.5rem] shadow-sm transition-all group/toggle ${instance.is_active ? 'bg-emerald-50 border-emerald-100 text-emerald-600 hover:bg-emerald-100' : 'bg-rose-50 border-rose-100 text-rose-600 hover:bg-rose-100'}`}
+                    title={instance.is_active ? 'Desativar Terminal' : 'Ativar Terminal'}
+                >
+                    <Power size={24} className={`${instance.is_active ? 'animate-pulse' : ''}`} />
+                </button>
                 <button onClick={() => onEdit(instance)} className="w-16 h-16 flex items-center justify-center bg-white border border-slate-100 text-slate-400 hover:text-[#356854] hover:border-emerald-100 rounded-[1.5rem] shadow-sm transition-all group/btn">
                     <Settings size={24} className="group-hover/btn:rotate-90 transition-transform duration-500" />
                 </button>
@@ -608,6 +628,17 @@ function Whatsapp() {
         } catch (err) { toast.error('Falha ao excluir.'); }
     };
 
+    const handleToggleInstance = async (instance) => {
+        try {
+            const newStatus = !instance.is_active;
+            await api.put(`/whatsapp/${instance.id}`, { is_active: newStatus });
+            setInstances(prev => prev.map(i => i.id === instance.id ? { ...i, is_active: newStatus } : i));
+            toast.success(newStatus ? 'Terminal ativado!' : 'Terminal pausado.');
+        } catch (error) {
+            toast.error('Erro ao alterar status.');
+        }
+    };
+
     return (
         <div className="whatsapp-page p-6 md:p-12 min-h-screen">
             <style>{DS_STYLE}</style>
@@ -639,6 +670,7 @@ function Whatsapp() {
                                 key={instance.id}
                                 instance={instance}
                                 onEdit={(inst) => setModalState({ isOpen: true, instance: inst })}
+                                onToggle={handleToggleInstance}
                             />
                         ))}
 
