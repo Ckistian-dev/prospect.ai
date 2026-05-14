@@ -40,7 +40,8 @@ const MessageContent = ({ msg, atendimentoId, onViewMedia, onDownloadDocument, i
     let displayText = msg.content;
 
     if (hasMedia && !msg.is_template) {
-        if (!displayText || (displayText.startsWith('[') && displayText.toLowerCase().includes('enviado'))) {
+        // Se for mídia, a legenda pode estar no content. Se for apenas placeholder de tipo, limpamos para focar no MediaDisplay
+        if (displayText && (displayText.startsWith('[') && displayText.endsWith(']'))) {
             displayText = null;
         }
     }
@@ -195,11 +196,15 @@ const MessageContent = ({ msg, atendimentoId, onViewMedia, onDownloadDocument, i
             case 'text':
             default:
                 const defaultText = displayText || (msg.media_id ? `[Mídia não suportada: ${type}]` : '');
+                
+                // Se não tiver texto nem mídia, e não for um tipo conhecido de sistema, mostra vazio apenas se realmente não houver nada
+                const finalContent = formatWhatsAppText(defaultText);
+                
                 return (
                     <div className="flex flex-col">
                         {quotedView}
                         <p className={`text-[15px] leading-relaxed font-medium ${isAssistant ? 'text-white' : 'text-slate-700'}`}>
-                            {formatWhatsAppText(defaultText) || '[Vazio]'}
+                            {defaultText ? finalContent : <span className="italic opacity-50">[Mensagem sem conteúdo de texto]</span>}
                         </p>
                     </div>
                 );

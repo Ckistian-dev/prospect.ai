@@ -105,15 +105,28 @@ const ContactItem = ({
     const formatTimestamp = (dateStr) => {
         if (!dateStr || dateStr === 0) return '';
         try {
-            // Se for um número e for menor que 10.000.000.000, é um timestamp em segundos (padrão Evolution)
-            const tsStr = typeof dateStr === 'number' && dateStr < 10000000000 ? dateStr * 1000 : dateStr;
-            const date = new Date(tsStr);
-            if (isNaN(date.getTime())) return '';
-            const now = new Date();
-            if (format(date, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd')) {
-                return format(date, 'HH:mm');
+            let date;
+            if (typeof dateStr === 'number') {
+                date = new Date(dateStr < 10000000000 ? dateStr * 1000 : dateStr);
+            } else if (typeof dateStr === 'string') {
+                if (/^\d+$/.test(dateStr)) {
+                    const num = parseInt(dateStr, 10);
+                    date = new Date(num < 10000000000 ? num * 1000 : num);
+                } else {
+                    date = new Date(dateStr);
+                }
+            } else {
+                date = new Date(dateStr);
             }
-            return format(date, 'dd/MM/yy');
+
+            if (isNaN(date.getTime())) return '';
+            
+            const today = new Date();
+            const isMsgToday = date.getDate() === today.getDate() &&
+                               date.getMonth() === today.getMonth() &&
+                               date.getFullYear() === today.getFullYear();
+            
+            return isMsgToday ? format(date, 'HH:mm') : format(date, 'dd/MM/yy HH:mm');
         } catch {
             return '';
         }

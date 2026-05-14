@@ -39,6 +39,7 @@ class GoogleDriveService:
     def _get_readable_type(self, mime_type: str) -> str:
         if 'image' in mime_type: return 'image'
         if 'video' in mime_type: return 'video'
+        if 'audio' in mime_type: return 'audio'
         if 'pdf' in mime_type: return 'document'
         if 'word' in mime_type or 'document' in mime_type: return 'document'
         if 'sheet' in mime_type or 'excel' in mime_type: return 'document'

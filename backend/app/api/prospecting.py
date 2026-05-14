@@ -213,7 +213,8 @@ async def _synchronize_and_process_history(
         count=999, 
         mode=None,
         jids=target_jids,
-        evolution_instance_id=whatsapp_instance.instance_id
+        evolution_instance_id=whatsapp_instance.instance_id,
+        format=False
     )
 
     if not raw_history_api:
@@ -262,7 +263,8 @@ async def _synchronize_and_process_history(
                     count=999, 
                     mode=None,
                     jids=target_jids,
-                    evolution_instance_id=whatsapp_instance.instance_id
+                    evolution_instance_id=whatsapp_instance.instance_id,
+                    format=False
                 )
 
     if not raw_history_api:

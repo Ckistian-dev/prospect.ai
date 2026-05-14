@@ -11,7 +11,6 @@ from typing import Optional, List, Dict, Any
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-import numpy as np
 
 from app.core.config import settings
 from app.db import models
@@ -53,7 +52,8 @@ class GeminiService:
         """Inicializa o cliente Gemini com a chave atual usando o novo SDK."""
         try:
             current_key = self.api_keys[self.current_key_index]
-            self.client = genai.Client(api_key=current_key)
+            # Aumentado o timeout para 10 minutos (600.000 ms) para suportar relatórios complexos
+            self.client = genai.Client(api_key=current_key, http_options={'timeout': 600000})
             logger.info(f"✅ Cliente Gemini (New SDK) inicializado (chave índice {self.current_key_index}).")
         except Exception as e:
             logger.error(f"🚨 ERRO CRÍTICO ao configurar o Gemini com a chave índice {self.current_key_index}: {e}", exc_info=True)
@@ -390,11 +390,12 @@ class GeminiService:
                 media_label = f"[{msg_type.upper()}]"
                 content = f"{media_label} {content}" if content else media_label
             
-            # Substitui quebras de linha para manter o log limpo
-            content = content.replace('\n', ' \\n ')
+            # Mantém quebras de linha para melhor leitura da IA no relatório
+            # content = content.replace('\n', ' \\n ')
             
             if content:
-                line = f"[{formatted_time}] {role}: {content}"
+                # Usa um bullet point para cada mensagem para organizar melhor
+                line = f"  • [{formatted_time}] {role}: {content}"
                 history_lines.append(line)
         
         if not history_lines:
@@ -626,6 +627,28 @@ class GeminiService:
             rag_query = "Abordagem inicial prospecção"
 
         rag_context = await self._retrieve_rag_context(db, config.id, rag_query)
+
+        # --- DRIVE CATALOG (Ensures AI knows about all available files) ---
+        drive_catalog = ""
+        try:
+            drive_stmt = select(models.KnowledgeVector).where(
+                models.KnowledgeVector.config_id == config.id,
+                models.KnowledgeVector.origin == 'drive'
+            ).limit(40) 
+            drive_res = await db.execute(drive_stmt)
+            drive_vectors = drive_res.scalars().all()
+            if drive_vectors:
+                cat_rows = []
+                cat_header = ""
+                for v in drive_vectors:
+                    v_lines = v.content.split('\n')
+                    if len(v_lines) >= 3:
+                        cat_header = v_lines[1]
+                        cat_rows.append(v_lines[2])
+                if cat_header:
+                    drive_catalog = f"# ARQUIVOS DISPONÍVEIS NO DRIVE (SE PRECISAR ENVIAR, USE SOMENTE O VALOR DA COLUNA 'ID' em 'arquivos_anexos')\n{cat_header}\n" + "\n".join(cat_rows) + "\n\n"
+        except Exception as e:
+            logger.error(f"Erro ao buscar catálogo do Drive para o prompt: {e}")
         
         # System Instruction (Prompt Fixo)
         system_instruction = config.prompt or "Você é um assistente de prospecção."
@@ -669,6 +692,7 @@ class GeminiService:
         obs_section = f"Observações: {contact.observacoes}\n" if contact.observacoes else ""
         prompt_text = (
             f"{rag_section}"
+            f"{drive_catalog}"
             f"# HISTÓRICO\n{formatted_history}\n\n"
             f"{workflow_context}"
             f"# DADOS DO CONTATO\n"
@@ -689,7 +713,7 @@ class GeminiService:
             f"# TAREFA ATUAL: {task_map.get(mode, 'Responder')}\n\n"
             f"# REGRAS DE EXECUÇÃO\n"
             f"1. **Fonte de Verdade:** Use prioritariamente o CONTEXTO (RAG).\n"
-            f"2. **Envio de Arquivos:** Se precisar enviar foto/vídeo, coloque os IDs em `arquivos_anexos`. NÃO coloque links no texto.\n"
+            f"2. **Envio de Arquivos (Fotos, Vídeos, Catálogos PDF, Áudios):** Se precisar enviar qualquer material, localize o ID correspondente na última coluna da tabela # DRIVE e coloque-o no array `arquivos_anexos`. NUNCA coloque o nome do arquivo ou links de download no texto. Use APENAS o ID alfanumérico do Drive no array.\n"
             f"3. **Transbordo:** Se pedirem um humano ou a dúvida for muito complexa, mude `nova_situacao` para 'Atendente Chamado'.\n"
             f"4. **Reações Visuais:** Se a última mensagem do cliente for um encerramento (ex: 'ok', 'obrigado', 'vou pensar'), NÃO mande texto. Preencha apenas o campo `reagir_com_emoji` com '👍', '❤️' ou '🤝' e deixe `mensagem_para_enviar` vazio.\n"
             f"# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)\n"
@@ -698,8 +722,8 @@ class GeminiService:
             f'  "mensagem_para_enviar": ["opa, blz?", "então, sobre o valor fica R$ 50", "te atende assim?"],\n'
             f'  "nova_situacao": "Aguardando Resposta" | "Lead Qualificado" | "Não Interessado" | "Atendente Chamado",\n'
             f'  "lead_score": 0 a 10,\n'
-            f'  "observacoes": "Resumo curto",\n'
-            f'  "arquivos_anexos": ["ID_DO_ARQUIVO"],\n'
+            f'  "observacoes": "Resumo curto da conversa",\n'
+            f'  "arquivos_anexos": ["ID_DO_ARQUIVO_DO_DRIVE_AQUI"],\n'
             f'  "novos_contatos": [{{"nome": "Nome", "numero": "Telefone", "observacao": "Contexto"}}],\n'
             f'  "acao_agenda": "agendar_reuniao" | null,\n'
             f'  "data_agendamento": "YYYY-MM-DDTHH:MM:SS" | null,\n'
@@ -789,7 +813,11 @@ class GeminiService:
         evolution_context = ""
         if use_all_contacts:
             evolution_context = await self._get_evolution_contacts_context(
-                db, user, start_date=start_date, end_date=end_date, prospect_ids=prospect_ids
+                db, user, 
+                start_date=start_date, 
+                end_date=end_date, 
+                prospect_ids=prospect_ids,
+                use_all_contacts=True
             )
 
         analysis_prompt = {
@@ -797,15 +825,15 @@ class GeminiService:
             "pergunta_usuario": question,
             "dados_contexto": {
                 "resumo_usuario": {"id": user.id, "email": user.email},
-                "prospeccoes_campanhas": simplified_prospects,
+                "prospeccoes_campanhas": simplified_prospects if not use_all_contacts else [],
                 "contatos_gerais_whatsapp": evolution_context,
                 "contexto_temporal": self._get_time_context().strip()
             },
             "instrucoes_adicionais": (
-                "1. Foco Total no Conteúdo: Para 'contatos_gerais_whatsapp', ignore completamente a ausência de status ou campanhas. Foque 100% no TEXTO das mensagens. "
-                "2. Sumarização: Resuma os principais tópicos discutidos nos contatos mais ativos. "
-                "3. Identificação de Leads: Aponte quais contatos parecem ser oportunidades reais de venda ou suporte crítico com base no que disseram. "
-                "4. Diagnóstico: O diagnóstico deve refletir o que está acontecendo nas conversas, não a organização do CRM."
+                "1. ANÁLISE EXAUSTIVA: Analise TODOS os contatos e mensagens fornecidos. Não ignore nenhum dado. "
+                "2. FOCO EM RESULTADOS: Identifique padrões de sucesso e falha nas abordagens. "
+                "3. PERFECCIONISMO: O relatório deve ser impecável, com dados precisos extraídos das conversas. "
+                "4. DIAGNÓSTICO PROFUNDO: Vá além do óbvio. Identifique o tom de voz dos clientes, objeções ocultas e oportunidades de ouro."
             ),
             "formato_resposta_obrigatorio": {
                 "descricao": "Sua resposta DEVE ser um único objeto JSON válido. Siga a estrutura sugerida.",
@@ -822,7 +850,12 @@ class GeminiService:
             }
         }
         
-        response, _ = await self._generate_with_retry_async(json.dumps(analysis_prompt, ensure_ascii=False, cls=SetEncoder), db, user, force_json=True)
+        response, _ = await self._generate_with_retry_async(
+            json.dumps(analysis_prompt, ensure_ascii=False, cls=SetEncoder, indent=2), 
+            db, 
+            user, 
+            force_json=True
+        )
         return self._parse_json_response(response.text)
 
     async def _get_evolution_contacts_context(
@@ -832,7 +865,8 @@ class GeminiService:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         prospect_ids: Optional[List[int]] = None,
-        limit: int = 150
+        limit: int = 1000, # Aumentado para pegar mais contatos
+        use_all_contacts: bool = False
     ) -> str:
         """Busca e resume contatos e mensagens da Evolution para dar contexto à IA."""
         from app.services.whatsapp_service import get_whatsapp_service
@@ -849,8 +883,9 @@ class GeminiService:
             return "Nenhuma instância do WhatsApp vinculada encontrada."
 
         # Se houver prospect_ids, pegamos os nomes das campanhas para filtrar
+        # No modo "use_all_contacts", ignoramos o filtro de campanhas para pegar tudo.
         campaign_names = []
-        if prospect_ids:
+        if prospect_ids and not use_all_contacts:
             stmt_camp = select(models.Prospect.nome_prospeccao).where(models.Prospect.id.in_(prospect_ids))
             res_camp = await db.execute(stmt_camp)
             campaign_names = res_camp.scalars().all()
@@ -864,7 +899,9 @@ class GeminiService:
             
             if not chats: continue
 
-            # Filtra os chats se houver campanhas selecionadas
+            # Filtra os chats para remover grupos e, se houver campanhas selecionadas, filtrar por elas
+            chats = [c for c in chats if not c.get('isGroup')]
+            
             if campaign_names:
                 chats = [c for c in chats if c.get('campanha') in campaign_names]
             
@@ -872,16 +909,15 @@ class GeminiService:
             
             all_context.append(f"### INSTÂNCIA: {inst.instance_name}")
             
-            # Para não sobrecarregar a IA, pegamos o histórico dos chats mais relevantes
-            # Mas com limite maior para "histórico completo" conforme solicitado
-            for i, chat in enumerate(chats[:50]): 
+            # Formata cada contato como uma seção clara
+            for i, chat in enumerate(chats): 
                 history_text = ""
                 try:
                     # Busca o histórico respeitando o filtro de data do dashboard
                     history = await ws.fetch_chat_history(
                         inst.instance_name, 
                         chat['remoteJid'], 
-                        count=100, 
+                        count=500, # Aumentado para pegar histórico mais longo
                         start_date=start_date,
                         end_date=end_date
                     )
@@ -892,7 +928,7 @@ class GeminiService:
                         history = await ws.fetch_chat_history(inst.instance_name, chat['remoteJid'], count=15)
                         history_text = self._format_history_for_prompt(history)
                         if history_text != "Nenhuma mensagem no histórico.":
-                            history_text = f"(Fora do período selecionado)\n{history_text}"
+                            history_text = f"*(Mensagens fora do período selecionado, exibindo as últimas 15)*\n{history_text}"
                     else:
                         history_text = self._format_history_for_prompt(history)
 
@@ -900,25 +936,36 @@ class GeminiService:
                     logger.warning(f"Erro ao buscar histórico para {chat['remoteJid']}: {e}")
                 
                 tipo_chat = "GRUPO" if chat.get('isGroup') else "INDIVIDUAL"
-                chat_info = f"- **{chat['name']}** ({chat['remoteJid']}) [{tipo_chat}]\n"
                 
-                # Só adiciona campanha/situação se forem valores reais e relevantes
+                # Título da Seção do Contato
+                chat_info = f"================================================================\n"
+                chat_info += f"👤 CONTATO #{i+1}: {chat['name']}\n"
+                chat_info += f"================================================================\n"
+                
+                # Detalhes do Contato em lista
+                chat_info += f"• **JID:** {chat['remoteJid']} ({tipo_chat})\n"
+                
                 campanha = chat.get('campanha')
                 situacao = chat.get('situacao')
-                if campanha and campanha not in ["Sem Campanha", "N/A"]:
-                    chat_info += f"  Campanha: {campanha}\n"
-                if situacao and situacao not in ["Sem Situação", "N/A"]:
-                    chat_info += f"  Situação: {situacao}\n"
+                
+                # Se não estivermos no modo estendido, mostramos info da campanha
+                if not use_all_contacts:
+                    if campanha and campanha not in ["Sem Campanha", "N/A"]:
+                        chat_info += f"• **Campanha:** {campanha}\n"
+                    if situacao and situacao not in ["Sem Situação", "N/A"]:
+                        chat_info += f"• **Situação:** {situacao}\n"
                 
                 unread = chat.get('unreadCount', 0)
                 if unread > 0:
-                    chat_info += f"  Mensagens Não Lidas: {unread}\n"
+                    chat_info += f"• **Mensagens Não Lidas:** {unread}\n"
 
                 if history_text and history_text != "Nenhuma mensagem no histórico.":
-                    # Indenta o histórico para melhor leitura da IA
-                    indented_history = history_text.replace('\n', '\n    ')
-                    chat_info += f"  Histórico Recente:\n    {indented_history}\n"
+                    chat_info += f"\n**HISTÓRICO RECENTE:**\n"
+                    chat_info += f"{history_text}\n"
+                else:
+                    chat_info += f"\n*(Nenhuma mensagem encontrada no histórico)*\n"
                 
+                chat_info += "\n"
                 all_context.append(chat_info)
                 
         return "\n".join(all_context)

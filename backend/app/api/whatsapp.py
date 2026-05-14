@@ -210,22 +210,27 @@ async def get_messages_from_api(
     whatsapp_service: WhatsAppService = Depends(get_whatsapp_service),
 ):
     """
-    Chama POST /chat/findMessages/{instance} da Evolution API para retornar
-    o histórico de mensagens de um JID específico.
+    Busca o histórico de mensagens integrando todas as variações de JID do contato
+    (LID, Número com 9, Número sem 9, etc).
     """
     instance = await crud_user.get_whatsapp_instance(db, instance_id, current_user.id)
     if not instance or not instance.instance_id:
         raise HTTPException(status_code=404, detail="Instância não encontrada ou não inicializada.")
 
-    # Busca histórico via Evolution DB
+    # Busca todas as variações de JID atreladas a este contato para não perder mensagens
+    all_jids = await whatsapp_service.get_all_jids_for_contact(remote_jid)
+    
+    # Busca histórico via Evolution DB usando a lista de JIDs
     messages = await whatsapp_service.fetch_chat_history(
-        instance.instance_name, 
-        remote_jid, 
+        instance_name=instance.instance_name, 
+        number="", 
+        jids=all_jids,
         count=count, 
         evolution_instance_id=instance.instance_id
     )
-    # Formata para o padrão esperado
-    return [whatsapp_service.format_evolution_message(m) for m in reversed(messages)]
+    
+    # Formata para o padrão esperado (Inverte para ordem cronológica ascendente)
+    return list(reversed(messages))
 
 
 @router.get("/{instance_id}/chats", summary="Listar conversas da instância (Evolution DB)")
@@ -272,7 +277,7 @@ async def get_chat_messages(
         evolution_instance_id=instance.instance_id
     )
     
-    return [whatsapp_service.format_evolution_message(m) for m in reversed(raw_messages)]
+    return list(reversed(raw_messages))
 
 @router.post("/{instance_id}/send", summary="Enviar mensagem manual (Evolution API)")
 async def send_message(

@@ -1,4 +1,6 @@
+import random
 import httpx
+from contextlib import asynccontextmanager
 from app.core.config import settings
 import logging
 import json
@@ -17,11 +19,28 @@ class MessageSendError(Exception):
     pass
 
 class WhatsAppService:
-    def __init__(self):
-        self.api_url = settings.EVOLUTION_API_URL
-        self.api_key = settings.EVOLUTION_API_KEY
-        self.headers = {"apikey": self.api_key, "Content-Type": "application/json"}
-        self.db_url = getattr(settings, "EVOLUTION_DATABASE_URL", None)
+    def __init__(self, api_url: str = settings.EVOLUTION_API_URL, api_key: str = settings.EVOLUTION_API_KEY, db_url: Optional[str] = getattr(settings, "EVOLUTION_DATABASE_URL", None)):
+        self.api_url = api_url.rstrip("/")
+        self.api_key = api_key
+        self.db_url = db_url
+        self.headers = {
+            "apikey": self.api_key,
+            "Content-Type": "application/json"
+        }
+
+    @asynccontextmanager
+    async def get_evolution_db_connection(self):
+        """Context manager para conexões com o banco da Evolution."""
+        if not self.db_url:
+            raise ValueError("EVOLUTION_DATABASE_URL não configurada.")
+        
+        # Converte a URL para o formato asyncpg se necessário
+        db_url = self.db_url.replace("postgresql+asyncpg://", "postgresql://")
+        conn = await asyncpg.connect(db_url)
+        try:
+            yield conn
+        finally:
+            await conn.close()
 
     def _normalize_number(self, number: str) -> str:
         clean_number = "".join(filter(str.isdigit, str(number)))
@@ -182,8 +201,8 @@ class WhatsAppService:
         payload = {
             "number": normalized_number,
             "media": media,
-            "mediatype": media_type,
-            "mimetype": mime_type,
+            "mediaType": media_type,
+            "mimeType": mime_type,
             "fileName": file_name,
             "caption": caption,
             "delay": delay
@@ -279,7 +298,7 @@ class WhatsAppService:
             return []
         return await self._fetch_chats_postgresql(evolution_instance_id, limit, offset, db, user_id)
 
-    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 999, mode: str = None, jids: List[str] = None, evolution_instance_id: Optional[str] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 999, mode: str = None, jids: List[str] = None, evolution_instance_id: Optional[str] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, format: bool = True) -> List[Dict[str, Any]]:
         """
         Busca o histórico de mensagens diretamente do banco de dados da Evolution.
         Suporta filtragem por data.
@@ -295,7 +314,7 @@ class WhatsAppService:
             
             return await self._fetch_history_postgresql(
                 instance_name, number, count, mode, jids, evolution_instance_id, 
-                start_date=start_date, end_date=end_date
+                start_date=start_date, end_date=end_date, format=format
             )
         except Exception as e:
             logger.error(f"Erro ao buscar histórico via DB: {e}")
@@ -408,45 +427,25 @@ class WhatsAppService:
                     
                     content = ""
                     if msg_obj:
-                        real_msg = msg_obj
-                        if "ephemeralMessage" in real_msg:
-                            real_msg = real_msg["ephemeralMessage"].get("message", real_msg)
-                        if "viewOnceMessage" in real_msg:
-                            real_msg = real_msg["viewOnceMessage"].get("message", real_msg)
-                        if "documentWithCaptionMessage" in real_msg:
-                            real_msg = real_msg["documentWithCaptionMessage"].get("message", real_msg)
-                            
-                        content = real_msg.get("conversation") or real_msg.get("extendedTextMessage", {}).get("text", "")
-                        if not content:
-                            if "imageMessage" in real_msg: content = "[Imagem]"
-                            elif "videoMessage" in real_msg: content = "[Vídeo]"
-                            elif "audioMessage" in real_msg: content = "[Áudio]"
-                            elif "documentMessage" in real_msg or "documentWithCaptionMessage" in real_msg: content = "[Documento]"
-                            elif "stickerMessage" in real_msg: content = "[Figurinha]"
-                            elif "contactMessage" in real_msg: content = "[Contato]"
-                            elif "contactsArrayMessage" in real_msg: content = "[Contatos]"
-                            elif "locationMessage" in real_msg: content = "[Localização]"
-                            elif "liveLocationMessage" in real_msg: content = "[Localização ao vivo]"
-                            elif "pollCreationMessage" in real_msg or "pollCreationMessageV2" in real_msg or "pollCreationMessageV3" in real_msg: content = "[Enquete]"
-                            elif "protocolMessage" in real_msg: content = "[Mensagem apagada/de sistema]"
-                            elif "reactionMessage" in real_msg: content = "[Reação]"
-                            elif "buttonsResponseMessage" in real_msg or "templateButtonReplyMessage" in real_msg or "listResponseMessage" in real_msg: content = "[Interação]"
-                            else: content = "[Mensagem não suportada]"
+                        # Reutiliza a lógica de formatação para consistência
+                        temp_formatted = self.format_evolution_message({"message": msg_obj, "key": key_obj, "messageTimestamp": row["messageTimestamp"]})
+                        content = temp_formatted.get("content", "")
                     
-                    chats.append({
-                        "id": remote_jid,
-                        "remoteJid": remote_jid,
-                        "lid": lid,
-                        "name": display_name,
-                        "profilePicUrl": row["profilePicUrl"],
-                        "isGroup": "@g.us" in remote_jid,
-                        "lastMessage": content,
-                        "timestamp": row["messageTimestamp"] or (int(row["updatedAt"].timestamp()) if row["updatedAt"] else 0),
-                        "status": row["status"],
-                        "fromMe": key_obj.get("fromMe", False) if key_obj else False,
-                        "lastMessageSender": remote_jid,
-                        "unreadCount": row["unreadCount"] or 0
-                    })
+                    if row["messageTimestamp"]:
+                        chats.append({
+                            "id": remote_jid,
+                            "remoteJid": remote_jid,
+                            "lid": lid,
+                            "name": display_name,
+                            "profilePicUrl": row["profilePicUrl"],
+                            "isGroup": "@g.us" in remote_jid,
+                            "lastMessage": content,
+                            "timestamp": row["messageTimestamp"],
+                            "status": row["status"],
+                            "fromMe": key_obj.get("fromMe", False) if key_obj else False,
+                            "lastMessageSender": remote_jid,
+                            "unreadCount": row["unreadCount"] or 0
+                        })
                 
                 if db and user_id: await self._correlate_chats_with_prospects(chats, db, user_id)
                 return chats
@@ -473,33 +472,235 @@ class WhatsAppService:
             if match:
                 chat.update({"situacao": match["situacao"], "campanha": match["campanha"], "prospect_contact_id": match["prospect_contact_id"], "observacoes": match["observacoes"]})
 
-    def format_evolution_message(self, raw_msg: Dict[str, Any]) -> Dict[str, Any]:
+    def format_evolution_message(self, raw_msg: Any) -> Dict[str, Any]:
+        # Inicialização de segurança para evitar NameError
+        timestamp = 0
+        buttons = []
+        extra_data = {}
+        content = ""
+        msg_type = "text"
+        role = "user"
+        participant = None
+        
         try:
             if isinstance(raw_msg, str): raw_msg = json.loads(raw_msg)
-            key = raw_msg.get("key", {})
-            msg_content = raw_msg.get("message", {})
-            if "ephemeralMessage" in msg_content: msg_content = msg_content["ephemeralMessage"].get("message", msg_content)
-            if "viewOnceMessage" in msg_content: msg_content = msg_content["viewOnceMessage"].get("message", msg_content)
-            content = msg_content.get("conversation") or msg_content.get("extendedTextMessage", {}).get("text", "")
-            msg_type, extra_data = "text", {}
-            for t in ["image", "video", "audio", "sticker", "document"]:
-                if f"{t}Message" in msg_content:
-                    msg_type = t
-                    extra_data = {"media_id": key.get("id"), "mime_type": msg_content[f"{t}Message"].get("mimetype")}
-                    if not content: content = msg_content[f"{t}Message"].get("caption", "")
-                    break
-            participant = key.get("participant") or raw_msg.get("participant")
-            return {"id": key.get("id"), "role": "assistant" if key.get("fromMe") else "user", "senderName": raw_msg.get("pushName"), "participant": participant, "content": content, "type": msg_type, "timestamp": raw_msg.get("messageTimestamp"), "status": raw_msg.get("status"), **extra_data}
-        except Exception: return {"id": f"error-{id(raw_msg)}", "role": "system", "content": "[Erro]", "type": "text", "timestamp": 0}
+            
+            # LOG DE DEPURAÇÃO: Início do processamento
+            msg_id_log = raw_msg.get("key", {}).get("id", "no-id")
 
-    async def _fetch_history_postgresql(self, instance_name: str, number: str, count: int = 999, mode: str = None, jids: List[str] = None, evolution_instance_id: Optional[str] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+            # 1. Metadados básicos
+            key = raw_msg.get("key", {})
+            timestamp = raw_msg.get("messageTimestamp") or 0
+            msg_content = raw_msg.get("message") or {}
+
+            buttons = []
+            extra_data = {}
+
+            if isinstance(msg_content, dict):
+                # 1. Desembrulhar mensagens aninhadas (Recursivo ou Loop)
+                temp_msg = msg_content
+                found_real_msg = False
+                wrappers = ["ephemeralMessage", "viewOnceMessage", "viewOnceMessageV2", "documentWithCaptionMessage", "protocolMessage", "editedMessage", "message"]
+                
+                for _ in range(5):
+                    if not isinstance(temp_msg, dict): break
+                    found_wrap = False
+                    for wrap in wrappers:
+                        if wrap in temp_msg:
+                            val = temp_msg[wrap]
+                            if isinstance(val, dict):
+                                if wrap == "protocolMessage" and "editedMessage" in val:
+                                    temp_msg = val["editedMessage"]
+                                elif "message" in val and isinstance(val["message"], dict):
+                                    temp_msg = val["message"]
+                                else:
+                                    temp_msg = val
+                                found_real_msg = True
+                                found_wrap = True
+                                break
+                    if not found_wrap:
+                        break
+                
+                if found_real_msg:
+                    msg_content = temp_msg
+
+
+                # 2. Extrair conteúdo e tipo
+                raw_type = raw_msg.get("messageType") or ""
+                
+                # Se for um tipo puramente técnico/sistema do WhatsApp, ignoramos
+                technical_types = ["senderKeyDistributionMessage", "peerDataOperationRequestMessage", "clientExpirationMessage", "accountSyncReceiptMessage"]
+                if raw_type in technical_types:
+                    logger.info(f"[Evolution] Ignorando mensagem do tipo técnico: {raw_type}")
+                    return {"id": msg_id_log, "role": "system", "content": "", "type": "technical", "timestamp": timestamp}
+
+                msg_type = raw_type.replace("Message", "").lower() if raw_type else "text"
+                if msg_type == "conversation": msg_type = "text"
+                if msg_type == "extendedtext": msg_type = "text"
+                
+                # Extração de botões (comum em fluxos de IA e marketing)
+                if "buttonsMessage" in msg_content:
+                    for btn in msg_content["buttonsMessage"].get("buttons", []):
+                        buttons.append(btn.get("buttonText", {}).get("displayText", ""))
+                elif "templateMessage" in msg_content:
+                    h_template = msg_content["templateMessage"].get("hydratedTemplate", {}) or msg_content["templateMessage"].get("hydratedFourRowTemplate", {})
+                    if h_template:
+                        for btn in h_template.get("hydratedButtons", []):
+                            for k in ["quickReplyButton", "urlButton", "callButton"]:
+                                if k in btn:
+                                    buttons.append(btn[k].get("displayText", ""))
+                elif "interactiveMessage" in msg_content:
+                    # Botões de mensagens interativas (Evolution API)
+                    # Se houver botões simples
+                    for btn in msg_content["interactiveMessage"].get("buttons", []):
+                        buttons.append(btn.get("buttonText", {}).get("displayText", ""))
+                    # Se houver native flow
+                    native = msg_content["interactiveMessage"].get("nativeFlowMessage", {})
+                    for btn in native.get("buttons", []):
+                        if "displayText" in btn:
+                            buttons.append(btn["displayText"])
+
+                # Tenta extrair texto de TODAS as fontes possíveis
+                content = (
+                    msg_content.get("conversation") or 
+                    msg_content.get("text") or
+                    msg_content.get("extendedTextMessage", {}).get("text") or 
+                    msg_content.get("contentText") or
+                    msg_content.get("caption") or 
+                    msg_content.get("textMessage") or
+                    # Suporte para interactiveMessage (Botões/CTA)
+                    msg_content.get("interactiveMessage", {}).get("body", {}).get("text") or
+                    # Suporte para templateMessage (Mensagens do sistema/marketing)
+                    msg_content.get("templateMessage", {}).get("hydratedTemplate", {}).get("hydratedContentText") or
+                    msg_content.get("templateMessage", {}).get("hydratedFourRowTemplate", {}).get("hydratedContentText") or
+                    ""
+                )
+
+                # Se for um objeto com chave 'message' (caso não pego pelo unwrapper)
+                if not content and "message" in msg_content and isinstance(msg_content["message"], dict):
+                    inner = msg_content["message"]
+                    content = inner.get("conversation") or inner.get("text") or inner.get("extendedTextMessage", {}).get("text") or ""
+
+                # Identifica mídias e extrai legendas/metadados
+                for t in ["image", "video", "audio", "sticker", "document"]:
+                    key_name = f"{t}Message"
+                    if key_name in msg_content:
+                        msg_type = t
+                        media_obj = msg_content[key_name]
+                        extra_data = {
+                            "media_id": key.get("id"), 
+                            "mime_type": media_obj.get("mimetype"),
+                            "caption": media_obj.get("caption"),
+                            "filename": media_obj.get("fileName") or media_obj.get("filename")
+                        }
+                        if not content:
+                            content = extra_data["caption"] or f"[{t.capitalize()}]"
+                        break
+                
+                # Casos especiais e Respostas (Interações)
+                if not content:
+                    if "buttonsResponseMessage" in msg_content:
+                        content = msg_content["buttonsResponseMessage"].get("selectedDisplayText") or "[Botão clicado]"
+                        msg_type = "buttons_response"
+                    elif "templateButtonReplyMessage" in msg_content:
+                        content = msg_content["templateButtonReplyMessage"].get("selectedDisplayText") or "[Botão clicado]"
+                        msg_type = "buttons_response"
+                    elif "listResponseMessage" in msg_content:
+                        content = msg_content["listResponseMessage"].get("title") or "[Item de lista selecionado]"
+                        msg_type = "list_response"
+                    elif "pollCreationMessage" in msg_content or "pollCreationMessageV2" in msg_content or "pollCreationMessageV3" in msg_content:
+                        poll = msg_content.get("pollCreationMessage") or msg_content.get("pollCreationMessageV2") or msg_content.get("pollCreationMessageV3")
+                        content = f"Enquete: {poll.get('name', '')}"
+                        msg_type = "poll"
+                    elif "pollUpdateMessage" in msg_content:
+                        vote = msg_content["pollUpdateMessage"].get("vote", {})
+                        options = vote.get("selectedOptions", [])
+                        content = f"[Voto: {', '.join(options)}]" if options else "[Voto em enquete]"
+                        msg_type = "poll_update"
+                    elif "reactionMessage" in msg_content:
+                        msg_type = "reaction"
+                        reaction_obj = msg_content['reactionMessage']
+                        content = f"Reagiu: {reaction_obj.get('text')}"
+                        extra_data["target_message_id"] = reaction_obj.get("key", {}).get("id")
+                        extra_data["reaction_text"] = reaction_obj.get("text")
+                    elif "protocolMessage" in msg_content:
+                        msg_type = "protocol"
+                        content = "[Mensagem de Sistema/Apagada]"
+                    elif "contactMessage" in msg_content:
+                        msg_type = "contact"
+                        content = f"Contato: {msg_content['contactMessage'].get('displayName')}"
+                    elif "contactsArrayMessage" in msg_content:
+                        msg_type = "contact"
+                        content = "[Contatos]"
+                    elif "locationMessage" in msg_content or "liveLocationMessage" in msg_content:
+                        msg_type = "location"
+                        content = "[Localização]"
+                    elif "interactiveMessage" in msg_content:
+                        # Fallback para interactiveMessage se não pegou body.text acima
+                        content = "[Mensagem Interativa]"
+                
+                # Fallback final: se ainda estiver vazio, não preenchemos o content para permitir filtragem
+                if not content:
+                    if msg_type != "text":
+                        content = f"[{msg_type.replace('Message', '').capitalize()}]"
+                    else:
+                        content = ""
+            else:
+                content = str(msg_content) if msg_content else ""
+
+            # 3. Determinar papel (role)
+            from_me = key.get("fromMe")
+            if isinstance(from_me, str):
+                from_me = from_me.lower() == "true"
+            
+            role = "assistant" if from_me else "user"
+            participant = key.get("participant") or raw_msg.get("participant")
+            
+            # 4. Fallback de ID para evitar erros no React (Warning: same key)
+            msg_id = key.get("id") or f"gen-{timestamp}-{hash(content or '')}-{random.randint(1000, 9999)}"
+
+
+            return {
+                "id": msg_id,
+                "role": role,
+                "senderName": raw_msg.get("pushName"),
+                "senderPhoto": raw_msg.get("senderPhoto"),
+                "participant": participant,
+                "content": content,
+                "type": msg_type,
+                "timestamp": timestamp,
+                "status": "read" if raw_msg.get("status") in ["READ", "PLAYED", "3"] else "unread",
+                "buttons": buttons,
+                **extra_data  # Espalha media_id, caption, filename, etc na raiz
+            }
+        except Exception as e:
+            logger.error(f"Erro ao formatar mensagem da Evolution: {e}", exc_info=True)
+            return {"id": f"error-{id(raw_msg)}", "role": "system", "content": f"[Erro de Formatação: {str(e)}]", "type": "text", "timestamp": 0}
+
+    async def _fetch_history_postgresql(self, instance_name: str, number: str, count: int = 999, mode: str = None, jids: List[str] = None, evolution_instance_id: Optional[str] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, format: bool = True) -> List[Dict[str, Any]]:
         try:
             db_url = self.db_url.replace("postgresql+asyncpg://", "postgresql://")
             conn = await asyncpg.connect(db_url)
             try:
                 instance_id = evolution_instance_id or await conn.fetchval('SELECT id FROM "Instance" WHERE name = $1', instance_name)
+                if not instance_id:
+                    logger.error(f"Instância '{instance_name}' não encontrada no banco da Evolution.")
+                    return []
+
+                # 1. Resolver JIDs se não fornecidos
+                all_target_jids = set(jids) if jids else set()
+                if not all_target_jids and number:
+                    resolved_jids = await self.get_all_jids_for_contact(number)
+                    all_target_jids.update(resolved_jids)
                 
-                # Prepara filtros de data (Unix timestamps)
+                # Garante que temos pelo menos o JID padrão baseado no número
+                if not all_target_jids and number:
+                    clean_num = "".join(filter(str.isdigit, str(number)))
+                    all_target_jids.add(f"{clean_num}@s.whatsapp.net")
+
+                all_target_jids = [j for j in all_target_jids if j]
+
+                # 2. Prepara filtros de data
                 start_ts = int(start_date.timestamp()) if start_date else None
                 end_ts = int(end_date.timestamp()) if end_date else None
                 
@@ -516,71 +717,57 @@ class WhatsAppService:
                     query_params.append(end_ts)
                     params_idx += 1
 
-                if not jids and number:
-                    clean_number = "".join(filter(str.isdigit, str(number)))
-                    contact_jid = await conn.fetchval('SELECT "remoteJid" FROM "Contact" WHERE "instanceId" = $1 AND "remoteJid" LIKE $2 LIMIT 1', instance_id, f"%{clean_number}%")
-                    if contact_jid: 
-                        jids = await self.get_all_jids_for_contact(contact_jid)
-                
-                if jids:
-                    all_target_jids = list(set(jids))
-                    query = f"""
-                        SELECT "key", "message", "messageTimestamp", "pushName", "status"
-                        FROM "Message"
-                        WHERE "instanceId" = $1
-                          AND (
-                            "key"->>'remoteJid' = ANY($2::text[])
-                            OR "key"->>'remoteJidAlt' = ANY($2::text[])
-                          )
-                          {date_filter}
-                        ORDER BY "messageTimestamp" DESC
-                        LIMIT $3
-                    """
-                    rows = await conn.fetch(query, instance_id, all_target_jids, count, *query_params)
-                else:
-                    # Fallback para busca por LIKE caso nenhum JID seja encontrado (ex: novo contato sem IsOnWhatsapp)
-                    clean_number = "".join(filter(str.isdigit, str(number)))
-                    search_term = clean_number
-                    if len(clean_number) >= 8:
-                        search_term = clean_number[-8:] # Busca pelos últimos 8 dígitos para cobrir variações de 9º dígito
-                    
-                    like_pattern = f"%{search_term}%"
-                    query = f"""
-                        SELECT "key", "message", "messageTimestamp", "pushName", "status"
-                        FROM "Message"
-                        WHERE "instanceId" = $1
-                          AND (
-                            "key"->>'remoteJid' LIKE $2
-                            OR "key"->>'remoteJidAlt' LIKE $2
-                          )
-                          {date_filter}
-                        ORDER BY "messageTimestamp" DESC
-                        LIMIT $3
-                    """
-                    rows = await conn.fetch(query, instance_id, like_pattern, count, *query_params)
+                # 3. Buscar mensagens
+                query = f"""
+                    SELECT m."key", m."message", m."messageTimestamp", m."pushName", m."status", m."messageType", m."contextInfo",
+                           c."profilePicUrl" as "senderPhoto"
+                    FROM "Message" m
+                    LEFT JOIN "Contact" c ON (
+                        c."remoteJid" = COALESCE(m."key"->>'participant', m."key"->>'remoteJid')
+                        AND c."instanceId" = m."instanceId"
+                    )
+                    WHERE m."instanceId" = $1
+                      AND (
+                        m."key"->>'remoteJid' = ANY($2::text[])
+                        OR m."key"->>'remoteJidAlt' = ANY($2::text[])
+                      )
+                      {date_filter}
+                    ORDER BY m."messageTimestamp" DESC
+                    LIMIT $3
+                """
+
+                logger.info(f"[Evolution DB] Buscando histórico para JIDs: {all_target_jids}")
+                rows = await conn.fetch(query, instance_id, all_target_jids, count, *query_params)
+                logger.info(f"[Evolution DB] Query retornou {len(rows)} linhas.")
                 
                 messages = []
-                for row in rows:
-                    # Formata a mensagem bruta do DB para o padrão da aplicação
+                for i, row in enumerate(rows):
                     raw_msg = {
                         "key": json.loads(row["key"]) if isinstance(row["key"], str) else row["key"],
                         "message": json.loads(row["message"]) if isinstance(row["message"], str) else row["message"],
                         "messageTimestamp": row["messageTimestamp"],
                         "pushName": row["pushName"],
-                        "status": row["status"]
+                        "status": row["status"],
+                        "messageType": row["messageType"],
+                        "contextInfo": json.loads(row["contextInfo"]) if isinstance(row["contextInfo"], str) else row["contextInfo"],
+                        "senderPhoto": row["senderPhoto"]
                     }
-                    messages.append(self.format_evolution_message(raw_msg))
+                    
+                    formatted = self.format_evolution_message(raw_msg)
+                    
+                    # Filtra mensagens técnicas ou totalmente vazias que não devem poluir a UI
+                    if formatted.get("type") == "technical" or (not formatted.get("content") and not formatted.get("media_id")):
+                        continue
+                        
+                    messages.append(formatted if format else raw_msg)
                 
                 if not messages and mode and mode != 'initial':
-                    raise ValueError(f"Histórico vazio para contato {number} em modo '{mode}'.")
+                    logger.warning(f"Histórico vazio para JIDs {all_target_jids} em modo '{mode}'.")
 
-                search_desc = f"JIDs: {jids}" if jids else f"Termo: {like_pattern}"
-                logger.info(f"Histórico carregado via DB ({search_desc}). Total: {len(messages)}.")
+                logger.info(f"Histórico carregado via DB para {number}. Total: {len(messages)} mensagens.")
                 return messages
             finally:
                 await conn.close()
-        except ValueError:
-            raise
         except Exception as e:
             logger.error(f"Erro ao buscar histórico no banco de dados da Evolution: {e}", exc_info=True)
             return []
@@ -748,7 +935,7 @@ class WhatsAppService:
             logger.error(f"Erro ao buscar contatos via API Evolution para '{instance_name}': {e}")
             return []
 
-    async def fetch_messages_from_api_exhaustive(self, instance_name: str, remote_jid: str = None, jids: List[str] = None, count: int = 100) -> List[Dict[str, Any]]:
+    async def fetch_messages_from_api_exhaustive(self, instance_name: str, remote_jid: str = None, jids: List[str] = None, count: int = 100, format: bool = True) -> List[Dict[str, Any]]:
         """
         Busca mensagens de forma exaustiva na Evolution API, consultando todos os JIDs relacionados
         (LID, 8/9 dígitos, etc) em paralelo para garantir que nada seja perdido.
@@ -815,17 +1002,17 @@ class WhatsAppService:
             m_jid_alt = m_key.get("remoteJidAlt") or m.get("remoteJidAlt")
             
             if any(jid in all_target_jids for jid in [m_jid, m_jid_alt] if jid):
-                formatted.append(self.format_evolution_message(m))
+                formatted.append(self.format_evolution_message(m) if format else m)
         
         # Retorna apenas a quantidade solicitada (as mais recentes)
         return formatted[-count:] if count > 0 else formatted
 
-    async def fetch_messages_from_api(self, instance_name: str, remote_jid: str, count: int = 50) -> List[Dict[str, Any]]:
+    async def fetch_messages_from_api(self, instance_name: str, remote_jid: str, count: int = 50, format: bool = True) -> List[Dict[str, Any]]:
         """
         Busca mensagens de um contato diretamente na Evolution API.
         Agora redireciona para a busca exaustiva para garantir completude.
         """
-        return await self.fetch_messages_from_api_exhaustive(instance_name, remote_jid=remote_jid, count=count)
+        return await self.fetch_messages_from_api_exhaustive(instance_name, remote_jid=remote_jid, count=count, format=format)
 
     async def fetch_all_groups(self, instance_name: str) -> List[Dict[str, Any]]:
         """Busca grupos na Evolution API."""
@@ -906,7 +1093,7 @@ class WhatsAppService:
             db_url = self.db_url.replace("postgresql+asyncpg://", "postgresql://")
             conn = await asyncpg.connect(db_url)
             try:
-                query = 'SELECT "jidOptions" FROM "IsOnWhatsapp" WHERE "remoteJid" = $1'
+                query = 'SELECT "jidOptions" FROM "IsOnWhatsapp" WHERE "id" = $1 OR "lid" = $1'
                 jid_options_json = await conn.fetchval(query, remote_jid)
 
                 if jid_options_json:
@@ -928,8 +1115,8 @@ class WhatsAppService:
 
     async def get_all_jids_for_contact(self, remote_jid: str) -> List[str]:
         """
-        Busca todos os JIDs relacionados a um contato (LID, 8/9 dígitos)
-        pesquisando tanto na tabela IsOnWhatsapp quanto na tabela Contact da Evolution.
+        Busca todos os JIDs relacionados a um contato (LID, variações de número 8/9 dígitos)
+        conforme solicitado, pesquisando na tabela IsOnWhatsapp (colunas jid e jidOptions).
         """
         if not self.db_url:
             return [remote_jid] if "@" in remote_jid else [f"{remote_jid}@s.whatsapp.net"]
@@ -938,79 +1125,51 @@ class WhatsAppService:
         if "@g.us" in remote_jid:
             return [remote_jid]
 
+        jids = {remote_jid}
+        
+        # 1. Normalização inicial (adiciona variações de 8/9 dígitos se for número brasileiro)
+        clean_num = "".join(filter(str.isdigit, remote_jid.split("@")[0]))
+        if clean_num.isdigit() and len(clean_num) >= 10:
+            standard_jid = f"{clean_num}@s.whatsapp.net"
+            jids.add(standard_jid)
+            
+            if clean_num.startswith('55'):
+                if len(clean_num) == 13: # Com 9
+                    without_9 = clean_num[:4] + clean_num[5:]
+                    jids.add(f"{without_9}@s.whatsapp.net")
+                elif len(clean_num) == 12: # Sem 9
+                    with_9 = clean_num[:4] + '9' + clean_num[4:]
+                    jids.add(f"{with_9}@s.whatsapp.net")
+
         try:
-            db_url = self.db_url.replace("postgresql+asyncpg://", "postgresql://")
-            conn = await asyncpg.connect(db_url)
-            try:
-                # 1. Normalização inicial
-                clean_num = "".join(filter(str.isdigit, remote_jid.split("@")[0]))
-                norm_num = self._normalize_number(clean_num)
-                
-                standard_jid = f"{clean_num}@s.whatsapp.net"
-                norm_jid = f"{norm_num}@s.whatsapp.net"
-                
-                jids = {remote_jid, standard_jid, norm_jid}
-                
-                # 2. Busca na tabela IsOnWhatsapp (mapeamento oficial de variações e LID)
-                query_iso = """
-                    SELECT "jidOptions", "lid", "remoteJid" 
+            async with self.get_evolution_db_connection() as conn:
+                # 2. Busca na tabela IsOnWhatsapp
+                # Procuramos o JID fornecido ou qualquer uma de suas variações nas colunas 'jid' ou 'jidOptions'
+                # jidOptions é uma string separada por vírgula
+                jid_list = list(jids)
+                query = """
+                    SELECT "id" as jid, "jidOptions", "lid" 
                     FROM "IsOnWhatsapp" 
-                    WHERE "remoteJid" = $1 OR "remoteJid" = $2 OR "lid" = $1 OR "lid" = $2
-                       OR "remoteJid" = $3 OR "lid" = $3
+                    WHERE "id" = ANY($1::text[]) 
+                       OR "lid" = ANY($1::text[])
+                       OR EXISTS (
+                           SELECT 1 FROM unnest($1::text[]) AS val 
+                           WHERE "jidOptions" LIKE '%' || val || '%'
+                       )
                 """
-                rows_iso = await conn.fetch(query_iso, standard_jid, norm_jid, remote_jid)
-                for row in rows_iso:
-                    if row["lid"]: jids.add(row["lid"])
-                    if row["remoteJid"]: jids.add(row["remoteJid"])
-                    if row["jidOptions"]:
-                        if isinstance(row["jidOptions"], str):
-                            try:
-                                options = json.loads(row["jidOptions"])
-                                if isinstance(options, list):
-                                    for opt in options:
-                                        if isinstance(opt, dict) and "jid" in opt: jids.add(opt["jid"])
-                                        elif isinstance(opt, str): jids.add(opt)
-                                else:
-                                    jids.update([j.strip() for j in row["jidOptions"].split(',') if j.strip()])
-                            except:
-                                jids.update([j.strip() for j in row["jidOptions"].split(',') if j.strip()])
-                        elif isinstance(row["jidOptions"], list):
-                            for opt in row["jidOptions"]:
-                                if isinstance(opt, dict) and "jid" in opt: jids.add(opt["jid"])
-                                elif isinstance(opt, str): jids.add(opt)
-
-                # 3. Busca na tabela Contact (captura contatos que podem não estar no IsOnWhatsapp)
-                # Extrai o DDD para validar a busca e evitar pegar contatos de outras regiões com mesmo final
-                ddd = ""
-                if len(clean_num) >= 10:
-                    ddd = clean_num[2:4] if clean_num.startswith("55") else clean_num[0:2]
-
-                search_term = clean_num[-8:] if len(clean_num) >= 8 else clean_num
-                query_contact = 'SELECT "remoteJid" FROM "Contact" WHERE "remoteJid" LIKE $1 OR "pushName" = (SELECT "pushName" FROM "Contact" WHERE "remoteJid" = $2 LIMIT 1)'
-                rows_contact = await conn.fetch(query_contact, f"%{search_term}%", remote_jid)
-                for row in rows_contact:
-                    candidate_jid = row["remoteJid"]
-                    if not candidate_jid or "@" not in candidate_jid: continue
-                    if "@g.us" in candidate_jid: continue
-                    
-                    # Validação de DDD: Se o DDD original é conhecido, o candidato deve ter o mesmo
-                    if ddd:
-                        candidate_num = "".join(filter(str.isdigit, candidate_jid.split("@")[0]))
-                        if len(candidate_num) >= 10:
-                            candidate_ddd = candidate_num[2:4] if candidate_num.startswith("55") else candidate_num[0:2]
-                            if candidate_ddd and ddd != candidate_ddd:
-                                continue # DDD diferente, provável contato distinto
-                    
-                    jids.add(candidate_jid)
+                rows = await conn.fetch(query, jid_list)
                 
-                # Remove JIDs inválidos ou vazios
-                result = list(set([j for j in jids if j and "@" in j]))
-                return result if result else [standard_jid]
-            finally:
-                await conn.close()
+                for row in rows:
+                    if row.get("jid"): jids.add(row["jid"])
+                    if row.get("lid"): jids.add(row["lid"])
+                    if row.get("jidOptions"):
+                        # Split das opções vinculadas
+                        opts = [opt.strip() for opt in row["jidOptions"].split(',') if opt.strip()]
+                        jids.update(opts)
         except Exception as e:
             logger.error(f"Erro ao buscar JIDs relacionados para {remote_jid}: {e}")
-            return [remote_jid] if "@" in remote_jid else [f"{remote_jid}@s.whatsapp.net"]
+            
+        return [j for j in list(jids) if j and "@" in j]
 
     async def check_whatsapp_numbers(self, instance_name: str, numbers: List[str]) -> Optional[List[Dict[str, Any]]]:
         results = []
@@ -1097,7 +1256,7 @@ class WhatsAppService:
                         persona_config=persona_config,
                         whatsapp_service=self,
                         gemini_service=gemini_service,
-                        whatsapp_instance=current_instance
+                        whatsapp_instance=pc.whatsapp_instance
                     )
                     
                     if history:

@@ -123,9 +123,7 @@ async def process_active_prospects():
                             # 1. Verificar conexão primeiro
                             conn_status = await whatsapp_service.get_connection_status(inst.instance_name)
                             if conn_status.get("status") != "connected":
-                                logger.warning(f"Instância '{inst.name}' (ID: {inst.id}) está desconectada. Inativando e pulando.")
-                                inst.is_active = False
-                                await db.commit()
+                                logger.warning(f"Instância '{inst.name}' (ID: {inst.id}) está desconectada. Pulando para aguardar reconexão automática.")
                                 continue # Tenta a próxima instância
 
                             # 2. Se conectada, verificar intervalo com Aleatorização Proporcional (Jitter)
@@ -493,24 +491,52 @@ async def process_active_prospects():
                     
                     # Processamento de Arquivos
                     if files_to_send and isinstance(files_to_send, list):
-                        for file_id in files_to_send:
+                        for raw_file_id in files_to_send:
                             try:
+                                if not raw_file_id: continue
+                                
+                                # Extrai apenas o ID caso a IA tenha enviado uma URL ou prefixo
+                                file_id = raw_file_id
+                                if isinstance(raw_file_id, str):
+                                    # Regex para ID do Google Drive (geralmente 25+ chars alfanuméricos com traços/under)
+                                    id_match = re.search(r'([-\w]{25,})', raw_file_id)
+                                    if id_match:
+                                        file_id = id_match.group(1)
+
                                 logger.info(f"AGENTE WORKER: Baixando arquivo {file_id} para envio...")
                                 file_data = await drive_service.download_file(file_id)
                                 if file_data:
                                     mime = file_data['mime_type']
-                                    if 'image' in mime: media_type = 'image'
-                                    elif 'video' in mime: media_type = 'video'
-                                    else: media_type = 'document'
+                                    
+                                    # Detecção refinada de tipo de mídia
+                                    if 'image' in mime:
+                                        media_type = 'image'
+                                    elif 'video' in mime:
+                                        media_type = 'video'
+                                    elif 'audio' in mime:
+                                        media_type = 'audio'
+                                    else:
+                                        media_type = 'document'
 
-                                    await whatsapp_service.send_media_message(
-                                        instance_name=selected_instance.instance_name,
-                                        number=contact.whatsapp,
-                                        media=file_data['base64'],
-                                        media_type=media_type,
-                                        mime_type=mime,
-                                        file_name=file_data['file_name']
-                                    )
+                                    logger.info(f"AGENTE WORKER: Enviando {media_type} ({mime}) para {contact.whatsapp}")
+
+                                    if media_type == 'audio':
+                                        # Envia como áudio (gravado/PTT) para melhor experiência
+                                        await whatsapp_service.send_whatsapp_audio(
+                                            instance_name=selected_instance.instance_name,
+                                            number=contact.whatsapp,
+                                            audio_base64=file_data['base64']
+                                        )
+                                    else:
+                                        # Envia como mídia genérica (imagem, vídeo ou documento)
+                                        await whatsapp_service.send_media_message(
+                                            instance_name=selected_instance.instance_name,
+                                            number=contact.whatsapp,
+                                            media=file_data['base64'],
+                                            media_type=media_type,
+                                            mime_type=mime,
+                                            file_name=file_data['file_name']
+                                        )
                                     logger.info(f"AGENTE WORKER: Arquivo {file_data['file_name']} enviado com sucesso.")
                                     
                                     now_iso = datetime.now(timezone.utc).isoformat()

@@ -90,28 +90,28 @@ const ActivityLogTable = ({ logData, onOpenConversation, onOpenEditContact, isLo
         <thead>
           <tr className="border-b border-slate-50">
             {['Contato Interagindo', 'Situação IA', 'Insight do Agente', 'Ações'].map((h, i) => (
-                <th key={i} className="px-12 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{h}</th>
+                <th key={i} className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{h}</th>
             ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-50">
           {logData.map((item, index) => (
             <tr key={index} className="group hover:bg-emerald-50/20 transition-all">
-              <td className="px-12 py-6">
-                <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 font-bold group-hover:bg-emerald-500 group-hover:text-white transition-all">{(item.contact_name || '?')[0].toUpperCase()}</div>
+              <td className="px-6 py-3">
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400 font-bold group-hover:bg-emerald-500 group-hover:text-white transition-all text-xs">{(item.contact_name || '?')[0].toUpperCase()}</div>
                     <div>
-                        <div className="text-sm font-black text-slate-800">{item.contact_name}</div>
-                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight mt-1">{new Date(item.updated_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} • Sincronizado</div>
+                        <div className="text-sm font-black text-slate-800 leading-tight">{item.contact_name}</div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight mt-0.5">{new Date(item.updated_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} • Sincronizado</div>
                     </div>
                 </div>
               </td>
-              <td className="px-12 py-6"><span className={getStatusClass(item.situacao)}>{item.situacao}</span></td>
-              <td className="px-12 py-6 max-w-xs"><p className="text-xs text-slate-400 font-medium italic truncate" title={item.observacoes}>{item.observacoes || 'Nenhum insight disponível.'}</p></td>
-              <td className="px-12 py-6">
+              <td className="px-6 py-3"><span className={getStatusClass(item.situacao)}>{item.situacao}</span></td>
+              <td className="px-6 py-3 max-w-sm"><p className="text-xs text-slate-400 font-medium italic truncate" title={item.observacoes}>{item.observacoes || 'Nenhum insight disponível.'}</p></td>
+              <td className="px-6 py-3">
                 <div className="flex justify-end items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                  <button onClick={() => onOpenConversation(item)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-100 text-slate-400 hover:text-[#356854] hover:border-emerald-100 rounded-xl transition-all shadow-sm"><MessageSquare size={18} /></button>
-                  <button onClick={() => onOpenEditContact(item)} className="w-10 h-10 flex items-center justify-center bg-white border border-slate-100 text-slate-400 hover:text-[#356854] hover:border-emerald-100 rounded-xl transition-all shadow-sm"><Edit size={18} /></button>
+                  <button onClick={() => onOpenConversation(item)} className="w-8 h-8 flex items-center justify-center bg-white border border-slate-100 text-slate-400 hover:text-[#356854] hover:border-emerald-100 rounded-lg transition-all shadow-sm"><MessageSquare size={16} /></button>
+                  <button onClick={() => onOpenEditContact(item)} className="w-8 h-8 flex items-center justify-center bg-white border border-slate-100 text-slate-400 hover:text-[#356854] hover:border-emerald-100 rounded-lg transition-all shadow-sm"><Edit size={16} /></button>
                 </div>
               </td>
             </tr>
@@ -136,7 +136,7 @@ function MainProspecting() {
   const [currentPage, setCurrentPage] = useState(1);
   const [loadingStates, setLoadingStates] = useState({ campaigns: true, log: false });
   const [actionLoading, setActionLoading] = useState({ start: false, stop: false, delete: false });
-  const logsPerPage = 12;
+  const logsPerPage = 20;
 
   const fetchData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoadingStates(p => ({ ...p, campaigns: true }));
@@ -266,7 +266,7 @@ function MainProspecting() {
           {/* Main Monitor */}
           <main className="xl:col-span-8 flex flex-col gap-12">
             <div className="ds-surface overflow-hidden border-none shadow-2xl shadow-slate-200/50 flex flex-col min-h-[750px]">
-              <div className="p-12 border-b border-slate-50 bg-white sticky top-0 z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+              <div className="px-8 py-6 border-b border-slate-50 bg-white sticky top-0 z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
                 <div>
                   <h2 className="text-xl font-black text-slate-800 flex items-center gap-3">Log de Monitoramento <Activity size={20} className="text-emerald-500" /></h2>
                   <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Status de processamento em tempo real</p>
@@ -291,14 +291,14 @@ function MainProspecting() {
               </div>
 
               {totalPages > 1 && (
-                <footer className="p-8 border-t border-slate-50 bg-white flex justify-between items-center">
+                <footer className="px-8 py-4 border-t border-slate-50 bg-white flex justify-between items-center">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Página {currentPage} de {totalPages}</span>
                     <div className="flex items-center gap-3">
-                        <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="w-10 h-10 flex items-center justify-center border border-slate-100 rounded-xl text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronsLeft size={18} /></button>
-                        <button onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1} className="w-10 h-10 flex items-center justify-center border border-slate-100 rounded-xl text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronLeft size={18} /></button>
-                        <div className="h-10 px-6 bg-emerald-50 rounded-xl flex items-center text-[#356854] font-black text-[10px] uppercase tracking-widest border border-emerald-100">{currentPage}</div>
-                        <button onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages} className="w-10 h-10 flex items-center justify-center border border-slate-100 rounded-xl text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronRight size={18} /></button>
-                        <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="w-10 h-10 flex items-center justify-center border border-slate-100 rounded-xl text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronsRight size={18} /></button>
+                        <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="w-8 h-8 flex items-center justify-center border border-slate-100 rounded-lg text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronsLeft size={16} /></button>
+                        <button onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1} className="w-8 h-8 flex items-center justify-center border border-slate-100 rounded-lg text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronLeft size={16} /></button>
+                        <div className="h-8 px-4 bg-emerald-50 rounded-lg flex items-center text-[#356854] font-black text-[10px] uppercase tracking-widest border border-emerald-100">{currentPage}</div>
+                        <button onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages} className="w-8 h-8 flex items-center justify-center border border-slate-100 rounded-lg text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronRight size={16} /></button>
+                        <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="w-8 h-8 flex items-center justify-center border border-slate-100 rounded-lg text-slate-400 hover:text-[#356854] disabled:opacity-20"><ChevronsRight size={16} /></button>
                     </div>
                 </footer>
               )}

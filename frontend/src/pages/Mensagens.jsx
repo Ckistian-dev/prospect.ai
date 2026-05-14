@@ -65,22 +65,61 @@ const DS_STYLE = `
     .chat-bubble-user {
         background: linear-gradient(135deg, #356854, #2a5242);
         color: white;
-        border-radius: 1.5rem 1.5rem 0.2rem 1.5rem;
+        border-radius: 1.25rem 0 1.25rem 1.25rem;
         padding: 0.85rem 1.1rem;
         box-shadow: 0 10px 15px -3px rgba(53, 104, 84, 0.2);
         font-size: 0.9rem;
         line-height: 1.5;
+        position: relative;
+    }
+
+    .chat-bubble-user::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        right: -10px;
+        width: 20px;
+        height: 15px;
+        background: #356854;
+        clip-path: polygon(0 0, 0 100%, 100% 0);
+        z-index: 1;
     }
 
     .chat-bubble-ia {
         background: white;
         color: var(--ds-text-main);
-        border-radius: 1.5rem 1.5rem 1.5rem 0.2rem;
+        border-radius: 0 1.25rem 1.25rem 1.25rem;
         padding: 0.85rem 1.1rem;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
         font-size: 0.9rem;
         line-height: 1.5;
-        border: 1px solid rgba(255, 255, 255, 0.8);
+        border: 1px solid #f1f5f9;
+        position: relative;
+    }
+
+    .chat-bubble-ia::before {
+        content: "";
+        position: absolute;
+        top: -1px;
+        left: -10px;
+        width: 20px;
+        height: 15px;
+        background: white;
+        clip-path: polygon(100% 0, 100% 100%, 0 0);
+        z-index: 1;
+    }
+
+    /* Adiciona a bordinha na ponta do balão da IA */
+    .chat-bubble-ia::after {
+        content: "";
+        position: absolute;
+        top: -1px;
+        left: -11px;
+        width: 21px;
+        height: 16px;
+        background: #f1f5f9;
+        clip-path: polygon(100% 0, 100% 100%, 0 0);
+        z-index: 0;
     }
 
     .editorial-label {
@@ -284,6 +323,7 @@ function Mensagens() {
             if (selectedContactIdRef.current !== contact.id) return;
 
             const fetched = res.data || [];
+            console.log(`[Mensagens] ${fetched.length} mensagens carregadas para ${contact.remoteJid}`);
             const latestMsg = fetched.length > 0 ? fetched[fetched.length - 1] : null;
             const nc = JSON.stringify(fetched);
 
@@ -320,7 +360,14 @@ function Mensagens() {
         selectedContactIdRef.current = contact.id;
         setHeaderImgError(false);
         setIsProfileSidebarOpen(false);
-        setMessages([]);
+        
+        // Tenta carregar o que já temos em memória (cache) para resposta instantânea
+        try {
+            const existing = contact.conversa && contact.conversa !== '[]' ? JSON.parse(contact.conversa) : [];
+            setMessages(existing);
+        } catch (e) {
+            setMessages([]);
+        }
 
         if (messagesPollingRef.current) clearInterval(messagesPollingRef.current);
 
@@ -341,10 +388,12 @@ function Mensagens() {
     // ── 3. Navegação por parâmetro de rota ────────────────────────────────────
     useEffect(() => {
         if (location.state?.selectContactId && contacts.length > 0) {
-            const found = contacts.find(c => c.prospect_contact_id === location.state.selectContactId);
+            const found = contacts.find(c => String(c.prospect_contact_id) === String(location.state.selectContactId));
             if (found) {
                 handleSelectContact(found);
-                setActiveButtonGroup('bot_ia');
+                if (found.situacao || found.campanha) {
+                    setActiveButtonGroup('bot_ia');
+                }
             }
             window.history.replaceState({}, document.title);
         }
@@ -564,6 +613,7 @@ function Mensagens() {
                                 </div>
                             ) : (
                                 <ChatBody
+                                    key={selectedContact.id}
                                     mensagem={chatBodyContact}
                                     onViewMedia={async (mid, type, fname) => {
                                         setIsDownloadingMedia(true);

@@ -150,7 +150,7 @@ const HeroStatModule = ({ modulo }) => {
         neutro: { icon: <Minus size={20} />, class: 'text-emerald-400 bg-emerald-500/10', border: 'border-emerald-500/20', label: 'Estável' },
     };
     const trend = trendMap[modulo.tendencia] || trendMap.neutro;
-    
+
     return (
         <div className="relative overflow-hidden rounded-[32px] p-8 sm:p-12 shadow-2xl transition-all duration-500 border border-white/20 bg-gradient-to-br from-[#1b3d2f] via-[#2d5746] to-[#356854] group">
             <div className="absolute top-[-100px] right-[-100px] w-80 h-80 rounded-full bg-emerald-400/20 blur-[100px]" />
@@ -316,7 +316,7 @@ const AnalysisReport = ({ analysisData }) => {
 
     const normalizedModulos = useMemo(() => {
         if (modulos.length > 0) return modulos;
-        const ac = analysisData; 
+        const ac = analysisData;
         const fallback = [];
         if (ac.diagnostico_geral) fallback.push({ tipo: 'text_section', titulo: 'Diagnóstico', conteudo: ac.diagnostico_geral, estilo: 'diagnostico' });
         if (ac.principais_pontos_de_friccao?.length) fallback.push({
@@ -424,7 +424,7 @@ const AIAnalyzer = ({ onAnalyze, isLoading, analysis, error }) => {
     return (
         <div className="relative group overflow-hidden bg-white rounded-[40px] p-6 sm:p-10 mt-12 border border-slate-100 shadow-2xl shadow-slate-200/60 transition-all duration-500">
             <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#1b3d2f] via-[#356854] to-emerald-500" />
-            
+
             <div className="relative z-10 flex flex-col lg:flex-row items-center lg:items-start gap-8 mb-12">
                 <div className="w-20 h-20 rounded-[28px] bg-gradient-to-tr from-[#1b3d2f] via-[#356854] to-emerald-500 flex items-center justify-center shadow-2xl ring-4 ring-emerald-50">
                     <Brain size={36} className="text-white animate-pulse" />
@@ -438,7 +438,7 @@ const AIAnalyzer = ({ onAnalyze, isLoading, analysis, error }) => {
                             </div>
                         </div>
 
-                        <button 
+                        <button
                             type="button"
                             onClick={() => setUseAllContacts(!useAllContacts)}
                             className={`group flex items-center gap-5 px-6 py-3 rounded-[20px] transition-all duration-300 border-2 ${useAllContacts ? 'bg-emerald-50/50 border-emerald-200 shadow-sm' : 'bg-white border-slate-100 hover:border-emerald-100'}`}
@@ -460,16 +460,6 @@ const AIAnalyzer = ({ onAnalyze, isLoading, analysis, error }) => {
 
             <div className="relative z-10 flex flex-col gap-8">
                 <div className="flex flex-col xl:flex-row gap-6 items-stretch xl:items-end">
-                    <div className="w-full xl:w-72 space-y-2">
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] ml-2">Modelo de IA</label>
-                        <select
-                            value={selectedModel}
-                            onChange={e => setSelectedModel(e.target.value)}
-                            className="w-full bg-slate-50 border-2 border-slate-100 text-slate-800 text-sm rounded-[20px] px-5 py-4 focus:outline-none focus:border-[#356854] font-bold appearance-none cursor-pointer"
-                        >
-                            {LLM_MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                        </select>
-                    </div>
 
                     <form onSubmit={handleSubmit} className="flex-1 flex flex-col sm:flex-row gap-4">
                         <div className="flex-1 relative">
@@ -557,10 +547,10 @@ const StatCard = ({ icon: Icon, title, value, color, description }) => (
 );
 
 const DateRangeFilter = ({ onDateChange }) => {
-    const [active, setActive] = useState('30d');
-    const [customRange, setCustomRange] = useState([subDays(new Date(), 29), new Date()]);
+    const [active, setActive] = useState('7d');
+    const [customRange, setCustomRange] = useState([subDays(new Date(), 6), new Date()]);
     const [showCustomPicker, setShowCustomPicker] = useState(false);
-    const ranges = { '7d': '7D', '30d': '30D', 'this_month': 'Mês', 'custom': <CalendarIcon size={18} /> };
+    const ranges = { 'today': 'Hoje', '7d': '7D', '30d': '30D', 'this_month': 'Mês', 'custom': <CalendarIcon size={18} /> };
 
     const handleSelect = (key) => {
         setActive(key);
@@ -568,6 +558,10 @@ const DateRangeFilter = ({ onDateChange }) => {
         setShowCustomPicker(false);
         let start = new Date(), end = new Date();
         if (key === 'this_month') start = startOfMonth(end);
+        else if (key === 'today') {
+            start.setHours(0, 0, 0, 0);
+            end.setHours(23, 59, 59, 999);
+        }
         else start = subDays(end, key === '7d' ? 6 : 29);
         onDateChange(start, end);
     };
@@ -594,9 +588,9 @@ const Dashboard = () => {
     const [data, setData] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
-    const [dateRange, setDateRange] = useState({ startDate: subDays(new Date(), 29), endDate: new Date() });
+    const [dateRange, setDateRange] = useState({ startDate: subDays(new Date(), 6), endDate: new Date() });
     const [selectedCampaigns, setSelectedCampaigns] = useState([]);
-    
+
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [analysisResult, setAnalysisResult] = useState(null);
     const [analysisError, setAnalysisError] = useState('');
@@ -619,13 +613,15 @@ const Dashboard = () => {
     const handleAIAnalysis = async (q, model, useAllContacts = false) => {
         setIsAnalyzing(true); setAnalysisResult(null); setAnalysisError('');
         try {
-            const res = await api.post('/dashboard/analyze', { 
-                question: q, 
+            const res = await api.post('/dashboard/analyze', {
+                question: q,
                 model: model,
-                start_date: dateRange.startDate.toISOString(), 
-                end_date: dateRange.endDate.toISOString(), 
+                start_date: dateRange.startDate.toISOString(),
+                end_date: dateRange.endDate.toISOString(),
                 prospect_ids: selectedCampaigns,
                 use_all_contacts: useAllContacts
+            }, {
+                timeout: 600000
             });
             setAnalysisResult(res.data.analysis);
         } catch (err) { setAnalysisError('Ocorreu um erro no processamento cognitivo.'); }
@@ -677,19 +673,19 @@ const Dashboard = () => {
                             <ResponsiveContainer width="100%" height="100%">
                                 <AreaChart data={data.activityChart} margin={{ top: 10, right: 20, left: 0, bottom: 40 }}>
                                     <defs>
-                                        <linearGradient id="colorContacts" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/><stop offset="95%" stopColor="#10b981" stopOpacity={0}/></linearGradient>
+                                        <linearGradient id="colorContacts" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#10b981" stopOpacity={0.2} /><stop offset="95%" stopColor="#10b981" stopOpacity={0} /></linearGradient>
                                     </defs>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                    <XAxis 
-                                        dataKey="date" 
-                                        axisLine={false} 
-                                        tickLine={false} 
-                                        tick={{fontSize: 10, fill: '#94a3b8', fontWeight: 900}} 
+                                    <XAxis
+                                        dataKey="date"
+                                        axisLine={false}
+                                        tickLine={false}
+                                        tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 900 }}
                                         dy={20}
                                         interval="preserveStartEnd"
                                         minTickGap={30}
                                     />
-                                    <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8', fontWeight: 900}} />
+                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 900 }} />
                                     <Tooltip content={<CustomTooltip />} />
                                     <Area type="monotone" dataKey="contatos" name="Contatos" stroke="#10b981" strokeWidth={5} fillOpacity={1} fill="url(#colorContacts)" animationDuration={2000} />
                                     <Area type="monotone" dataKey="respostas" name="Respostas" stroke="#cbd5e1" strokeWidth={3} fill="transparent" strokeDasharray="8 8" animationDuration={2500} />
@@ -724,11 +720,11 @@ const Dashboard = () => {
                     </div>
                 </div>
 
-                <AIAnalyzer 
-                    onAnalyze={handleAIAnalysis} 
-                    isLoading={isAnalyzing} 
-                    analysis={analysisResult} 
-                    error={analysisError} 
+                <AIAnalyzer
+                    onAnalyze={handleAIAnalysis}
+                    isLoading={isAnalyzing}
+                    analysis={analysisResult}
+                    error={analysisError}
                 />
             </div>
         </div>
