@@ -298,7 +298,7 @@ class WhatsAppService:
             return []
         return await self._fetch_chats_postgresql(evolution_instance_id, limit, offset, db, user_id)
 
-    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 999, mode: str = None, jids: List[str] = None, evolution_instance_id: Optional[str] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, format: bool = True) -> List[Dict[str, Any]]:
+    async def fetch_chat_history(self, instance_name: str, number: str, count: int = 5000, mode: str = None, jids: List[str] = None, evolution_instance_id: Optional[str] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, format: bool = True) -> List[Dict[str, Any]]:
         """
         Busca o histórico de mensagens diretamente do banco de dados da Evolution.
         Suporta filtragem por data.
@@ -377,7 +377,7 @@ class WhatsAppService:
                     FROM raw_contacts
                     ORDER BY group_key, "pushName" IS NULL, "updatedAt" DESC
                 ),
-                -- Pega as últimas 1000 mensagens da instância para buscar conteúdo de forma eficiente
+                -- Pega as últimas 30000 mensagens da instância para buscar conteúdo de forma eficiente
                 latest_msgs AS (
                     SELECT 
                         "key"->>'remoteJid' as msg_jid,
@@ -388,7 +388,7 @@ class WhatsAppService:
                     FROM "Message"
                     WHERE "instanceId" = $1
                     ORDER BY "messageTimestamp" DESC
-                    LIMIT 1000
+                    LIMIT 30000
                 ),
                 -- Pega a mais recente para cada chat consolidado (se houver nos últimos 1000)
                 chat_latest_msgs AS (
@@ -677,7 +677,7 @@ class WhatsAppService:
             logger.error(f"Erro ao formatar mensagem da Evolution: {e}", exc_info=True)
             return {"id": f"error-{id(raw_msg)}", "role": "system", "content": f"[Erro de Formatação: {str(e)}]", "type": "text", "timestamp": 0}
 
-    async def _fetch_history_postgresql(self, instance_name: str, number: str, count: int = 999, mode: str = None, jids: List[str] = None, evolution_instance_id: Optional[str] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, format: bool = True) -> List[Dict[str, Any]]:
+    async def _fetch_history_postgresql(self, instance_name: str, number: str, count: int = 5000, mode: str = None, jids: List[str] = None, evolution_instance_id: Optional[str] = None, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, format: bool = True) -> List[Dict[str, Any]]:
         try:
             db_url = self.db_url.replace("postgresql+asyncpg://", "postgresql://")
             conn = await asyncpg.connect(db_url)

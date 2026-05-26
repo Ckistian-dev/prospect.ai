@@ -146,8 +146,8 @@ class GeminiService:
             "top_k": self.generation_config.get("top_k", 1),
         }
 
-        # Penalties não são suportados no gemini-2.5-flash e variantes lite
-        if "gemini-2.5-flash" not in model_name:
+        # Penalties são apenas suportados de forma consistente em modelos Pro
+        if "pro" in model_name:
             config_args["frequency_penalty"] = self.generation_config.get("frequency_penalty", 0.0)
             config_args["presence_penalty"] = self.generation_config.get("presence_penalty", 0.0)
 
@@ -168,6 +168,7 @@ class GeminiService:
         while True:
             for attempt in range(max_attempts_per_key):
                 try:
+                    logger.info(f"Chamando API do Gemini (key index={self.current_key_index}) com o modelo: '{model_name}'...")
                     response = await self.client.aio.models.generate_content(
                         model=model_name,
                         contents=prompt,
@@ -489,8 +490,8 @@ class GeminiService:
 
         # Define system instruction se disponível (para imagens)
         system_instruction = None
-        if config.prompt:
-            system_instruction = config.prompt
+        # if config.prompt:
+        #     system_instruction = config.prompt
 
         if 'audio' in media_data['mime_type']:
             # --- CORREÇÃO: Simplificação do prompt de transcrição ---
@@ -539,18 +540,16 @@ class GeminiService:
             if db_history is None:
                 db_history = []
 
-            # RAG para análise de imagem (se houver texto na imagem que precise de contexto)
-            last_user_msg = next((m.get('content', '') for m in reversed(db_history) if m.get('role') == 'user'), "")
-            rag_context = await self._retrieve_rag_context(db, config.id, last_user_msg)
+            # RAG para análise de imagem removido conforme solicitação
+            rag_context = ""
 
             # A função agora retorna uma string formatada, não mais um JSON.
             historico_conversa_str = self._format_history_for_prompt(db_history or [])
             
             time_context = self._get_time_context()
 
-            rag_section_analysis = f"# CONTEXTO (RAG)\n{rag_context}\n\n" if rag_context else ""
+            # rag_section_analysis removido
             analysis_prompt_text = (
-                f"{rag_section_analysis}"
                 f"{time_context}\n"
                 f"# HISTÓRICO DA CONVERSA\n{historico_conversa_str}\n\n"
                 f"# TAREFA ATUAL: Extração de Dados de Mídia\n"
@@ -558,7 +557,7 @@ class GeminiService:
                 f"# REGRAS DE EXECUÇÃO\n"
                 f"1. **Foco na Extração:** Identifique dados importantes (produtos, dúvidas, intenções) citados no arquivo.\n"
                 f"2. **Tom Neutro:** Atue como um extrator de dados, não use a persona do assistente.\n"
-                f"3. **Contexto:** Use o histórico e o RAG para entender o que é prioritário extrair.\n\n"
+                f"3. **Contexto:** Use o histórico da conversa para entender o que é prioritário extrair.\n\n"
                 f"# FORMATO DE RESPOSTA (JSON OBRIGATÓRIO)\n"
                 f"Retorne APENAS um JSON válido.\n"
                 f"{{\n"
@@ -569,7 +568,7 @@ class GeminiService:
             prompt_contents = [analysis_prompt_text, media_part]
 
             try:
-                response, tokens_used = await self._generate_with_retry_async(prompt_contents, db, user, force_json=True, system_instruction=system_instruction)
+                response, tokens_used = await self._generate_with_retry_async(prompt_contents, db, user, force_json=True, system_instruction=None)
                 response_json = self._parse_json_response(response.text)
                 analysis = response_json.get("analise", "[Não foi possível extrair a análise]").strip()
                 logger.info(f"Análise de mídia gerada: '{analysis[:100]}...'")
@@ -778,12 +777,13 @@ class GeminiService:
         start_date: Optional[datetime],
         end_date: Optional[datetime],
         prospect_ids: Optional[List[int]] = None,
-        use_all_contacts: bool = False
+        use_all_contacts: bool = False,
+        model_name: str = 'gemini-2.5-flash'
     ) -> Dict[str, Any]:
         """Usa a IA para analisar dados de prospecção com base em uma pergunta do usuário."""
         from app.crud import crud_prospect, crud_config
 
-        logger.info(f"Iniciando análise de dados de prospecção para user_id={user.id} (use_all_contacts={use_all_contacts}) com a pergunta: '{question[:100]}...'")
+        logger.info(f"Iniciando análise de dados de prospecção para user_id={user.id} (use_all_contacts={use_all_contacts}) com a pergunta: '{question[:100]}...' usando o modelo: {model_name}")
 
         # Coletar dados relevantes de prospecção (campanhas)
         prospects = await crud_prospect.get_prospects_by_user(db, user_id=user.id)
@@ -854,7 +854,8 @@ class GeminiService:
             json.dumps(analysis_prompt, ensure_ascii=False, cls=SetEncoder, indent=2), 
             db, 
             user, 
-            force_json=True
+            force_json=True,
+            model_name=model_name
         )
         return self._parse_json_response(response.text)
 

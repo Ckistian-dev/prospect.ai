@@ -52,6 +52,7 @@ async def analyze_data_with_ia(
     end_date_str = payload.get("end_date")
     prospect_ids = payload.get("prospect_ids")
     use_all_contacts = payload.get("use_all_contacts", False)
+    model = payload.get("model", "gemini-2.5-flash")
 
     if not question:
         raise HTTPException(status_code=400, detail="A pergunta é obrigatória.")
@@ -66,7 +67,8 @@ async def analyze_data_with_ia(
         start_date=start_date, 
         end_date=end_date, 
         prospect_ids=prospect_ids,
-        use_all_contacts=use_all_contacts
+        use_all_contacts=use_all_contacts,
+        model_name=model
     )
 
     return {"analysis": analysis}

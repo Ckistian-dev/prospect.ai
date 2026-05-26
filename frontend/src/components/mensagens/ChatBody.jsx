@@ -4,7 +4,7 @@ import { Check, CheckCheck, AlertCircle, Clock, MessageSquare, Wand2, Loader2, S
 import toast from 'react-hot-toast';
 import MessageContent from './MessageContent';
 
-const ChatBody = ({ mensagem, onViewMedia, onDownloadDocument, isDownloadingMedia }) => {
+const ChatBody = ({ mensagem, onViewMedia, onDownloadDocument, isDownloadingMedia, onLoadMoreMessages, hasMoreMessages, isLoadingMore }) => {
     const chatContainerRef = useRef(null);
     const [messages, setMessages] = useState([]);
 
@@ -15,6 +15,18 @@ const ChatBody = ({ mensagem, onViewMedia, onDownloadDocument, isDownloadingMedi
     const prevMessagesLengthRef = useRef(0);
     const initialScrollDoneRef = useRef(null);
     const [isInitialScrolling, setIsInitialScrolling] = useState(true);
+
+    const [isPreventingScrollJump, setIsPreventingScrollJump] = useState(false);
+    const [savedScrollHeight, setSavedScrollHeight] = useState(0);
+
+    const handleScroll = (e) => {
+        const { scrollTop, scrollHeight } = e.target;
+        if (scrollTop <= 5 && !isLoadingMore && hasMoreMessages && onLoadMoreMessages) {
+            setSavedScrollHeight(scrollHeight);
+            setIsPreventingScrollJump(true);
+            onLoadMoreMessages();
+        }
+    };
 
     // 1. Detectar troca de chat e limpar estado imediatamente
     useEffect(() => {
@@ -71,7 +83,7 @@ const ChatBody = ({ mensagem, onViewMedia, onDownloadDocument, isDownloadingMedi
         setMessages(processedMessages);
     }, [mensagem?.conversa, mensagem?.id]);
 
-    // 3. Efeito de Scroll e Revelação
+    // 3. Efeito de Scroll e Revelação (com preservação de Scroll para Lazy Loading)
     useEffect(() => {
         const chatElement = chatContainerRef.current;
         if (!chatElement) return;
@@ -104,15 +116,20 @@ const ChatBody = ({ mensagem, onViewMedia, onDownloadDocument, isDownloadingMedi
                 initialScrollDoneRef.current = currentAtendimentoId;
             }
         } else {
-            // Scroll para novas mensagens (mantém no fim se o usuário já estiver lá)
-            if (userWasAtBottomRef.current) {
+            // Se estamos carregando mensagens mais antigas (Lazy Loading), preserva a posição do Scroll
+            if (isPreventingScrollJump && savedScrollHeight > 0) {
+                chatElement.scrollTop = chatElement.scrollHeight - savedScrollHeight;
+                setIsPreventingScrollJump(false);
+                setSavedScrollHeight(0);
+            } else if (userWasAtBottomRef.current) {
+                // Scroll para novas mensagens (mantém no fim se o usuário já estiver lá)
                 chatElement.scrollTop = chatElement.scrollHeight;
             }
         }
 
         prevAtendimentoIdRef.current = currentAtendimentoId;
         prevMessagesLengthRef.current = messages.length;
-    }, [messages, mensagem?.id]);
+    }, [messages, mensagem?.id, isPreventingScrollJump, savedScrollHeight]);
 
     const formatTimestamp = (dateStr) => {
         if (!dateStr || dateStr === 0) return '';
@@ -159,12 +176,37 @@ const ChatBody = ({ mensagem, onViewMedia, onDownloadDocument, isDownloadingMedi
     return (
         <div
             ref={chatContainerRef}
+            onScroll={handleScroll}
             className={`flex-1 p-4 md:p-6 overflow-y-auto overflow-x-hidden space-y-6 custom-scrollbar bg-slate-50/20 ${
                 isInitialScrolling 
                     ? 'opacity-0 pointer-events-none invisible' 
                     : 'opacity-100 visible transition-opacity duration-500'
             }`}
         >
+            {hasMoreMessages && (
+                <div className="flex justify-center py-2">
+                    <button
+                        onClick={() => {
+                            const chatElement = chatContainerRef.current;
+                            if (chatElement) {
+                                setSavedScrollHeight(chatElement.scrollHeight);
+                                setIsPreventingScrollJump(true);
+                            }
+                            onLoadMoreMessages();
+                        }}
+                        disabled={isLoadingMore}
+                        className="text-[11px] font-black uppercase tracking-widest text-[#356854] bg-[#356854]/10 hover:bg-[#356854]/20 disabled:opacity-50 px-4 py-2 rounded-xl transition-all flex items-center gap-2 border border-[#356854]/20"
+                    >
+                        {isLoadingMore ? (
+                            <>
+                                <Loader2 size={12} className="animate-spin text-[#356854]" /> Carregando...
+                            </>
+                        ) : (
+                            "Carregar mensagens anteriores"
+                        )}
+                    </button>
+                </div>
+            )}
             {messages.map((msg, index) => {
                 const isAssistant = msg.role === 'assistant';
                 const nextMsg = messages[index + 1];

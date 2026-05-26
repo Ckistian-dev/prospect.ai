@@ -186,6 +186,12 @@ function Mensagens() {
     const [isProcessing, setIsProcessing] = useState({});
     const messagesPollingRef = useRef(null);
     const selectedContactIdRef = useRef(null);
+    const [messagesLimit, setMessagesLimit] = useState(100);
+    const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false);
+
+    // Refs de Controle para evitar loops infinitos de renderização
+    const instancesRef = useRef([]);
+    const messagesLimitRef = useRef(100);
 
     const [statusOptions] = useState([
         { nome: "Aguardando Início", cor: "#a855f7" },
@@ -215,7 +221,7 @@ function Mensagens() {
         }
 
         try {
-            let activeInstances = instances;
+            let activeInstances = instancesRef.current;
             if (!activeInstances || activeInstances.length === 0) {
                 const [userRes, instancesRes] = await Promise.all([
                     api.get('/auth/me'),
@@ -223,6 +229,7 @@ function Mensagens() {
                 ]);
                 setCurrentUser(userRes.data);
                 activeInstances = instancesRes.data.filter(inst => inst.is_active);
+                instancesRef.current = activeInstances;
                 setInstances(activeInstances);
             }
 
@@ -294,7 +301,7 @@ function Mensagens() {
             setIsLoadingContacts(false);
             setIsLoadingMoreContacts(false);
         }
-    }, [instances]);
+    }, []);
 
     useEffect(() => {
         loadContacts(offset, offset > 0);
@@ -310,13 +317,14 @@ function Mensagens() {
     };
 
     // ── 2. Carrega mensagens quando um contato é selecionado ──────────────────
-    const loadMessages = useCallback(async (contact, showLoading = true) => {
+    const loadMessages = useCallback(async (contact, showLoading = true, limitToUse = null) => {
         if (!contact) return;
+        const actualLimit = limitToUse !== null ? limitToUse : messagesLimitRef.current;
         if (showLoading) setIsLoadingMessages(true);
         try {
             const res = await api.get(
                 `/whatsapp/${contact.instanceId}/messages-api/${encodeURIComponent(contact.remoteJid)}`,
-                { params: { count: 1000 } }
+                { params: { count: actualLimit } }
             );
 
             // Segurança: Ignora se o usuário já trocou de contato
@@ -352,15 +360,19 @@ function Mensagens() {
                 setIsLoadingMessages(false);
             }
         }
-    }, [limit]);
+    }, []);
 
-    // Quando seleciona um contato: para polling anterior, carrega mensagens, inicia novo polling
+    // Quando seleciona um contato: reseta limite, atualiza cache e faz carregamento inicial
     const handleSelectContact = useCallback((contact) => {
         setSelectedContact(contact);
         selectedContactIdRef.current = contact.id;
         setHeaderImgError(false);
         setIsProfileSidebarOpen(false);
         
+        // Reseta o limite de mensagens para o padrão inicial ao trocar de contato
+        setMessagesLimit(100);
+        messagesLimitRef.current = 100;
+
         // Tenta carregar o que já temos em memória (cache) para resposta instantânea
         try {
             const existing = contact.conversa && contact.conversa !== '[]' ? JSON.parse(contact.conversa) : [];
@@ -369,21 +381,31 @@ function Mensagens() {
             setMessages([]);
         }
 
-        if (messagesPollingRef.current) clearInterval(messagesPollingRef.current);
-
-        loadMessages(contact, true);
-
-        messagesPollingRef.current = setInterval(() => {
-            loadMessages(contact, false);
-        }, 5000);
+        // Carrega as 100 mensagens iniciais imediatamente
+        loadMessages(contact, true, 100);
     }, [loadMessages]);
 
-    // Limpa polling ao desmontar
+    // Polling de Mensagens com React useEffect: reinicia apenas quando muda o contato selecionado
     useEffect(() => {
-        return () => {
-            if (messagesPollingRef.current) clearInterval(messagesPollingRef.current);
-        };
-    }, []);
+        if (!selectedContact) return;
+
+        const interval = setInterval(() => {
+            loadMessages(selectedContact, false);
+        }, 5000);
+
+        return () => clearInterval(interval);
+    }, [selectedContact, loadMessages]);
+
+    // Handler para carregar mais mensagens anteriores (Lazy Loading de histórico)
+    const handleLoadMoreMessages = useCallback(async () => {
+        if (!selectedContact || isLoadingMoreMessages) return;
+        setIsLoadingMoreMessages(true);
+        const newLimit = messagesLimit + 100;
+        setMessagesLimit(newLimit);
+        messagesLimitRef.current = newLimit;
+        await loadMessages(selectedContact, false, newLimit);
+        setIsLoadingMoreMessages(false);
+    }, [selectedContact, messagesLimit, loadMessages, isLoadingMoreMessages]);
 
     // ── 3. Navegação por parâmetro de rota ────────────────────────────────────
     useEffect(() => {
@@ -472,7 +494,7 @@ function Mensagens() {
                         });
                         const res = await api.get(
                             `/whatsapp/${item.instanceId}/messages-api/${encodeURIComponent(item.remoteJid)}`,
-                            { params: { count: limit } }
+                            { params: { count: messagesLimitRef.current } }
                         );
                         const fetched = res.data || [];
                         const nc = JSON.stringify(fetched);
@@ -488,7 +510,7 @@ function Mensagens() {
                 })();
             }
         });
-    }, [sendingQueue, isProcessing, limit]);
+    }, [sendingQueue, isProcessing]);
 
     // ── Render ────────────────────────────────────────────────────────────────
     if (isLoadingContacts && !currentUser) {
@@ -646,6 +668,9 @@ function Mensagens() {
                                         }
                                     }}
                                     isDownloadingMedia={isDownloadingMedia}
+                                    onLoadMoreMessages={handleLoadMoreMessages}
+                                    hasMoreMessages={messages.length >= messagesLimit}
+                                    isLoadingMore={isLoadingMoreMessages}
                                 />
                             )}
 
